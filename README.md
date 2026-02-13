@@ -4,8 +4,7 @@
 
 [**Try it live at ClassBuild.ai**](https://classbuild.ai)
 
-<!-- Replace with your screenshot: a full-width image of the Build page or Syllabus page -->
-![ClassBuild screenshot](public/og-image.png)
+![ClassBuild — AI Course Generator](public/hero.png)
 
 ---
 
