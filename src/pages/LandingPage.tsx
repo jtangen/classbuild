@@ -309,7 +309,7 @@ export function LandingPage() {
           </p>
 
           <p className="text-base text-text-secondary max-w-2xl mx-auto mb-10 leading-relaxed">
-            Describe your subject and get interactive chapters, gamified quizzes, presentation slides, voice narration, and AI infographics — all woven with five evidence-based learning principles.
+            Turn any topic into a complete multimedia course, grounded in five evidence-based learning principles.
           </p>
 
           <div className="flex items-center justify-center gap-4">
