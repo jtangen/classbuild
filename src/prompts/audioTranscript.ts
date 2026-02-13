@@ -43,10 +43,30 @@ export function buildAudioTranscriptPrompt(): string {
 Output ONLY the adapted transcript text, ready to be fed directly into a text-to-speech engine. Do not include any preamble, explanation, metadata, section headers, or formatting. Just the spoken-word transcript from start to finish.`;
 }
 
+function stripHtmlToText(html: string): string {
+  // Remove <style> and <script> blocks entirely
+  let text = html.replace(/<style[\s\S]*?<\/style>/gi, '');
+  text = text.replace(/<script[\s\S]*?<\/script>/gi, '');
+  // Remove SVG blocks
+  text = text.replace(/<svg[\s\S]*?<\/svg>/gi, '');
+  // Convert <br> and block-level closing tags to newlines
+  text = text.replace(/<br\s*\/?>/gi, '\n');
+  text = text.replace(/<\/(p|div|li|h[1-6]|tr|blockquote|section|article)>/gi, '\n');
+  // Strip remaining HTML tags
+  text = text.replace(/<[^>]+>/g, '');
+  // Decode common HTML entities
+  text = text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&nbsp;/g, ' ');
+  // Collapse whitespace
+  text = text.replace(/[ \t]+/g, ' ');
+  text = text.replace(/\n{3,}/g, '\n\n');
+  return text.trim();
+}
+
 export function buildAudioTranscriptUserPrompt(
   chapterTitle: string,
   chapterContent: string,
 ): string {
+  const textContent = stripHtmlToText(chapterContent);
   return `Adapt the following reading for spoken audio delivery. The reading is titled "${chapterTitle}".
 
 Apply all transformation rules: remove visual references, convert citations to spoken form, expand abbreviations, add pacing cues, remove widget references, strip formatting, and maintain an engaging academic tone.
@@ -54,6 +74,6 @@ Apply all transformation rules: remove visual references, convert citations to s
 Output ONLY the transcript text — no preamble, no explanation.
 
 --- BEGIN CHAPTER CONTENT ---
-${chapterContent}
+${textContent}
 --- END CHAPTER CONTENT ---`;
 }
