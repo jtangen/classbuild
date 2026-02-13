@@ -123,7 +123,7 @@ export function BuildPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, chapters, addChapter, updateChapter, setup, setStage, completeStage } = useCourseStore();
   const { claudeApiKey, elevenLabsApiKey, geminiApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, batchGenerating, batchCurrentChapter, batchPhase, setBatchGenerating, setBatchCurrentChapter, setBatchPhase } = useUiStore();
+  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial } = useUiStore();
 
   const [selectedChapterNum, setSelectedChapterNum] = useState(1);
   const [chapterHtml, setChapterHtml] = useState('');
@@ -932,6 +932,277 @@ export function BuildPage() {
     setBatchGenerating(false);
   }, [syllabus, chapters, claudeApiKey, geminiApiKey, researchDossiers, setup.chapterLength, setup.themeId, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase]);
 
+  // ─── Full batch generation (all materials for all chapters) ───
+  const generateEverything = useCallback(async () => {
+    if (!syllabus) return;
+    setBatchGenerating(true);
+
+    const chaptersWithResearch = syllabus.chapters.filter(
+      ch => researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
+    );
+
+    for (const ch of chaptersWithResearch) {
+      setBatchCurrentChapter(ch.number);
+
+      // Fresh read — chapter may already exist from a previous partial run
+      let existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+
+      // ─── Phase 1: Sequential Opus calls ───
+      // 1a. Chapter HTML
+      if (!existing?.htmlContent) {
+        setBatchMaterial('Reading');
+        setBatchPhase('thinking');
+        try {
+          const dossier = researchDossiers.find(d => d.chapterNumber === ch.number);
+          const researchSources = dossier?.sources.map(s => ({
+            title: s.title, authors: s.authors, year: s.year,
+            summary: s.summary, url: s.url, doi: s.doi,
+          }));
+          const hasGemini = !!geminiApiKey;
+          const fullText = await streamMessage(
+            {
+              apiKey: claudeApiKey,
+              model: MODELS.opus,
+              system: buildChapterPrompt(setup.themeId, hasGemini),
+              messages: [{
+                role: 'user',
+                content: buildChapterUserPrompt(
+                  syllabus.courseTitle, ch, setup.chapterLength, researchSources, hasGemini,
+                ),
+              }],
+              thinkingBudget: 'high',
+              maxTokens: 16000,
+            },
+            {
+              onThinking: () => setBatchPhase('thinking'),
+              onText: () => setBatchPhase('writing'),
+              onError: (err) => setError(err.message),
+            }
+          );
+          let html = extractHtml(fullText);
+          if (hasGemini) {
+            setBatchPhase('writing');
+            html = await replaceGeminiPlaceholders(html, geminiApiKey);
+          }
+          addChapter({ number: ch.number, title: ch.title, htmlContent: html });
+        } catch (err) {
+          setError(`Failed to generate Class ${ch.number}: ${err instanceof Error ? err.message : String(err)}`);
+          continue; // Skip entire chapter if reading fails
+        }
+      }
+
+      // Re-read after possible addChapter
+      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+      if (!existing?.htmlContent) continue;
+      const html = existing.htmlContent;
+
+      // 1b. Practice Quiz
+      if (!existing.practiceQuizData) {
+        setBatchMaterial('Practice Quiz');
+        setBatchPhase('thinking');
+        try {
+          const quizText = await streamMessage(
+            {
+              apiKey: claudeApiKey,
+              model: MODELS.opus,
+              system: buildPracticeQuizPrompt(),
+              messages: [{
+                role: 'user',
+                content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
+              }],
+              thinkingBudget: 'high',
+              maxTokens: 8000,
+            },
+            { onError: (err) => setError(err.message) }
+          );
+          const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
+          const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+          updateChapter(ch.number, { practiceQuizData: balancedQuiz });
+        } catch {
+          // Quiz failed, continue
+        }
+      }
+
+      // 1c. In-Class Quiz
+      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+      if (!existing?.inClassQuizData || existing.inClassQuizData.length === 0) {
+        setBatchMaterial('In-Class Quiz');
+        setBatchPhase('thinking');
+        try {
+          const inClassText = await streamMessage(
+            {
+              apiKey: claudeApiKey,
+              model: MODELS.opus,
+              system: buildInClassQuizPrompt(),
+              messages: [{
+                role: 'user',
+                content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
+              }],
+              thinkingBudget: 'high',
+              maxTokens: 8000,
+            },
+            { onError: (err) => setError(err.message) }
+          );
+          try {
+            const parsed = parseJson(inClassText) as InClassQuizQuestion[];
+            const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
+            const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
+            if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
+          } catch {
+            // Parse failed
+          }
+        } catch {
+          // In-class quiz failed, continue
+        }
+      }
+
+      // ─── Phase 2: Parallel Haiku/Gemini calls ───
+      setBatchMaterial('Extras');
+      setBatchPhase('writing');
+      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+
+      const parallelTasks: Promise<void>[] = [];
+
+      // Discussion
+      if (!existing?.discussionData || existing.discussionData.length === 0) {
+        parallelTasks.push((async () => {
+          try {
+            const fullText = await streamWithRetry(
+              {
+                apiKey: claudeApiKey,
+                system: buildDiscussionPrompt(),
+                messages: [{
+                  role: 'user',
+                  content: buildDiscussionUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment),
+                }],
+                thinkingBudget: 'medium',
+                maxTokens: 4000,
+              },
+              {}
+            );
+            const parsed = parseJson(fullText) as DiscussionPrompt[];
+            updateChapter(ch.number, { discussionData: parsed });
+          } catch { /* continue */ }
+        })());
+      }
+
+      // Activities
+      if (!existing?.activityData || existing.activityData.length === 0) {
+        parallelTasks.push((async () => {
+          try {
+            const fullText = await streamWithRetry(
+              {
+                apiKey: claudeApiKey,
+                system: buildActivitiesPrompt(),
+                messages: [{
+                  role: 'user',
+                  content: buildActivitiesUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes),
+                }],
+                thinkingBudget: 'medium',
+                maxTokens: 4000,
+              },
+              {}
+            );
+            const parsed = parseJson(fullText) as Activity[];
+            updateChapter(ch.number, { activityData: parsed });
+          } catch { /* continue */ }
+        })());
+      }
+
+      // Audio transcript (+TTS)
+      if (!existing?.audioTranscript) {
+        parallelTasks.push((async () => {
+          try {
+            const transcript = await streamWithRetry(
+              {
+                apiKey: claudeApiKey,
+                system: buildAudioTranscriptPrompt(),
+                messages: [{
+                  role: 'user',
+                  content: buildAudioTranscriptUserPrompt(ch.title, html),
+                }],
+                thinkingBudget: 'medium',
+                maxTokens: 8000,
+              },
+              {}
+            );
+            updateChapter(ch.number, { audioTranscript: transcript });
+
+            if (elevenLabsApiKey) {
+              try {
+                const { generateAudiobook } = await import('../services/elevenlabs/tts');
+                const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: setup.voiceId });
+                const url = URL.createObjectURL(blob);
+                updateChapter(ch.number, { audioUrl: url });
+              } catch {
+                // TTS failed, transcript is still saved
+              }
+            }
+          } catch { /* continue */ }
+        })());
+      }
+
+      // Slides
+      if (!existing?.slidesJson || existing.slidesJson.length === 0) {
+        parallelTasks.push((async () => {
+          try {
+            const fullText = await streamWithRetry(
+              {
+                apiKey: claudeApiKey,
+                system: buildSlidesPrompt(),
+                messages: [{
+                  role: 'user',
+                  content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, html),
+                }],
+                thinkingBudget: 'medium',
+                maxTokens: 4000,
+              },
+              {}
+            );
+            const parsed = parseJson(fullText) as SlideData[];
+            updateChapter(ch.number, { slidesJson: parsed });
+          } catch { /* continue */ }
+        })());
+      }
+
+      // Infographic (requires Gemini)
+      if (geminiApiKey && !existing?.infographicDataUri) {
+        parallelTasks.push((async () => {
+          try {
+            const { buildInfographicMetaPrompt, buildInfographicMetaUserPrompt } = await import('../prompts/infographic');
+            const promptText = await streamWithRetry(
+              {
+                apiKey: claudeApiKey,
+                model: MODELS.opus,
+                system: buildInfographicMetaPrompt(setup.themeId),
+                messages: [{
+                  role: 'user',
+                  content: buildInfographicMetaUserPrompt(ch.title, ch.keyConcepts, html),
+                }],
+                thinkingBudget: 'medium',
+                maxTokens: 2000,
+              },
+              {}
+            );
+            updateChapter(ch.number, { infographicPrompt: promptText });
+            const { generateInfographic: genImg } = await import('../services/gemini/imageGen');
+            const dataUri = await genImg(promptText, geminiApiKey);
+            updateChapter(ch.number, { infographicDataUri: dataUri });
+          } catch { /* continue */ }
+        })());
+      }
+
+      if (parallelTasks.length > 0) {
+        await Promise.allSettled(parallelTasks);
+      }
+    }
+
+    setBatchCurrentChapter(null);
+    setBatchPhase(null);
+    setBatchMaterial(null);
+    setBatchGenerating(false);
+  }, [syllabus, claudeApiKey, geminiApiKey, elevenLabsApiKey, researchDossiers, setup, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial]);
+
   const handleProceed = () => {
     completeStage('build');
     setStage('export');
@@ -1003,7 +1274,9 @@ export function BuildPage() {
                 animate={{ rotate: 360 }}
                 transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
               />
-              Batch generating...
+              {batchMaterial
+                ? `Class ${batchCurrentChapter}: ${batchMaterial}`
+                : 'Batch generating...'}
             </span>
           )}
           <Button
@@ -1042,23 +1315,38 @@ export function BuildPage() {
                   Generate {researched} class{researched !== 1 ? 'es' : ''} at once?
                 </h3>
                 <p className="text-sm text-text-secondary mb-3 leading-relaxed">
-                  Each class requires three separate AI generations, so this will take a while
-                  {researched >= 6 ? ' — possibly 30 minutes or more' : researched >= 3 ? ' — possibly 10-15 minutes' : ''}.
-                  It will also use a meaningful amount of your API key balance.
-                </p>
-                <p className="text-xs text-text-muted mb-4 leading-relaxed">
-                  For each class, this creates the <span className="text-text-secondary">Reading</span>, <span className="text-text-secondary">Practice Quiz</span>, and <span className="text-text-secondary">In-Class Quiz</span>.
-                  You can add other materials (slides, activities, audiobook, etc.) individually afterwards.
+                  This will use a meaningful amount of your API key balance.
                 </p>
                 {unresearched > 0 && (
-                  <p className="text-xs text-amber-400/80 mb-4 leading-relaxed">
+                  <p className="text-xs text-amber-400/80 mb-3 leading-relaxed">
                     {unresearched} class{unresearched !== 1 ? 'es' : ''} without research will be skipped. Go to Research to add them.
                   </p>
                 )}
+                <div className="grid gap-2 sm:grid-cols-2 mb-3">
+                  <button
+                    onClick={() => { setShowBatchConfirm(false); generateEverything(); }}
+                    disabled={researched === 0}
+                    className="p-3 rounded-lg border border-violet-500/30 bg-violet-500/10 hover:bg-violet-500/20 transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
+                  >
+                    <div className="text-sm font-semibold text-violet-300 mb-1">Build Everything</div>
+                    <p className="text-xs text-text-muted leading-relaxed">
+                      All materials — reading, quizzes, discussion, activities, audiobook, slides{geminiApiKey ? ', infographic' : ''}.
+                      {researched >= 6 ? ' Possibly 1-2 hours.' : researched >= 3 ? ' Possibly 30-60 min.' : ' Takes a while.'}
+                    </p>
+                  </button>
+                  <button
+                    onClick={() => { setShowBatchConfirm(false); generateAllClasses(); }}
+                    disabled={researched === 0}
+                    className="p-3 rounded-lg border border-violet-500/10 bg-bg-elevated hover:bg-bg-card transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
+                  >
+                    <div className="text-sm font-semibold text-text-secondary mb-1">Classes + Quizzes Only</div>
+                    <p className="text-xs text-text-muted leading-relaxed">
+                      Reading, Practice Quiz, and In-Class Quiz for each class.
+                      {researched >= 6 ? ' Possibly 30+ min.' : researched >= 3 ? ' Possibly 10-15 min.' : ''}
+                    </p>
+                  </button>
+                </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={() => { setShowBatchConfirm(false); generateAllClasses(); }} disabled={researched === 0}>
-                    Generate {researched} Class{researched !== 1 ? 'es' : ''}
-                  </Button>
                   <Button size="sm" variant="ghost" onClick={() => setShowBatchConfirm(false)}>
                     Cancel
                   </Button>
@@ -1100,17 +1388,32 @@ export function BuildPage() {
                   {syllabus.chapters.map((ch) => {
                     const generated = chapters.find(c => c.number === ch.number);
                     const isCurrent = batchCurrentChapter === ch.number;
+                    // Count completed materials for this chapter
+                    let matCount = 0;
+                    const maxMat = geminiApiKey ? 8 : 7;
+                    if (generated) {
+                      if (generated.htmlContent) matCount++;
+                      if (generated.practiceQuizData) matCount++;
+                      if (generated.inClassQuizData && generated.inClassQuizData.length > 0) matCount++;
+                      if (generated.discussionData && generated.discussionData.length > 0) matCount++;
+                      if (generated.activityData && generated.activityData.length > 0) matCount++;
+                      if (generated.audioTranscript) matCount++;
+                      if (generated.slidesJson && generated.slidesJson.length > 0) matCount++;
+                      if (geminiApiKey && generated.infographicDataUri) matCount++;
+                    }
                     return (
                       <div key={ch.number} className="relative flex items-center gap-4 pl-0">
                         <div className="relative z-10 shrink-0">
                           <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-all duration-300 ${
-                            generated
+                            generated && matCount === maxMat
                               ? 'bg-success/10 border-success/30 text-success'
+                              : generated
+                              ? 'bg-violet-500/10 border-violet-500/30 text-violet-400'
                               : isCurrent
                               ? 'bg-violet-500/20 border-violet-500/50 text-violet-400'
                               : 'bg-bg-card border-violet-500/10 text-text-muted'
                           }`}>
-                            {generated ? (
+                            {generated && matCount === maxMat ? (
                               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
                             ) : isCurrent ? (
                               <motion.div
@@ -1129,9 +1432,11 @@ export function BuildPage() {
                           <div className="text-sm font-medium truncate">{ch.title}</div>
                           <div className="text-xs text-text-muted mt-0.5">
                             {generated
-                              ? 'Class + Quizzes generated'
+                              ? `${matCount}/${maxMat} materials`
                               : isCurrent
-                              ? batchPhase === 'thinking' ? 'Thinking...' : 'Writing...'
+                              ? batchMaterial
+                                ? `${batchMaterial}${batchPhase === 'thinking' ? ' — thinking...' : ' — writing...'}`
+                                : batchPhase === 'thinking' ? 'Thinking...' : 'Writing...'
                               : 'Pending'}
                           </div>
                         </div>
