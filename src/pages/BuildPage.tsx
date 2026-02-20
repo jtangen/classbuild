@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
-import { streamMessage } from '../services/claude/streaming';
+import { streamMessage, streamWithRetry } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
 import { buildChapterPrompt, buildChapterUserPrompt } from '../prompts/chapter';
 import { buildPracticeQuizPrompt, buildPracticeQuizUserPrompt } from '../prompts/practiceQuiz';
@@ -91,27 +91,6 @@ function parseJson(text: string, wrapType: '[' | '{' = '['): unknown {
     }
   }
   return JSON.parse(jsonStr);
-}
-
-async function streamWithRetry(
-  options: Parameters<typeof streamMessage>[0],
-  callbacks: Parameters<typeof streamMessage>[1],
-  maxRetries = 3,
-): Promise<string> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await streamMessage(options, callbacks);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      const isRateLimit = msg.includes('429') || msg.toLowerCase().includes('rate');
-      if (isRateLimit && attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, (attempt + 1) * 1500));
-        continue;
-      }
-      throw err;
-    }
-  }
-  throw new Error('Max retries exceeded');
 }
 
 async function replaceGeminiPlaceholders(html: string, apiKey: string): Promise<string> {

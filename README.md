@@ -61,6 +61,39 @@ ClassBuild is a six-stage pipeline:
 
 Four visual themes (Midnight, Classic, Ocean, Warm) carry through every output — chapters, quizzes, slides, and the published course viewer.
 
+## CLI — Headless Course Generation
+
+The ClassBuild CLI generates complete courses from the command line — no browser required. Ideal for batch-building entire programs or course catalogues.
+
+```bash
+ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
+  --topic "The Psychology of Prejudice" \
+  --chapters 12 \
+  --level advanced-undergrad \
+  --theme midnight \
+  --length comprehensive \
+  --notes "University of Queensland, Australia. Use international and Australian examples." \
+  --output ./output/prejudice
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--topic` | *(required)* | Course topic |
+| `--chapters` | `12` | Number of chapters |
+| `--level` | `advanced-undergrad` | `general-public`, `professional`, `advanced-undergrad` |
+| `--theme` | `midnight` | `midnight`, `classic`, `ocean`, `warm` |
+| `--length` | `standard` | `concise`, `standard`, `comprehensive` |
+| `--widgets` | `3` | Interactive widgets per chapter |
+| `--cohort` | `60` | Expected class size |
+| `--environment` | `lecture-theatre` | `lecture-theatre`, `collaborative`, `flat-classroom`, `online-hybrid` |
+| `--notes` | — | Additional context for the AI (audience, tone, specific topics) |
+| `--voice-id` | — | ElevenLabs voice ID for audiobook narration |
+| `--syllabus` | — | Path to existing syllabus.json (skip regeneration) |
+| `--stop-after` | — | `syllabus` or `research` — stop early for review |
+| `--no-publish` | `false` | Skip course viewer assembly |
+
+See 6 example courses built with the CLI at [courses.classbuild.ai](https://courses.classbuild.ai).
+
 ## Learning Science
 
 These aren't buzzwords. Each principle draws on decades of cognitive science, and ClassBuild weaves all five into every chapter, quiz, and activity it generates:

@@ -28,3 +28,7 @@ dist-ssr
 
 # Internal docs
 vision/
+
+# Generated course output + deploy artifacts
+output/
+deploy-courses/

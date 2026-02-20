@@ -350,16 +350,25 @@ export async function generateQuizDocPackage(
   const folder = zip.folder(folderName)!;
 
   // Generate each version .docx
+  // Use toBuffer() in Node.js, toBlob() in browser — JSZip accepts both
+  const packDoc = async (doc: Document): Promise<Buffer | Blob> => {
+    try {
+      return await Packer.toBuffer(doc);
+    } catch {
+      return await Packer.toBlob(doc);
+    }
+  };
+
   for (const version of versions) {
     const doc = buildQuizVersionDoc(version, courseTitle, chapterTitle);
-    const buffer = await Packer.toBlob(doc);
+    const buffer = await packDoc(doc);
     folder.file(`quiz-version-${version.label}.docx`, buffer);
   }
 
   // Generate answer key .docx
   const answerKeyDoc = buildAnswerKeyDoc(questions, versions, courseTitle, chapterTitle);
-  const answerKeyBlob = await Packer.toBlob(answerKeyDoc);
-  folder.file('answer-key.docx', answerKeyBlob);
+  const answerKeyBuffer = await packDoc(answerKeyDoc);
+  folder.file('answer-key.docx', answerKeyBuffer);
 
   return zip.generateAsync({ type: 'blob' });
 }

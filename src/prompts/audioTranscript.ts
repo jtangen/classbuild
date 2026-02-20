@@ -39,8 +39,12 @@ export function buildAudioTranscriptPrompt(): string {
 - Keep the engaging hooks, examples, and real-world connections.
 - Maintain smooth transitions between sections.
 
+### Omit Title and Subtitle
+- Do NOT begin with the chapter title, subtitle, or any heading. Jump straight into the main content — typically the opening hook or first paragraph.
+- The audio player already displays the chapter title, so repeating it sounds redundant and unnatural.
+
 ## Output Format
-Output ONLY the adapted transcript text, ready to be fed directly into a text-to-speech engine. Do not include any preamble, explanation, metadata, section headers, or formatting. Just the spoken-word transcript from start to finish.`;
+Output ONLY the adapted transcript text, ready to be fed directly into a text-to-speech engine. Do not include any preamble, explanation, metadata, section headers, or formatting. Do not start with the chapter title or subtitle. Just the spoken-word transcript from start to finish.`;
 }
 
 function stripHtmlToText(html: string): string {
@@ -71,7 +75,7 @@ export function buildAudioTranscriptUserPrompt(
 
 Apply all transformation rules: remove visual references, convert citations to spoken form, expand abbreviations, add pacing cues, remove widget references, strip formatting, and maintain an engaging academic tone.
 
-Output ONLY the transcript text — no preamble, no explanation.
+Output ONLY the transcript text — no preamble, no explanation. Do NOT start with the chapter title or subtitle — begin directly with the main content.
 
 --- BEGIN CHAPTER CONTENT ---
 ${textContent}

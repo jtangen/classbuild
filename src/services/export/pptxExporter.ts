@@ -470,7 +470,11 @@ export async function generatePptx(
   themeId?: string,
 ): Promise<Blob> {
   THEME = buildPptxTheme(themeId);
-  const pptx = new PptxGenJS();
+  // Handle CJS/ESM interop: in some Node.js environments the default import
+  // wraps the constructor in a { default: ... } object
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Ctor = typeof PptxGenJS === 'function' ? PptxGenJS : (PptxGenJS as any).default;
+  const pptx = new Ctor();
 
   pptx.author = 'ClassBuild';
   pptx.title = chapterTitle;

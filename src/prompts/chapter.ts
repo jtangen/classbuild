@@ -274,13 +274,13 @@ You MUST use the following HTML structure and CSS exactly. Do NOT invent your ow
 
 ## IMAGES
 Do NOT embed SVG graphics, illustrations, or diagrams in the HTML. SVGs render inconsistently and bloat the document.
-${hasGeminiImages ? `Instead, you may include up to 2 image placeholders where a visual would genuinely aid understanding (e.g. a diagram, chart, or infographic). Use this exact format:
+${hasGeminiImages ? `Instead, you may include up to 3 image placeholders where a visual would genuinely aid understanding (e.g. a diagram, chart, or infographic). Use this exact format:
 
 <figure class="gemini-image" data-prompt="A detailed educational infographic showing [specific description of what to visualize, layout, labels, and colors]">
   <figcaption>[Short caption for the image]</figcaption>
 </figure>
 
-The data-prompt attribute must be a detailed image generation prompt: describe the layout, labels, colors, and content precisely. These placeholders will be replaced with AI-generated images automatically. Only include them where an image truly adds pedagogical value — not every chapter needs one.` : 'If you want to illustrate a concept, describe it in text or use an interactive widget instead.'}
+The data-prompt attribute must be a detailed image generation prompt: describe the layout, labels, colors, and content precisely. These placeholders will be replaced with AI-generated images automatically. Include them wherever a visual genuinely aids understanding — most chapters benefit from at least 2 well-placed images.` : 'If you want to illustrate a concept, describe it in text or use an interactive widget instead.'}
 
 ## CONTENT GUIDELINES
 - Write in an engaging, clear academic voice — knowledgeable but accessible
@@ -334,6 +334,6 @@ ${chapter.widgets.map((w, i) => `${i + 1}. "${w.title}": ${w.description} (illus
 ${researchSources && researchSources.length > 0
     ? `**Research sources to cite in-text and include in the APA 7 reference list**:\n${researchSources.map(s => `- ${s.authors} (${s.year}). ${s.title}.${s.doi ? ` DOI: ${s.doi}` : ''}${s.url ? ` URL: ${s.url}` : ''}\n  Summary: ${s.summary}`).join('\n')}`
     : ''}
-${hasGeminiImages ? '\n**Image generation is available** — include 1-2 `<figure class="gemini-image">` placeholders where a visual would genuinely help explain a concept. Remember: no SVGs.' : ''}
+${hasGeminiImages ? '\n**Image generation is available** — include 2-3 `<figure class="gemini-image">` placeholders where a visual would genuinely help explain a concept. Remember: no SVGs.' : ''}
 Generate the complete HTML chapter now. Remember: output ONLY raw HTML starting with <!DOCTYPE html>. No markdown code fences.`;
 }
