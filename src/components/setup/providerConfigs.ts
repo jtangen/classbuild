@@ -14,10 +14,10 @@ export interface ProviderConfig {
 }
 
 export const CLAUDE_COST_NOTE =
-  'Pay-as-you-go \u2014 typically a few dollars per course.';
+  'Pay-as-you-go \u2014 a full course typically costs around $20\u201330, depending on length.';
 
 export const ELEVENLABS_COST_NOTE =
-  'Free tier: ~10 min/month. Starter ($5/mo): ~30 min.';
+  'Starter plan ($5/mo) recommended \u2014 a full course audiobook uses ~60\u201390 min of quota.';
 
 export const GEMINI_COST_NOTE =
   'Free to start \u2014 Google gives you $300 in trial credits. Each image costs ~$0.04.';

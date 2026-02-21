@@ -29,7 +29,7 @@ Output as a JSON array:
   {
     "title": "Activity name",
     "duration": "10-15 minutes",
-    "description": "What students do, step by step",
+    "description": "A clear walkthrough of the activity: what the instructor sets up, what students do in each phase, what they produce or discuss, and how it wraps up. Write 3-5 sentences minimum — enough that an instructor could run this without guessing at the gaps.",
     "materials": "Any required materials (or 'None')",
     "learningGoal": "What this activity reinforces",
     "scalingNotes": "How to adapt for different class sizes"
