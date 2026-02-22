@@ -81,9 +81,17 @@ export function ApiKeyPanel() {
       <h3 className="text-sm font-medium text-text-primary">
         Connect Your Services
       </h3>
-      <p className="text-xs text-text-muted">
-        ClassBuild talks directly to these services from your browser. Your keys never leave your device.
-      </p>
+      <div className="flex items-start gap-2.5 rounded-lg bg-emerald-500/5 border border-emerald-500/15 px-3.5 py-3">
+        <svg className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <rect x="3" y="11" width="18" height="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" />
+        </svg>
+        <div>
+          <p className="text-xs font-medium text-emerald-400 mb-0.5">Your keys never leave your computer</p>
+          <p className="text-xs text-text-muted leading-relaxed">
+            ClassBuild has no server and no accounts. Everything happens right here in your browser — we never see, store, or have access to your keys.
+          </p>
+        </div>
+      </div>
       <ProviderCard
         config={CLAUDE_CONFIG}
         apiKey={claudeApiKey}
