@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# LLM documentation
+Llm-txt: /llm.txt

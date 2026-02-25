@@ -1,36 +1,37 @@
+<!--
+  keywords: ai course generator, university course builder, ai education, learning science, quiz generator, slide generator, curriculum builder, edtech, prompt engineering, claude, anthropic
+  homepage: https://classbuild.ai
+  cli: scripts/generate-course.ts
+  llm-txt: https://classbuild.ai/llm.txt
+  repository: https://github.com/jtangen/classbuild
+-->
+
 # ClassBuild
 
 **One topic in. A complete course out.** Grounded in how humans actually learn.
 
-[**Try it live at ClassBuild.ai**](https://classbuild.ai)
+[**Try it live at ClassBuild.ai**](https://classbuild.ai) · [LLM-readable docs](/llm.txt)
 
 ![ClassBuild — AI Course Generator](public/hero.png)
 
 ---
 
-## The Problem
-
-Building a university-quality course takes weeks of writing, designing quizzes, creating slides, and sourcing examples. Most AI tools generate flat text dumps — no structure, no pedagogy, no multimedia. ClassBuild generates complete, ready-to-teach courses that apply real cognitive science at every layer.
-
-## What ClassBuild Does
+## What is ClassBuild?
 
 Describe your subject and ClassBuild produces a full course: interactive chapters with embedded widgets, gamified quizzes with confidence calibration, PowerPoint slides with speaker notes, AI-narrated audiobooks, infographics, and a teaching pack — all woven with five evidence-based learning principles.
 
-**Per chapter, you get:**
+## What does ClassBuild produce per chapter?
+
 - Interactive HTML reading with embedded visualizations and callout boxes
 - Gamified practice quiz with confidence calibration, streaks, and achievements
 - In-class quiz (5 shuffled versions + answer keys)
 - PowerPoint slides with speaker notes
 - AI-narrated audiobook (ElevenLabs)
+- AI-generated infographic (Gemini)
 - Teaching pack: discussion starters, activities, and current events hooks
+- Research dossier with sources and synthesis notes
 
-## Built With
-
-React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.6 / Sonnet 4.5 / Haiku 4.5 · ElevenLabs · Gemini
-
-Built with Claude for the [Anthropic Hackathon](https://docs.google.com/forms/d/e/1FAIpQLSdAmDqfWux_oP_E55aSaXRahq6lkSi3jBWG4PlMOmhgVUhg-w/viewform) (Feb 2026).
-
-## Getting Started
+## How do I install ClassBuild?
 
 ```bash
 git clone https://github.com/jtangen/classbuild.git
@@ -43,13 +44,15 @@ Open [localhost:5173](http://localhost:5173) and enter your API key on the Setup
 
 **Bring Your Own Key** — ClassBuild runs entirely in your browser. Your API keys are never sent to any server.
 
+## What API keys do I need?
+
 | Key | Required | Purpose |
 |-----|----------|---------|
 | Anthropic Claude | Yes | Course generation (all stages) |
 | ElevenLabs | No | Voice narration |
 | Google Gemini | No | AI-generated infographics |
 
-## How It Works
+## How does ClassBuild work?
 
 ClassBuild is a six-stage pipeline:
 
@@ -61,7 +64,7 @@ ClassBuild is a six-stage pipeline:
 
 Four visual themes (Midnight, Classic, Ocean, Warm) carry through every output — chapters, quizzes, slides, and the published course viewer.
 
-## CLI — Headless Course Generation
+## How do I generate a course from the command line?
 
 The ClassBuild CLI generates complete courses from the command line — no browser required. Ideal for batch-building entire programs or course catalogues.
 
@@ -75,6 +78,10 @@ ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
   --notes "University of Queensland, Australia. Use international and Australian examples." \
   --output ./output/prejudice
 ```
+
+Set `ELEVENLABS_API_KEY` and `GEMINI_API_KEY` as environment variables for audio and infographics.
+
+## What does each CLI flag do?
 
 | Flag | Default | Description |
 |------|---------|-------------|
@@ -91,10 +98,51 @@ ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
 | `--syllabus` | — | Path to existing syllabus.json (skip regeneration) |
 | `--stop-after` | — | `syllabus` or `research` — stop early for review |
 | `--no-publish` | `false` | Skip course viewer assembly |
+| `--specific-topics` | — | Comma-separated topics to include |
+| `--avoid-topics` | — | Comma-separated topics to exclude |
+| `--textbook` | — | Reference textbook for alignment |
+| `--output` | `./output` | Output directory |
 
 See 6 example courses built with the CLI at [courses.classbuild.ai](https://courses.classbuild.ai).
 
-## Learning Science
+## How do I use ClassBuild's prompt library in my own project?
+
+ClassBuild's 11 prompt builders in `src/prompts/` can be imported directly. Each returns a system prompt and user message for the Anthropic messages API:
+
+```typescript
+import { buildSyllabusPrompt, parseSyllabusResponse } from 'classbuild/src/prompts/syllabus';
+import { buildChapterPrompt, buildChapterUserPrompt } from 'classbuild/src/prompts/chapter';
+import { buildResearchUserPrompt, RESEARCH_SYSTEM_PROMPT } from 'classbuild/src/prompts/research';
+import { buildPracticeQuizPrompt } from 'classbuild/src/prompts/practiceQuiz';
+
+// Example: generate a syllabus
+const { system, userMessage } = buildSyllabusPrompt(setup);
+const response = await anthropic.messages.create({
+  model: 'claude-sonnet-4-6',
+  system,
+  messages: [{ role: 'user', content: userMessage }],
+  max_tokens: 16000,
+});
+const syllabus = parseSyllabusResponse(response.content[0].text);
+```
+
+**Available prompt builders:**
+
+| File | Exports | Purpose |
+|------|---------|---------|
+| `syllabus.ts` | `buildSyllabusPrompt()`, `parseSyllabusResponse()` | Course architecture with learning science |
+| `chapter.ts` | `buildChapterPrompt()`, `buildChapterUserPrompt()` | Interactive HTML chapter |
+| `research.ts` | `RESEARCH_SYSTEM_PROMPT`, `buildResearchUserPrompt()` | Research dossier with web search |
+| `slides.ts` | `buildSlidesPrompt()`, `buildSlidesUserPrompt()` | PowerPoint slide content |
+| `practiceQuiz.ts` | `buildPracticeQuizPrompt()`, `buildPracticeQuizUserPrompt()` | Gamified practice quiz |
+| `inClassQuiz.ts` | `buildInClassQuizPrompt()`, `buildInClassQuizUserPrompt()` | In-class quiz (5 versions) |
+| `activities.ts` | `buildActivitiesPrompt()`, `buildActivitiesUserPrompt()` | Classroom activities |
+| `discussion.ts` | `buildDiscussionPrompt()`, `buildDiscussionUserPrompt()` | Discussion starters |
+| `audioTranscript.ts` | `buildAudioTranscriptPrompt()`, `buildAudioTranscriptUserPrompt()` | Audiobook narration |
+| `learningObjectives.ts` | — | Learning objectives (Bloom's taxonomy) |
+| `infographic.ts` | `buildInfographicMetaPrompt()`, `buildInfographicMetaUserPrompt()` | Infographic briefs |
+
+## What learning science does ClassBuild apply?
 
 These aren't buzzwords. Each principle draws on decades of cognitive science, and ClassBuild weaves all five into every chapter, quiz, and activity it generates:
 
@@ -105,6 +153,12 @@ These aren't buzzwords. Each principle draws on decades of cognitive science, an
 - **Elaboration** — Learners connect new material to what they already know through discussion starters, thought experiments, and cross-chapter callbacks
 
 The syllabus stage annotates every chapter with the specific principles it emphasizes, so instructors can see exactly how the science is wired in.
+
+## Built with
+
+React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 · ElevenLabs · Gemini
+
+Built with Claude for the [Anthropic Hackathon](https://docs.google.com/forms/d/e/1FAIpQLSdAmDqfWux_oP_E55aSaXRahq6lkSi3jBWG4PlMOmhgVUhg-w/viewform) (Feb 2026).
 
 ## License
 

@@ -16,7 +16,14 @@
     "course-generator",
     "learning-science",
     "anthropic",
-    "claude"
+    "claude",
+    "university-course",
+    "quiz-generator",
+    "slide-generator",
+    "curriculum",
+    "edtech",
+    "ai-course-builder",
+    "prompt-engineering"
   ],
   "type": "module",
   "scripts": {
