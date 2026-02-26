@@ -110,12 +110,12 @@ export function BuildPage() {
   const [discussions, setDiscussions] = useState<DiscussionPrompt[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [inClassQuizData, setInClassQuizData] = useState<InClassQuizQuestion[]>([]);
-  const [generatingQuiz, setGeneratingQuiz] = useState(false);
-  const [generatingInClassQuiz, setGeneratingInClassQuiz] = useState(false);
-  const [generatingDiscussion, setGeneratingDiscussion] = useState(false);
-  const [generatingActivities, setGeneratingActivities] = useState(false);
-  const [generatingAudio, setGeneratingAudio] = useState(false);
-  const [generatingSlides, setGeneratingSlides] = useState(false);
+  const [generatingQuiz, setGeneratingQuiz] = useState<number | null>(null);
+  const [generatingInClassQuiz, setGeneratingInClassQuiz] = useState<number | null>(null);
+  const [generatingDiscussion, setGeneratingDiscussion] = useState<number | null>(null);
+  const [generatingActivities, setGeneratingActivities] = useState<number | null>(null);
+  const [generatingAudio, setGeneratingAudio] = useState<number | null>(null);
+  const [generatingSlides, setGeneratingSlides] = useState<number | null>(null);
   const [audioTranscript, setAudioTranscript] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
   const [audioPhase, setAudioPhase] = useState<'transcript' | 'synthesizing' | null>(null);
@@ -130,25 +130,30 @@ export function BuildPage() {
   const [expandingActivity, setExpandingActivity] = useState<number | null>(null);
   const [copiedLabel, setCopiedLabel] = useState('');
   const [infographicDataUri, setInfographicDataUri] = useState('');
-  const [generatingInfographic, setGeneratingInfographic] = useState(false);
+  const [generatingInfographic, setGeneratingInfographic] = useState<number | null>(null);
   const [tabErrors, setTabErrors] = useState<Record<string, string>>({});
   const [showBatchConfirm, setShowBatchConfirm] = useState(false);
   const autoGenStarted = useRef(false);
+  const selectedChapterRef = useRef(selectedChapterNum);
+  const batchCancelRef = useRef(false);
+
+  // Keep ref in sync for generation callbacks
+  selectedChapterRef.current = selectedChapterNum;
 
   // Derived state
   const currentChapter = chapters.find(c => c.number === selectedChapterNum);
   const syllabusChapter = syllabus?.chapters.find(c => c.number === selectedChapterNum);
-  const anyLocalGenerating = generatingQuiz || generatingInClassQuiz || generatingDiscussion || generatingActivities || generatingAudio || generatingSlides || generatingInfographic;
+  const anyLocalGenerating = !!(generatingQuiz || generatingInClassQuiz || generatingDiscussion || generatingActivities || generatingAudio || generatingSlides || generatingInfographic);
   const anyBusy = isGenerating || anyLocalGenerating || batchGenerating;
 
   const tabGenerating: Record<string, boolean> = {
-    quiz: generatingQuiz,
-    inclassquiz: generatingInClassQuiz,
-    discussion: generatingDiscussion,
-    activities: generatingActivities,
-    audio: generatingAudio,
-    slides: generatingSlides,
-    infographic: generatingInfographic,
+    quiz: generatingQuiz === selectedChapterNum,
+    inclassquiz: generatingInClassQuiz === selectedChapterNum,
+    discussion: generatingDiscussion === selectedChapterNum,
+    activities: generatingActivities === selectedChapterNum,
+    audio: generatingAudio === selectedChapterNum,
+    slides: generatingSlides === selectedChapterNum,
+    infographic: generatingInfographic === selectedChapterNum,
   };
 
   const setTabError = useCallback((tab: string, msg: string) => {
@@ -341,7 +346,7 @@ export function BuildPage() {
         html = await replaceGeminiPlaceholders(html, geminiApiKey);
       }
 
-      setChapterHtml(html);
+      if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
       addChapter({
         number: chapterNum,
         title: ch.title,
@@ -442,7 +447,8 @@ export function BuildPage() {
 
   const generateQuiz = useCallback(async () => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
-    setGeneratingQuiz(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingQuiz(capturedChapter);
     clearTabError('quiz');
 
     try {
@@ -465,35 +471,38 @@ export function BuildPage() {
       const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
       const balancedText = await balancePracticeQuiz(fullText, claudeApiKey);
 
-      updateChapter(selectedChapterNum, { practiceQuizData: balancedText });
+      updateChapter(capturedChapter, { practiceQuizData: balancedText });
 
-      try {
-        const { buildQuizHtml } = await import('../templates/quizTemplate');
-        const html = buildQuizHtml(
-          `${syllabusChapter.title} — Practice Quiz`,
-          balancedText,
-          syllabus.courseTitle,
-          setup.themeId,
-        );
-        setQuizHtml(html);
-      } catch {
-        const fallbackHtml = `<!DOCTYPE html><html><head><style>
-          body { background: #0f0f1a; color: #f1f5f9; font-family: system-ui; padding: 2rem; line-height: 1.8; }
-          strong { color: #a78bfa; }
-          hr { border-color: #252540; margin: 1.5rem 0; }
-        </style></head><body><pre style="white-space:pre-wrap">${fullText.replace(/</g, '&lt;')}</pre></body></html>`;
-        setQuizHtml(fallbackHtml);
+      if (selectedChapterRef.current === capturedChapter) {
+        try {
+          const { buildQuizHtml } = await import('../templates/quizTemplate');
+          const html = buildQuizHtml(
+            `${syllabusChapter.title} — Practice Quiz`,
+            balancedText,
+            syllabus.courseTitle,
+            setup.themeId,
+          );
+          setQuizHtml(html);
+        } catch {
+          const fallbackHtml = `<!DOCTYPE html><html><head><style>
+            body { background: #0f0f1a; color: #f1f5f9; font-family: system-ui; padding: 2rem; line-height: 1.8; }
+            strong { color: #a78bfa; }
+            hr { border-color: #252540; margin: 1.5rem 0; }
+          </style></head><body><pre style="white-space:pre-wrap">${fullText.replace(/</g, '&lt;')}</pre></body></html>`;
+          setQuizHtml(fallbackHtml);
+        }
       }
     } catch (err) {
       setTabError('quiz', err instanceof Error ? err.message : 'Quiz generation failed');
     } finally {
-      setGeneratingQuiz(false);
+      setGeneratingQuiz(null);
     }
   }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
 
   const generateInClassQuiz = useCallback(async () => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
-    setGeneratingInClassQuiz(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingInClassQuiz(capturedChapter);
     clearTabError('inclassquiz');
 
     try {
@@ -516,21 +525,22 @@ export function BuildPage() {
         const parsed = parseJson(fullText) as InClassQuizQuestion[];
         const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
         const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-        setInClassQuizData(balanced);
-        updateChapter(selectedChapterNum, { inClassQuizData: balanced });
+        if (selectedChapterRef.current === capturedChapter) setInClassQuizData(balanced);
+        updateChapter(capturedChapter, { inClassQuizData: balanced });
       } catch {
         setTabError('inclassquiz', 'Failed to parse in-class quiz data');
       }
     } catch (err) {
       setTabError('inclassquiz', err instanceof Error ? err.message : 'In-class quiz generation failed');
     } finally {
-      setGeneratingInClassQuiz(false);
+      setGeneratingInClassQuiz(null);
     }
   }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
 
   const generateDiscussion = useCallback(async () => {
     if (!syllabus || !syllabusChapter) return;
-    setGeneratingDiscussion(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingDiscussion(capturedChapter);
     clearTabError('discussion');
 
     try {
@@ -550,21 +560,22 @@ export function BuildPage() {
 
       try {
         const parsed = parseJson(fullText) as DiscussionPrompt[];
-        setDiscussions(parsed);
-        updateChapter(selectedChapterNum, { discussionData: parsed });
+        if (selectedChapterRef.current === capturedChapter) setDiscussions(parsed);
+        updateChapter(capturedChapter, { discussionData: parsed });
       } catch {
         setTabError('discussion', 'Failed to parse discussion prompts');
       }
     } catch (err) {
       setTabError('discussion', err instanceof Error ? err.message : 'Discussion generation failed');
     } finally {
-      setGeneratingDiscussion(false);
+      setGeneratingDiscussion(null);
     }
   }, [syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, setup.cohortSize, setup.teachingEnvironment, updateChapter, setTabError, clearTabError]);
 
   const generateActivities = useCallback(async () => {
     if (!syllabus || !syllabusChapter) return;
-    setGeneratingActivities(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingActivities(capturedChapter);
     clearTabError('activities');
 
     try {
@@ -584,15 +595,15 @@ export function BuildPage() {
 
       try {
         const parsed = parseJson(fullText) as Activity[];
-        setActivities(parsed);
-        updateChapter(selectedChapterNum, { activityData: parsed });
+        if (selectedChapterRef.current === capturedChapter) setActivities(parsed);
+        updateChapter(capturedChapter, { activityData: parsed });
       } catch {
         setTabError('activities', 'Failed to parse activities');
       }
     } catch (err) {
       setTabError('activities', err instanceof Error ? err.message : 'Activities generation failed');
     } finally {
-      setGeneratingActivities(false);
+      setGeneratingActivities(null);
     }
   }, [syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes, updateChapter, setTabError, clearTabError]);
 
@@ -638,7 +649,8 @@ export function BuildPage() {
 
   const generateAudio = useCallback(async () => {
     if (!currentChapter || !syllabus) return;
-    setGeneratingAudio(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingAudio(capturedChapter);
     clearTabError('audio');
     setAudioPhase('transcript');
     setAudioError('');
@@ -658,8 +670,8 @@ export function BuildPage() {
         {}
       );
 
-      setAudioTranscript(transcript);
-      updateChapter(selectedChapterNum, { audioTranscript: transcript });
+      if (selectedChapterRef.current === capturedChapter) setAudioTranscript(transcript);
+      updateChapter(capturedChapter, { audioTranscript: transcript });
 
       if (elevenLabsApiKey) {
         setAudioPhase('synthesizing');
@@ -671,18 +683,18 @@ export function BuildPage() {
             onProgress: (current, total) => setAudioChunkProgress({ current, total }),
           });
           const url = URL.createObjectURL(blob);
-          setAudioUrl(url);
-          updateChapter(selectedChapterNum, { audioUrl: url });
+          if (selectedChapterRef.current === capturedChapter) setAudioUrl(url);
+          updateChapter(capturedChapter, { audioUrl: url });
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.error('ElevenLabs TTS failed:', err);
-          setAudioError(msg);
+          if (selectedChapterRef.current === capturedChapter) setAudioError(msg);
         }
       }
     } catch (err) {
       setTabError('audio', err instanceof Error ? err.message : 'Audio transcript generation failed');
     } finally {
-      setGeneratingAudio(false);
+      setGeneratingAudio(null);
       setAudioPhase(null);
       setAudioChunkProgress(null);
     }
@@ -690,7 +702,7 @@ export function BuildPage() {
 
   const retryAudio = useCallback(async () => {
     if (!audioTranscript || !elevenLabsApiKey) return;
-    setGeneratingAudio(true);
+    setGeneratingAudio(selectedChapterNum);
     setAudioPhase('synthesizing');
     setAudioError('');
     setAudioChunkProgress(null);
@@ -709,7 +721,7 @@ export function BuildPage() {
       console.error('ElevenLabs TTS retry failed:', err);
       setAudioError(msg);
     } finally {
-      setGeneratingAudio(false);
+      setGeneratingAudio(null);
       setAudioPhase(null);
       setAudioChunkProgress(null);
     }
@@ -717,7 +729,8 @@ export function BuildPage() {
 
   const generateSlides = useCallback(async () => {
     if (!currentChapter || !syllabus || !syllabusChapter) return;
-    setGeneratingSlides(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingSlides(capturedChapter);
     clearTabError('slides');
 
     try {
@@ -737,21 +750,22 @@ export function BuildPage() {
 
       try {
         const parsed = parseJson(fullText) as SlideData[];
-        setSlidesData(parsed);
-        updateChapter(selectedChapterNum, { slidesJson: parsed });
+        if (selectedChapterRef.current === capturedChapter) setSlidesData(parsed);
+        updateChapter(capturedChapter, { slidesJson: parsed });
       } catch {
         setTabError('slides', 'Failed to parse slide data from response');
       }
     } catch (err) {
       setTabError('slides', err instanceof Error ? err.message : 'Slides generation failed');
     } finally {
-      setGeneratingSlides(false);
+      setGeneratingSlides(null);
     }
   }, [currentChapter, syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
 
   const generateInfographic = useCallback(async () => {
     if (!currentChapter || !syllabusChapter || !geminiApiKey) return;
-    setGeneratingInfographic(true);
+    const capturedChapter = selectedChapterNum;
+    setGeneratingInfographic(capturedChapter);
     setInfographicDataUri('');
     clearTabError('infographic');
 
@@ -772,17 +786,17 @@ export function BuildPage() {
         {}
       );
 
-      updateChapter(selectedChapterNum, { infographicPrompt: promptText });
+      updateChapter(capturedChapter, { infographicPrompt: promptText });
 
       const { generateInfographic: genImg } = await import('../services/gemini/imageGen');
       const dataUri = await genImg(promptText, geminiApiKey);
 
-      setInfographicDataUri(dataUri);
-      updateChapter(selectedChapterNum, { infographicDataUri: dataUri });
+      if (selectedChapterRef.current === capturedChapter) setInfographicDataUri(dataUri);
+      updateChapter(capturedChapter, { infographicDataUri: dataUri });
     } catch (err) {
       setTabError('infographic', err instanceof Error ? err.message : 'Infographic generation failed');
     } finally {
-      setGeneratingInfographic(false);
+      setGeneratingInfographic(null);
     }
   }, [currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, geminiApiKey, setup.themeId, updateChapter, setTabError, clearTabError]);
 
@@ -804,6 +818,7 @@ export function BuildPage() {
   const generateAllClasses = useCallback(async () => {
     if (!syllabus) return;
     setBatchGenerating(true);
+    batchCancelRef.current = false;
 
     const chaptersToGenerate = syllabus.chapters.filter(
       ch => !chapters.find(c => c.number === ch.number)
@@ -811,6 +826,7 @@ export function BuildPage() {
     );
 
     for (const ch of chaptersToGenerate) {
+      if (batchCancelRef.current) break;
       setBatchCurrentChapter(ch.number);
       setBatchPhase('thinking');
 
@@ -915,12 +931,14 @@ export function BuildPage() {
   const generateEverything = useCallback(async () => {
     if (!syllabus) return;
     setBatchGenerating(true);
+    batchCancelRef.current = false;
 
     const chaptersWithResearch = syllabus.chapters.filter(
       ch => researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
     );
 
     for (const ch of chaptersWithResearch) {
+      if (batchCancelRef.current) break;
       setBatchCurrentChapter(ch.number);
 
       // Fresh read — chapter may already exist from a previous partial run
@@ -1183,6 +1201,9 @@ export function BuildPage() {
   }, [syllabus, claudeApiKey, geminiApiKey, elevenLabsApiKey, researchDossiers, setup, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial]);
 
   const handleProceed = () => {
+    if (anyBusy) {
+      if (!window.confirm('Generation is still in progress. You can export what\'s available so far. Continue?')) return;
+    }
     completeStage('build');
     setStage('export');
     navigate('/export');
@@ -1247,22 +1268,30 @@ export function BuildPage() {
             </Button>
           )}
           {batchGenerating && (
-            <span className="flex items-center gap-2 text-xs text-violet-400">
-              <motion.div
-                className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full"
-                animate={{ rotate: 360 }}
-                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
-              />
-              {batchMaterial
-                ? `Class ${batchCurrentChapter}: ${batchMaterial}`
-                : 'Batch generating...'}
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="flex items-center gap-2 text-xs text-violet-400">
+                <motion.div
+                  className="w-4 h-4 border-2 border-violet-500 border-t-transparent rounded-full"
+                  animate={{ rotate: 360 }}
+                  transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                />
+                {batchMaterial
+                  ? `Class ${batchCurrentChapter}: ${batchMaterial}`
+                  : 'Batch generating...'}
+              </span>
+              <button
+                onClick={() => { batchCancelRef.current = true; }}
+                className="text-xs text-amber-400 hover:text-amber-300 bg-transparent border-0 cursor-pointer underline"
+              >
+                Stop After Current
+              </button>
+            </div>
           )}
           <Button
             size="sm"
             variant="secondary"
             onClick={handleProceed}
-            disabled={chapters.length === 0 || anyBusy}
+            disabled={chapters.length === 0}
           >
             Go to Export
             <svg className="ml-1.5 w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1345,8 +1374,8 @@ export function BuildPage() {
         {/* Left: Chapter Sidebar */}
         <ChapterSidebar
           selectedChapterNum={selectedChapterNum}
-          onSelectChapter={(num) => !anyBusy && setSelectedChapterNum(num)}
-          disabled={anyBusy}
+          onSelectChapter={setSelectedChapterNum}
+          disabled={batchGenerating}
           batchCurrentChapter={batchCurrentChapter}
         />
 
@@ -1721,7 +1750,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">Gamified Practice Quiz</p>
                             <p className="text-text-muted text-xs mb-4">12 questions with calibration scoring, achievements, and confetti</p>
-                            <Button onClick={generateQuiz} disabled={!currentChapter || generatingQuiz}>
+                            <Button onClick={generateQuiz} disabled={!currentChapter || !!generatingQuiz}>
                               Generate Practice Quiz
                             </Button>
                           </>
@@ -1841,7 +1870,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">In-Class Quiz</p>
                             <p className="text-text-muted text-xs mb-4">10 questions exported as 5 shuffled Word doc versions (A-E) + answer key</p>
-                            <Button onClick={generateInClassQuiz} disabled={!currentChapter || generatingInClassQuiz}>
+                            <Button onClick={generateInClassQuiz} disabled={!currentChapter || !!generatingInClassQuiz}>
                               Generate In-Class Quiz
                             </Button>
                           </>
@@ -1938,7 +1967,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">Conversation Starters</p>
                             <p className="text-text-muted text-xs mb-4">5-6 provocative prompts to display on a slide as students arrive</p>
-                            <Button onClick={generateDiscussion} disabled={!currentChapter || generatingDiscussion}>
+                            <Button onClick={generateDiscussion} disabled={!currentChapter || !!generatingDiscussion}>
                               Generate Conversation Starters
                             </Button>
                           </>
@@ -2199,7 +2228,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">In-Class Activities</p>
                             <p className="text-text-muted text-xs mb-4">4-6 dynamic activities with timing and scaling notes</p>
-                            <Button onClick={generateActivities} disabled={!currentChapter || generatingActivities}>
+                            <Button onClick={generateActivities} disabled={!currentChapter || !!generatingActivities}>
                               Generate Activities
                             </Button>
                           </>
@@ -2257,7 +2286,7 @@ export function BuildPage() {
                             <p className="text-amber-400 text-sm mb-1">
                               Audio synthesis failed: {audioError}
                             </p>
-                            <Button size="sm" variant="secondary" className="mt-2" onClick={retryAudio} disabled={generatingAudio}>
+                            <Button size="sm" variant="secondary" className="mt-2" onClick={retryAudio} disabled={!!generatingAudio}>
                               Retry Audio
                             </Button>
                           </div>
@@ -2295,7 +2324,7 @@ export function BuildPage() {
                             ) : (
                               <>
                                 <p className="text-text-secondary text-sm mb-1">Transcript ready — click below to generate audio.</p>
-                                <Button size="sm" variant="secondary" className="mt-2" onClick={retryAudio} disabled={generatingAudio}>
+                                <Button size="sm" variant="secondary" className="mt-2" onClick={retryAudio} disabled={!!generatingAudio}>
                                   Generate Audio
                                 </Button>
                               </>
@@ -2353,7 +2382,7 @@ export function BuildPage() {
                                 ? 'AI-adapted transcript + ElevenLabs v3 audio synthesis'
                                 : 'Generate a spoken-word transcript (add ElevenLabs key in Setup for audio)'}
                             </p>
-                            <Button onClick={generateAudio} disabled={!currentChapter || generatingAudio}>
+                            <Button onClick={generateAudio} disabled={!currentChapter || !!generatingAudio}>
                               Generate Audiobook
                             </Button>
                           </>
@@ -2490,7 +2519,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">Lecture Slides</p>
                             <p className="text-text-muted text-xs mb-4">8-12 themed PowerPoint slides with speaker notes</p>
-                            <Button onClick={generateSlides} disabled={!currentChapter || generatingSlides}>
+                            <Button onClick={generateSlides} disabled={!currentChapter || !!generatingSlides}>
                               Generate Slides
                             </Button>
                           </>
@@ -2539,7 +2568,7 @@ export function BuildPage() {
                             variant="secondary"
                             size="sm"
                             onClick={generateInfographic}
-                            disabled={generatingInfographic}
+                            disabled={!!generatingInfographic}
                           >
                             Regenerate
                           </Button>
@@ -2573,7 +2602,7 @@ export function BuildPage() {
                             </div>
                             <p className="text-text-secondary mb-1">Educational Infographic</p>
                             <p className="text-text-muted text-xs mb-4">AI-generated visual summary of key concepts</p>
-                            <Button onClick={generateInfographic} disabled={!currentChapter || generatingInfographic}>
+                            <Button onClick={generateInfographic} disabled={!currentChapter || !!generatingInfographic}>
                               Generate Infographic
                             </Button>
                           </>
