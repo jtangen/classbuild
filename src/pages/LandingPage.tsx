@@ -380,7 +380,7 @@ const STAGE_ROUTES: Record<StageId, string> = {
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const { currentStage, reset, setup } = useCourseStore();
+  const { currentStage, reset, setup, updateSetup, setSyllabus, addChapter, completeStage, setStage } = useCourseStore();
   const [showConfirm, setShowConfirm] = useState(false);
 
   const hasExistingCourse = currentStage !== 'landing' && currentStage !== 'setup';
@@ -402,6 +402,17 @@ export function LandingPage() {
   const continueCurrent = () => {
     setShowConfirm(false);
     navigate(STAGE_ROUTES[currentStage]);
+  };
+
+  const handleLoadDemoCourse = async () => {
+    const { demoSetup, demoSyllabus, demoChapters } = await import('../fixtures/demoCourse');
+    reset();
+    updateSetup(demoSetup);
+    setSyllabus(demoSyllabus);
+    for (const ch of demoChapters) addChapter(ch);
+    (['setup', 'syllabus', 'research', 'build'] as StageId[]).forEach(completeStage);
+    setStage('export');
+    navigate('/export');
   };
 
   return (
@@ -497,6 +508,9 @@ export function LandingPage() {
               document.getElementById('science')?.scrollIntoView({ behavior: 'smooth' });
             }}>
               How It Works
+            </Button>
+            <Button variant="ghost" size="lg" onClick={handleLoadDemoCourse}>
+              Load demo course
             </Button>
           </div>
         </motion.div>
