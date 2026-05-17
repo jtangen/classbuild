@@ -39,10 +39,19 @@ const ENVIRONMENT_LABELS: Record<string, string> = {
 export function SetupPage() {
   const navigate = useNavigate();
   const { setup, setStage, completeStage, resetDownstream } = useCourseStore();
-  const { claudeApiKey, claudeKeyValid, geminiKeyValid, geminiApiKey } = useApiStore();
+  const {
+    claudeApiKey, claudeKeyValid,
+    openrouterApiKey, openrouterKeyValid,
+    geminiApiKey, geminiKeyValid,
+    llmProvider,
+  } = useApiStore();
+
+  const activeLlmKey = llmProvider === 'openrouter' ? openrouterApiKey : claudeApiKey;
+  const activeLlmKeyValid = llmProvider === 'openrouter' ? openrouterKeyValid : claudeKeyValid;
+  const activeLlmLabel = llmProvider === 'openrouter' ? 'OpenRouter' : 'Anthropic';
 
   const hasTopic = setup.topic.trim().length > 10;
-  const hasApiKey = claudeApiKey.trim().length > 0;
+  const hasApiKey = activeLlmKey.trim().length > 0;
   const canProceed = hasTopic && hasApiKey;
 
   const handleGenerate = () => {
@@ -156,8 +165,8 @@ export function SetupPage() {
             <div className="flex gap-2">
               <span className="text-text-muted shrink-0">Services:</span>
               <span className="text-text-secondary flex items-center gap-1.5 flex-wrap">
-                <span className={claudeKeyValid === true ? 'text-emerald-400' : claudeApiKey ? 'text-amber-400' : 'text-text-muted'}>
-                  Claude {claudeKeyValid === true ? '✓' : claudeApiKey ? '?' : '✗'}
+                <span className={activeLlmKeyValid === true ? 'text-emerald-400' : activeLlmKey ? 'text-amber-400' : 'text-text-muted'}>
+                  {activeLlmLabel} {activeLlmKeyValid === true ? '✓' : activeLlmKey ? '?' : '✗'}
                 </span>
                 {' · '}
                 <span className={geminiKeyValid === true ? 'text-emerald-400' : geminiApiKey ? 'text-amber-400' : 'text-text-muted'}>
@@ -167,13 +176,22 @@ export function SetupPage() {
             </div>
           </div>
 
-          {claudeKeyValid === false && (
+          {activeLlmKeyValid === false && llmProvider === 'anthropic' && (
             <div className="mb-4 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-sm">
               Your Claude connection didn't work. Check that you copied the full key from{' '}
               <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener noreferrer" className="underline hover:text-error/80">
                 console.anthropic.com
               </a>{' '}
               and that your account has API credits.
+            </div>
+          )}
+          {activeLlmKeyValid === false && llmProvider === 'openrouter' && (
+            <div className="mb-4 p-3 rounded-lg bg-error/10 border border-error/20 text-error text-sm">
+              Your OpenRouter connection didn't work. Check that you copied the full key from{' '}
+              <a href="https://openrouter.ai/keys" target="_blank" rel="noopener noreferrer" className="underline hover:text-error/80">
+                openrouter.ai/keys
+              </a>{' '}
+              and that your account has credits.
             </div>
           )}
 
@@ -192,9 +210,9 @@ export function SetupPage() {
 
           {!canProceed && (
             <p className="text-xs text-text-muted text-center mt-3">
-              {!hasTopic && !hasApiKey ? 'Enter a course topic and add your Anthropic API key to continue' :
+              {!hasTopic && !hasApiKey ? `Enter a course topic and add your ${activeLlmLabel} API key to continue` :
                !hasTopic ? (setup.topic.trim().length === 0 ? 'Enter a course topic to continue' : 'Please provide a more detailed topic description') :
-               'Add your Anthropic API key to continue'}
+               `Add your ${activeLlmLabel} API key to continue`}
             </p>
           )}
         </motion.div>

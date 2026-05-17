@@ -1,30 +1,27 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { useApiStore } from '../../store/apiStore';
-import { MODELS } from '../../services/claude/client';
+import { getClient, MODELS, resolveModel } from '../../services/claude/client';
 import { ProviderCard } from './ProviderCard';
-import { CLAUDE_CONFIG, GEMINI_CONFIG } from './providerConfigs';
+import { LlmProviderCard } from './LlmProviderCard';
+import { GEMINI_CONFIG } from './providerConfigs';
 
 export function ApiKeyPanel() {
   const {
-    claudeApiKey, geminiApiKey,
-    claudeKeyValid, geminiKeyValid,
-    isValidatingClaude, isValidatingGemini,
-    setClaudeApiKey, setGeminiApiKey,
-    setClaudeKeyValid, setGeminiKeyValid,
-    setIsValidatingClaude, setIsValidatingGemini,
+    claudeApiKey, openrouterApiKey, geminiApiKey,
+    claudeKeyValid, openrouterKeyValid, geminiKeyValid,
+    isValidatingGemini,
+    setGeminiApiKey,
+    setClaudeKeyValid, setOpenrouterKeyValid, setGeminiKeyValid,
+    setIsValidatingClaude, setIsValidatingOpenrouter, setIsValidatingGemini,
   } = useApiStore();
 
   const validateClaude = useCallback(async () => {
     if (!claudeApiKey.trim()) return;
     setIsValidatingClaude(true);
     try {
-      const { default: Anthropic } = await import('@anthropic-ai/sdk');
-      const client = new Anthropic({
-        apiKey: claudeApiKey.trim(),
-        dangerouslyAllowBrowser: true,
-      });
+      const client = getClient(claudeApiKey.trim(), 'anthropic');
       await client.messages.create({
-        model: MODELS.haiku,
+        model: resolveModel(MODELS.haiku, 'anthropic'),
         max_tokens: 10,
         messages: [{ role: 'user', content: 'Hi' }],
       });
@@ -35,6 +32,24 @@ export function ApiKeyPanel() {
       setIsValidatingClaude(false);
     }
   }, [claudeApiKey, setClaudeKeyValid, setIsValidatingClaude]);
+
+  const validateOpenrouter = useCallback(async () => {
+    if (!openrouterApiKey.trim()) return;
+    setIsValidatingOpenrouter(true);
+    try {
+      const client = getClient(openrouterApiKey.trim(), 'openrouter');
+      await client.messages.create({
+        model: resolveModel(MODELS.haiku, 'openrouter'),
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'Hi' }],
+      });
+      setOpenrouterKeyValid(true);
+    } catch {
+      setOpenrouterKeyValid(false);
+    } finally {
+      setIsValidatingOpenrouter(false);
+    }
+  }, [openrouterApiKey, setOpenrouterKeyValid, setIsValidatingOpenrouter]);
 
   const validateGemini = useCallback(async () => {
     if (!geminiApiKey.trim()) return;
@@ -57,6 +72,7 @@ export function ApiKeyPanel() {
     if (mountedRef.current) return;
     mountedRef.current = true;
     if (claudeApiKey.trim() && claudeKeyValid === null) validateClaude();
+    if (openrouterApiKey.trim() && openrouterKeyValid === null) validateOpenrouter();
     if (geminiApiKey.trim() && geminiKeyValid === null) validateGemini();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -76,14 +92,9 @@ export function ApiKeyPanel() {
           </p>
         </div>
       </div>
-      <ProviderCard
-        config={CLAUDE_CONFIG}
-        apiKey={claudeApiKey}
-        keyValid={claudeKeyValid}
-        isValidating={isValidatingClaude}
-        setKey={setClaudeApiKey}
-        validate={validateClaude}
-        defaultExpanded={!claudeApiKey}
+      <LlmProviderCard
+        validateClaude={validateClaude}
+        validateOpenrouter={validateOpenrouter}
       />
       <ProviderCard
         config={GEMINI_CONFIG}

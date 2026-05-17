@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
-import { useApiStore } from '../store/apiStore';
+import { useLlmCredentials } from '../store/useLlmCredentials';
 import { useUiStore } from '../store/uiStore';
 import { streamMessage } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
@@ -44,7 +44,7 @@ function sanitizeFilename(text: string): string {
 
 export function ExportPage() {
   const { syllabus, chapters, researchDossiers, addChapter, updateChapter, setup, curriculumMap } = useCourseStore();
-  const { claudeApiKey } = useApiStore();
+  const { apiKey: llmApiKey, provider: llmProvider } = useLlmCredentials();
   const { isGenerating, setIsGenerating, setError, error } = useUiStore();
   const [generatingChapter, setGeneratingChapter] = useState<number | null>(null);
   const [isPublishing, setIsPublishing] = useState(false);
@@ -340,7 +340,8 @@ export function ExportPage() {
       // Generate chapter
       const fullText = await streamMessage(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildChapterPrompt(setup.themeId),
           messages: [{ role: 'user', content: buildChapterUserPrompt(syllabus.courseTitle, ch, setup.chapterLength, researchSources) }],
@@ -357,7 +358,8 @@ export function ExportPage() {
       try {
         const quizText = await streamMessage(
           {
-            apiKey: claudeApiKey,
+            apiKey: llmApiKey,
+            provider: llmProvider,
             model: MODELS.opus,
             system: buildPracticeQuizPrompt(),
             messages: [{ role: 'user', content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
@@ -373,7 +375,8 @@ export function ExportPage() {
       try {
         const inClassText = await streamMessage(
           {
-            apiKey: claudeApiKey,
+            apiKey: llmApiKey,
+            provider: llmProvider,
             model: MODELS.opus,
             system: buildInClassQuizPrompt(),
             messages: [{ role: 'user', content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
@@ -417,7 +420,7 @@ export function ExportPage() {
       setIsGenerating(false);
       setGeneratingChapter(null);
     }
-  }, [syllabus, chapters, claudeApiKey, researchDossiers, setup.chapterLength, addChapter, updateChapter, isGenerating, setIsGenerating, setError]);
+  }, [syllabus, chapters, llmApiKey, llmProvider, researchDossiers, setup.chapterLength, addChapter, updateChapter, isGenerating, setIsGenerating, setError]);
 
   // --- Download All ---
 

@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
-import { useApiStore } from '../store/apiStore';
+import { useLlmCredentials } from '../store/useLlmCredentials';
 import { useUiStore } from '../store/uiStore';
 import { streamWithRetry } from '../services/claude/streaming';
 import type { WebSearchResult } from '../services/claude/streaming';
@@ -38,7 +38,8 @@ const emptyResearchState: ChapterResearchState = {
 export function ResearchPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, addResearchDossier, setStage, completeStage } = useCourseStore();
-  const { claudeApiKey } = useApiStore();
+  const { apiKey: llmApiKey, provider: llmProvider } = useLlmCredentials();
+  const isOpenrouter = llmProvider === 'openrouter';
   const { setActiveTab } = useUiStore();
   const [currentChapter, setCurrentChapter] = useState(0);
   const [researchingSet, setResearchingSet] = useState<Set<number>>(new Set());
@@ -72,7 +73,8 @@ export function ResearchPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: RESEARCH_SYSTEM_PROMPT,
           messages: [{
             role: 'user',
@@ -174,7 +176,7 @@ export function ResearchPage() {
       });
       updateChapterState(chapterNum, s => ({ ...s, phase: 'idle' }));
     }
-  }, [syllabus, claudeApiKey, addResearchDossier, updateChapterState, researchingSet, researchDossiers]);
+  }, [syllabus, llmApiKey, llmProvider, addResearchDossier, updateChapterState, researchingSet, researchDossiers]);
 
   // Auto-start first chapter research
   useEffect(() => {
@@ -245,8 +247,11 @@ export function ResearchPage() {
 
   const { phase, searchQueries, webResults, synthesisText, latestSource, doiResults, error: chapterError } = currentState;
 
+  // On OpenRouter (via :online), search happens before the first text token —
+  // the per-query stream events Anthropic provides don't fire, so the "thinking"
+  // phase actually covers the search wait. Label it accurately for each provider.
   const phaseLabel =
-    phase === 'thinking' ? 'Planning research strategy...' :
+    phase === 'thinking' ? (isOpenrouter ? 'Searching the web...' : 'Planning research strategy...') :
     phase === 'searching' ? `Searching academic databases... (${webResults.length} sources found)` :
     phase === 'compiling' ? 'Compiling research dossier...' :
     phase === 'validating' ? 'Verifying DOIs against doi.org...' :

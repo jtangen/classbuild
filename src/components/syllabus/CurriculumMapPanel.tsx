@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { useCourseStore } from '../../store/courseStore';
-import { useApiStore } from '../../store/apiStore';
+import { useLlmCredentials } from '../../store/useLlmCredentials';
 import { streamMessage } from '../../services/claude/streaming';
 import {
   buildLearningObjectivesPrompt,
@@ -29,19 +29,20 @@ const BLOOM_COLORS: Record<string, string> = {
 
 export function CurriculumMapPanel() {
   const { syllabus, curriculumMap, setCurriculumMap } = useCourseStore();
-  const { claudeApiKey } = useApiStore();
+  const { apiKey: llmApiKey, provider: llmProvider } = useLlmCredentials();
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const handleGenerate = useCallback(async () => {
-    if (!syllabus || !claudeApiKey) return;
+    if (!syllabus || !llmApiKey) return;
     setIsGenerating(true);
     setError(null);
 
     try {
       const fullText = await streamMessage(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: buildLearningObjectivesPrompt(),
           messages: [{ role: 'user', content: buildLearningObjectivesUserPrompt(syllabus) }],
           thinkingBudget: 'medium',
@@ -61,7 +62,7 @@ export function CurriculumMapPanel() {
     } finally {
       setIsGenerating(false);
     }
-  }, [syllabus, claudeApiKey, setCurriculumMap]);
+  }, [syllabus, llmApiKey, llmProvider, setCurriculumMap]);
 
   if (!syllabus) return null;
 
