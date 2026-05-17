@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
+import { useLlmCredentials } from '../store/useLlmCredentials';
 import { useUiStore } from '../store/uiStore';
 import { streamMessage, streamWithRetry } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
@@ -62,7 +63,8 @@ async function replaceGeminiPlaceholders(html: string, apiKey: string): Promise<
 export function BuildPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, chapters, addChapter, updateChapter, setup, setStage, completeStage } = useCourseStore();
-  const { claudeApiKey, geminiApiKey } = useApiStore();
+  const { geminiApiKey } = useApiStore();
+  const { apiKey: llmApiKey, provider: llmProvider } = useLlmCredentials();
   const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial } = useUiStore();
 
   const [selectedChapterNum, setSelectedChapterNum] = useState(1);
@@ -326,7 +328,8 @@ export function BuildPage() {
       const hasGemini = !!geminiApiKey;
       const fullText = await streamMessage(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildChapterPrompt(setup.themeId, hasGemini),
           messages: [{
@@ -366,7 +369,7 @@ export function BuildPage() {
       setIsGenerating(false);
       setThinkingText('');
     }
-  }, [syllabus, claudeApiKey, geminiApiKey, researchDossiers, setup.chapterLength, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+  }, [syllabus, llmApiKey, llmProvider, geminiApiKey, researchDossiers, setup.chapterLength, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
 
   const refineChapter = useCallback(async (feedback: string) => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
@@ -406,7 +409,8 @@ export function BuildPage() {
       const hasGemini = !!geminiApiKey;
       const fullText = await streamMessage(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildChapterPrompt(setup.themeId, hasGemini),
           messages: [
@@ -451,7 +455,7 @@ export function BuildPage() {
       setIsGenerating(false);
       setThinkingText('');
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, geminiApiKey, researchDossiers, setup.chapterLength, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, geminiApiKey, researchDossiers, setup.chapterLength, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
 
   const generateQuiz = useCallback(async () => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
@@ -462,7 +466,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildPracticeQuizPrompt(),
           messages: [{
@@ -477,7 +482,7 @@ export function BuildPage() {
 
       // Balance answer lengths (silent post-processing)
       const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-      const balancedText = await balancePracticeQuiz(fullText, claudeApiKey);
+      const balancedText = await balancePracticeQuiz(fullText, llmApiKey, llmProvider);
 
       updateChapter(capturedChapter, { practiceQuizData: balancedText });
 
@@ -505,7 +510,7 @@ export function BuildPage() {
     } finally {
       setGeneratingQuiz(null);
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, updateChapter, setTabError, clearTabError]);
 
   const generateInClassQuiz = useCallback(async () => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
@@ -516,7 +521,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildInClassQuizPrompt(),
           messages: [{
@@ -532,7 +538,7 @@ export function BuildPage() {
       try {
         const parsed = parseJson(fullText) as InClassQuizQuestion[];
         const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-        const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
+        const balanced = await balanceInClassQuiz(parsed, llmApiKey, llmProvider);
         if (selectedChapterRef.current === capturedChapter) setInClassQuizData(balanced);
         updateChapter(capturedChapter, { inClassQuizData: balanced });
       } catch {
@@ -543,7 +549,7 @@ export function BuildPage() {
     } finally {
       setGeneratingInClassQuiz(null);
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, updateChapter, setTabError, clearTabError]);
 
   const generateWeeklyChallengeContent = useCallback(async () => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
@@ -561,7 +567,8 @@ export function BuildPage() {
 
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildWeeklyChallengePrompt(),
           messages: [{
@@ -607,7 +614,7 @@ export function BuildPage() {
     } finally {
       setGeneratingWeeklyChallenge(null);
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, setup.themeId, updateChapter, setTabError, clearTabError]);
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, setup.themeId, updateChapter, setTabError, clearTabError]);
 
   const generateDiscussion = useCallback(async () => {
     if (!syllabus || !syllabusChapter) return;
@@ -618,7 +625,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: buildDiscussionPrompt(),
           messages: [{
             role: 'user',
@@ -642,7 +650,7 @@ export function BuildPage() {
     } finally {
       setGeneratingDiscussion(null);
     }
-  }, [syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, setup.cohortSize, setup.teachingEnvironment, updateChapter, setTabError, clearTabError]);
+  }, [syllabus, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, setup.cohortSize, setup.teachingEnvironment, updateChapter, setTabError, clearTabError]);
 
   const generateActivities = useCallback(async () => {
     if (!syllabus || !syllabusChapter) return;
@@ -653,7 +661,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: buildActivitiesPrompt(),
           messages: [{
             role: 'user',
@@ -677,7 +686,7 @@ export function BuildPage() {
     } finally {
       setGeneratingActivities(null);
     }
-  }, [syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes, updateChapter, setTabError, clearTabError]);
+  }, [syllabus, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes, updateChapter, setTabError, clearTabError]);
 
   const fleshOutActivity = useCallback(async (index: number) => {
     if (!syllabusChapter || expandingActivity !== null) return;
@@ -689,7 +698,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.haiku,
           system: buildActivityDetailPrompt(),
           messages: [{
@@ -717,7 +727,7 @@ export function BuildPage() {
     } finally {
       setExpandingActivity(null);
     }
-  }, [activities, syllabusChapter, claudeApiKey, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes, expandingActivity, setError]);
+  }, [activities, syllabusChapter, llmApiKey, llmProvider, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes, expandingActivity, setError]);
 
   const generateAudio = useCallback(async () => {
     if (!currentChapter || !syllabus) return;
@@ -730,7 +740,8 @@ export function BuildPage() {
     try {
       const transcript = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: buildAudioTranscriptPrompt(),
           messages: [{
             role: 'user',
@@ -772,7 +783,7 @@ export function BuildPage() {
       setAudioPhase(null);
       setAudioChunkProgress(null);
     }
-  }, [currentChapter, syllabus, selectedChapterNum, claudeApiKey, geminiApiKey, updateChapter, setTabError, clearTabError]);
+  }, [currentChapter, syllabus, selectedChapterNum, llmApiKey, llmProvider, geminiApiKey, updateChapter, setTabError, clearTabError]);
 
   const retryAudio = useCallback(async () => {
     if (!audioTranscript || !geminiApiKey) return;
@@ -812,7 +823,8 @@ export function BuildPage() {
     try {
       const fullText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           system: buildSlidesPrompt(),
           messages: [{
             role: 'user',
@@ -836,7 +848,7 @@ export function BuildPage() {
     } finally {
       setGeneratingSlides(null);
     }
-  }, [currentChapter, syllabus, syllabusChapter, selectedChapterNum, claudeApiKey, updateChapter, setTabError, clearTabError]);
+  }, [currentChapter, syllabus, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, updateChapter, setTabError, clearTabError]);
 
   const generateInfographic = useCallback(async () => {
     if (!currentChapter || !syllabusChapter || !geminiApiKey) return;
@@ -849,7 +861,8 @@ export function BuildPage() {
       const { buildInfographicMetaPrompt, buildInfographicMetaUserPrompt } = await import('../prompts/infographic');
       const promptText = await streamWithRetry(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: buildInfographicMetaPrompt(setup.themeId),
           messages: [{
@@ -874,7 +887,7 @@ export function BuildPage() {
     } finally {
       setGeneratingInfographic(null);
     }
-  }, [currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, geminiApiKey, setup.themeId, updateChapter, setTabError, clearTabError]);
+  }, [currentChapter, syllabusChapter, selectedChapterNum, llmApiKey, llmProvider, geminiApiKey, setup.themeId, updateChapter, setTabError, clearTabError]);
 
   // Generate all outputs for the currently selected chapter.
   // Each generate* already sets tab errors internally; this outer catch only
@@ -922,7 +935,8 @@ export function BuildPage() {
         const hasGemini = !!geminiApiKey;
         const fullText = await streamMessage(
           {
-            apiKey: claudeApiKey,
+            apiKey: llmApiKey,
+            provider: llmProvider,
             model: MODELS.opus,
             system: buildChapterPrompt(setup.themeId, hasGemini),
             messages: [{
@@ -953,7 +967,8 @@ export function BuildPage() {
         try {
           const quizText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildPracticeQuizPrompt(),
               messages: [{
@@ -966,7 +981,7 @@ export function BuildPage() {
             { onError: (err) => setError(err.message) }
           );
           const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-          const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+          const balancedQuiz = await balancePracticeQuiz(quizText, llmApiKey, llmProvider);
           updateChapter(ch.number, { practiceQuizData: balancedQuiz });
         } catch {
           // Quiz generation failed, continue
@@ -976,7 +991,8 @@ export function BuildPage() {
         try {
           const inClassText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildInClassQuizPrompt(),
               messages: [{
@@ -991,7 +1007,7 @@ export function BuildPage() {
           try {
             const parsed = parseJson(inClassText) as InClassQuizQuestion[];
             const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-            const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
+            const balanced = await balanceInClassQuiz(parsed, llmApiKey, llmProvider);
             if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
           } catch {
             // Parse failed, continue
@@ -1009,7 +1025,8 @@ export function BuildPage() {
           const { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } = await import('../prompts/weeklyChallenge');
           const challengeText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildWeeklyChallengePrompt(),
               messages: [{
@@ -1040,7 +1057,7 @@ export function BuildPage() {
       setBatchPhase(null);
       setBatchGenerating(false);
     }
-  }, [syllabus, chapters, claudeApiKey, geminiApiKey, researchDossiers, setup.chapterLength, setup.themeId, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase]);
+  }, [syllabus, chapters, llmApiKey, llmProvider, geminiApiKey, researchDossiers, setup.chapterLength, setup.themeId, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase]);
 
   // ─── Full batch generation (all materials for all chapters) ───
   const generateEverything = useCallback(async () => {
@@ -1074,7 +1091,8 @@ export function BuildPage() {
           const hasGemini = !!geminiApiKey;
           const fullText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildChapterPrompt(setup.themeId, hasGemini),
               messages: [{
@@ -1116,7 +1134,8 @@ export function BuildPage() {
         try {
           const quizText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildPracticeQuizPrompt(),
               messages: [{
@@ -1129,7 +1148,7 @@ export function BuildPage() {
             { onError: (err) => setError(err.message) }
           );
           const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-          const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+          const balancedQuiz = await balancePracticeQuiz(quizText, llmApiKey, llmProvider);
           updateChapter(ch.number, { practiceQuizData: balancedQuiz });
         } catch {
           // Quiz failed, continue
@@ -1144,7 +1163,8 @@ export function BuildPage() {
         try {
           const inClassText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildInClassQuizPrompt(),
               messages: [{
@@ -1159,7 +1179,7 @@ export function BuildPage() {
           try {
             const parsed = parseJson(inClassText) as InClassQuizQuestion[];
             const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-            const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
+            const balanced = await balanceInClassQuiz(parsed, llmApiKey, llmProvider);
             if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
           } catch {
             // Parse failed
@@ -1183,7 +1203,8 @@ export function BuildPage() {
           const { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } = await import('../prompts/weeklyChallenge');
           const challengeText = await streamMessage(
             {
-              apiKey: claudeApiKey,
+              apiKey: llmApiKey,
+              provider: llmProvider,
               model: MODELS.opus,
               system: buildWeeklyChallengePrompt(),
               messages: [{
@@ -1219,7 +1240,8 @@ export function BuildPage() {
           try {
             const fullText = await streamWithRetry(
               {
-                apiKey: claudeApiKey,
+                apiKey: llmApiKey,
+                provider: llmProvider,
                 system: buildDiscussionPrompt(),
                 messages: [{
                   role: 'user',
@@ -1242,7 +1264,8 @@ export function BuildPage() {
           try {
             const fullText = await streamWithRetry(
               {
-                apiKey: claudeApiKey,
+                apiKey: llmApiKey,
+                provider: llmProvider,
                 system: buildActivitiesPrompt(),
                 messages: [{
                   role: 'user',
@@ -1265,7 +1288,8 @@ export function BuildPage() {
           try {
             const transcript = await streamWithRetry(
               {
-                apiKey: claudeApiKey,
+                apiKey: llmApiKey,
+                provider: llmProvider,
                 system: buildAudioTranscriptPrompt(),
                 messages: [{
                   role: 'user',
@@ -1299,7 +1323,8 @@ export function BuildPage() {
           try {
             const fullText = await streamWithRetry(
               {
-                apiKey: claudeApiKey,
+                apiKey: llmApiKey,
+                provider: llmProvider,
                 system: buildSlidesPrompt(),
                 messages: [{
                   role: 'user',
@@ -1323,7 +1348,8 @@ export function BuildPage() {
             const { buildInfographicMetaPrompt, buildInfographicMetaUserPrompt } = await import('../prompts/infographic');
             const promptText = await streamWithRetry(
               {
-                apiKey: claudeApiKey,
+                apiKey: llmApiKey,
+                provider: llmProvider,
                 model: MODELS.opus,
                 system: buildInfographicMetaPrompt(setup.themeId),
                 messages: [{
@@ -1354,7 +1380,7 @@ export function BuildPage() {
       setBatchMaterial(null);
       setBatchGenerating(false);
     }
-  }, [syllabus, claudeApiKey, geminiApiKey, researchDossiers, setup, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial]);
+  }, [syllabus, llmApiKey, llmProvider, geminiApiKey, researchDossiers, setup, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial]);
 
   const handleProceed = () => {
     if (anyBusy) {

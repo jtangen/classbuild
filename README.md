@@ -49,8 +49,12 @@ Open [localhost:5173](http://localhost:5173) and enter your API key on the Setup
 
 | Key | Required | Purpose |
 |-----|----------|---------|
-| Anthropic Claude | Yes | Course generation (all stages) |
+| Anthropic Claude **or** OpenRouter | Yes (pick one) | Course generation (all stages). OpenRouter is useful if you already have credits there or can't use Anthropic's API directly. |
 | Google Gemini | No | Voice narration (TTS) and AI-generated infographics |
+
+On the Setup page, the LLM provider card has a tab switcher — choose **Anthropic** (default) or **OpenRouter** and paste the matching key. Both keys can be saved at once; only the active tab is used.
+
+> **Research on OpenRouter:** uses Exa search via OpenRouter's `:online` model suffix (transparently swapped in by the streaming layer). Per-call cost is slightly higher than vanilla requests because Exa charges per search.
 
 ## How does ClassBuild work?
 
@@ -79,6 +83,17 @@ ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
   --output ./output/prejudice
 ```
 
+Or via OpenRouter:
+
+```bash
+OPENROUTER_API_KEY=sk-or-... npx tsx scripts/generate-course.ts \
+  --topic "The Psychology of Prejudice" \
+  --provider openrouter \
+  --output ./output/prejudice
+```
+
+The CLI auto-detects the provider from whichever env var is set. If both are set, pass `--provider anthropic|openrouter` to choose explicitly.
+
 Set `GEMINI_API_KEY` as an environment variable to enable audio narration and infographics. Install `ffmpeg` if you want the CLI to transcode WAV output to MP3.
 
 ## What does each CLI flag do?
@@ -96,6 +111,7 @@ Set `GEMINI_API_KEY` as an environment variable to enable audio narration and in
 | `--notes` | — | Additional context for the AI (audience, tone, specific topics) |
 | `--voice-id` | — | Gemini TTS voice name for audiobook narration (e.g. `Kore`, `Puck`, `Charon`) |
 | `--syllabus` | — | Path to existing syllabus.json (skip regeneration) |
+| `--provider` | *(auto)* | `anthropic` or `openrouter` — auto-detected from env vars |
 | `--stop-after` | — | `syllabus` or `research` — stop early for review |
 | `--no-publish` | `false` | Skip course viewer assembly |
 | `--specific-topics` | — | Comma-separated topics to include |

@@ -1,6 +1,6 @@
 import type { InClassQuizQuestion } from '../../types/course';
 import { streamMessage } from '../claude/streaming';
-import { MODELS } from '../claude/client';
+import { MODELS, type Provider } from '../claude/client';
 
 // ---------- Practice Quiz Parsing ----------
 
@@ -132,11 +132,13 @@ interface RewriteOutput {
 
 async function requestRewrites(
   questions: RewriteInput[],
-  apiKey: string
+  apiKey: string,
+  provider: Provider
 ): Promise<RewriteOutput[]> {
   const fullText = await streamMessage(
     {
       apiKey,
+      provider,
       model: MODELS.haiku,
       system: REWRITE_SYSTEM,
       messages: [{ role: 'user', content: JSON.stringify(questions, null, 2) }],
@@ -161,7 +163,8 @@ async function requestRewrites(
 
 export async function balancePracticeQuiz(
   quizMarkdown: string,
-  apiKey: string
+  apiKey: string,
+  provider: Provider = 'anthropic'
 ): Promise<string> {
   try {
     const questions = parsePracticeQuiz(quizMarkdown);
@@ -183,7 +186,7 @@ export async function balancePracticeQuiz(
       distractors: questions[idx].distractors,
     }));
 
-    const rewrites = await requestRewrites(rewriteInput, apiKey);
+    const rewrites = await requestRewrites(rewriteInput, apiKey, provider);
 
     // Split markdown into question blocks for scoped replacement
     const parts = quizMarkdown.split(/(\n---\n)/);
@@ -227,7 +230,8 @@ export async function balancePracticeQuiz(
 
 export async function balanceInClassQuiz(
   quiz: InClassQuizQuestion[],
-  apiKey: string
+  apiKey: string,
+  provider: Provider = 'anthropic'
 ): Promise<InClassQuizQuestion[]> {
   try {
     const auditInput = quiz.map(q => ({
@@ -247,7 +251,7 @@ export async function balanceInClassQuiz(
       distractors: quiz[idx].distractors.map(d => d.text),
     }));
 
-    const rewrites = await requestRewrites(rewriteInput, apiKey);
+    const rewrites = await requestRewrites(rewriteInput, apiKey, provider);
 
     // Merge rewrites back into the quiz array
     const result = quiz.map((q, i) => {

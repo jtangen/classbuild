@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
-import { useApiStore } from '../store/apiStore';
+import { useLlmCredentials } from '../store/useLlmCredentials';
 import { useUiStore } from '../store/uiStore';
 import { streamMessage } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
@@ -18,7 +18,7 @@ import { friendlyError } from '../utils/errors';
 export function SyllabusPage() {
   const navigate = useNavigate();
   const { setup, syllabus, setSyllabus, syllabusConversation, addSyllabusMessage, setStage, completeStage } = useCourseStore();
-  const { claudeApiKey } = useApiStore();
+  const { apiKey: llmApiKey, provider: llmProvider } = useLlmCredentials();
   const { isGenerating, setIsGenerating, showScienceOverlay, toggleScienceOverlay, error, setError } = useUiStore();
   const [isRefining, setIsRefining] = useState(false);
   const [showCurriculumMap, setShowCurriculumMap] = useState(false);
@@ -60,7 +60,8 @@ export function SyllabusPage() {
 
       const fullText = await streamMessage(
         {
-          apiKey: claudeApiKey,
+          apiKey: llmApiKey,
+          provider: llmProvider,
           model: MODELS.opus,
           system: systemPrompt,
           messages,
@@ -101,10 +102,10 @@ export function SyllabusPage() {
       setIsGenerating(false);
       setIsThinking(false);
     }
-  }, [setup, claudeApiKey, syllabusConversation, addSyllabusMessage, setSyllabus, setIsGenerating, setError, partialChapters.length]);
+  }, [setup, llmApiKey, llmProvider, syllabusConversation, addSyllabusMessage, setSyllabus, setIsGenerating, setError, partialChapters.length]);
 
   useEffect(() => {
-    if (!syllabus && !isGenerating && claudeApiKey && !generationStarted.current) {
+    if (!syllabus && !isGenerating && llmApiKey && !generationStarted.current) {
       generationStarted.current = true;
       generateSyllabus();
     }

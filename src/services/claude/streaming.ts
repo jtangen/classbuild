@@ -1,5 +1,78 @@
 import type Anthropic from '@anthropic-ai/sdk';
-import { getClient, getThinkingTokens, MODELS, type ThinkingBudget } from './client';
+import { getClient, getThinkingTokens, MODELS, resolveModel, type Provider, type ThinkingBudget } from './client';
+
+const WEB_SEARCH_TOOL_TYPE = 'web_search_20250305';
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function wantsWebSearch(tools: any[] | undefined): boolean {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return Array.isArray(tools) && tools.some((t: any) => t?.type === WEB_SEARCH_TOOL_TYPE);
+}
+
+/**
+ * OpenRouter rejects Anthropic's `web_search_20250305` server tool — it
+ * exposes web search via the `:online` model suffix instead (powered by Exa).
+ * When the caller asks for web_search on OpenRouter, we:
+ *   1. Drop the unsupported tool from the array.
+ *   2. Append `:online` to the resolved model ID.
+ * Other tools (if any) are forwarded unchanged.
+ */
+function applyOnlineBridge(
+  provider: Provider,
+  resolvedModel: string,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: any[] | undefined,
+): {
+  model: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  tools: any[] | undefined;
+  usedOnline: boolean;
+} {
+  if (provider !== 'openrouter' || !wantsWebSearch(tools)) {
+    return { model: resolvedModel, tools, usedOnline: false };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const forwarded = tools!.filter((t: any) => t?.type !== WEB_SEARCH_TOOL_TYPE);
+  return {
+    model: `${resolvedModel}:online`,
+    tools: forwarded.length > 0 ? forwarded : undefined,
+    usedOnline: true,
+  };
+}
+
+/**
+ * OpenRouter's `:online` returns citations inline in the model's text output,
+ * not in a structured field. We catch both forms in practice:
+ *   1. Markdown links: `[label](https://...)`
+ *   2. Bare URLs: `https://example.com/path`
+ * Dedupe by URL; for bare URLs, the hostname is used as the title.
+ */
+const MARKDOWN_LINK_RE = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+const BARE_URL_RE = /https?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?]/g;
+
+function extractInlineCitations(text: string): WebSearchResult[] {
+  const seen = new Set<string>();
+  const out: WebSearchResult[] = [];
+
+  let m: RegExpExecArray | null;
+  while ((m = MARKDOWN_LINK_RE.exec(text)) !== null) {
+    const url = m[2];
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ title: m[1].trim(), url, pageAge: null });
+  }
+  while ((m = BARE_URL_RE.exec(text)) !== null) {
+    const url = m[0];
+    if (seen.has(url)) continue;
+    seen.add(url);
+    let title = url;
+    try {
+      title = new URL(url).hostname.replace(/^www\./, '');
+    } catch { /* keep url as title */ }
+    out.push({ title, url, pageAge: null });
+  }
+  return out;
+}
 
 export interface WebSearchResult {
   title: string;
@@ -19,6 +92,7 @@ export interface StreamCallbacks {
 
 export interface StreamOptions {
   apiKey: string;
+  provider?: Provider;
   model?: string;
   system?: string;
   messages: Anthropic.MessageParam[];
@@ -35,6 +109,7 @@ export async function streamMessage(
 ): Promise<string> {
   const {
     apiKey,
+    provider = 'anthropic',
     model = MODELS.sonnet,
     system,
     messages,
@@ -43,12 +118,15 @@ export async function streamMessage(
     maxTokens = 16000,
   } = options;
 
-  const client = getClient(apiKey);
+  const client = getClient(apiKey, provider);
+  const baseModel = resolveModel(model, provider);
+  const { model: finalModel, tools: effectiveTools, usedOnline } =
+    applyOnlineBridge(provider, baseModel, tools);
   let fullText = '';
 
   try {
     const params: Anthropic.MessageCreateParams = {
-      model,
+      model: finalModel,
       max_tokens: maxTokens,
       messages,
       stream: true,
@@ -66,8 +144,8 @@ export async function streamMessage(
       params.max_tokens = Math.max(maxTokens, getThinkingTokens(thinkingBudget) + maxTokens);
     }
 
-    if (tools && tools.length > 0) {
-      params.tools = tools;
+    if (effectiveTools && effectiveTools.length > 0) {
+      params.tools = effectiveTools;
     }
 
     const stream = await client.messages.stream(params);
@@ -147,6 +225,13 @@ export async function streamMessage(
       }
     }
 
+    // OpenRouter's `:online` doesn't emit per-search events during streaming;
+    // citations arrive as inline markdown links in the final text. Extract
+    // them once at the end so the UI's source list still populates.
+    if (usedOnline) {
+      callbacks.onWebSearchResults?.(extractInlineCitations(fullText));
+    }
+
     callbacks.onDone?.(fullText);
     return fullText;
   } catch (error) {
@@ -183,6 +268,7 @@ export async function sendMessage(
 ): Promise<Anthropic.Message> {
   const {
     apiKey,
+    provider = 'anthropic',
     model = MODELS.sonnet,
     system,
     messages,
@@ -191,10 +277,13 @@ export async function sendMessage(
     maxTokens = 16000,
   } = options;
 
-  const client = getClient(apiKey);
+  const client = getClient(apiKey, provider);
+  const baseModel = resolveModel(model, provider);
+  const { model: finalModel, tools: effectiveTools } =
+    applyOnlineBridge(provider, baseModel, tools);
 
   const params: Anthropic.MessageCreateParams = {
-    model,
+    model: finalModel,
     max_tokens: maxTokens,
     messages,
   };
@@ -211,8 +300,8 @@ export async function sendMessage(
     params.max_tokens = Math.max(maxTokens, getThinkingTokens(thinkingBudget) + maxTokens);
   }
 
-  if (tools && tools.length > 0) {
-    params.tools = tools;
+  if (effectiveTools && effectiveTools.length > 0) {
+    params.tools = effectiveTools;
   }
 
   return client.messages.create(params);

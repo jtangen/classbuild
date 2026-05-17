@@ -17,6 +17,10 @@
  *     --level advanced-undergrad \
  *     --notes "University of Queensland, Brisbane, Australia. Use international and Australian examples." \
  *     --output ./output/prejudice
+ *
+ *   # Or via OpenRouter (no Anthropic-direct account needed):
+ *   OPENROUTER_API_KEY=sk-or-... npx tsx scripts/generate-course.ts \
+ *     --topic "..." --provider openrouter --output ./output/x
  */
 
 import { writeFile, mkdir, readFile, unlink } from 'node:fs/promises';
@@ -25,7 +29,7 @@ import { parseArgs, promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 
 import { streamWithRetry } from '../src/services/claude/streaming';
-import { MODELS } from '../src/services/claude/client';
+import { MODELS, type Provider } from '../src/services/claude/client';
 import { buildSyllabusPrompt, parseSyllabusResponse } from '../src/prompts/syllabus';
 import { buildChapterPrompt, buildChapterUserPrompt } from '../src/prompts/chapter';
 import { replaceGeminiImagePlaceholdersNode } from './lib/node-image-placer';
@@ -83,6 +87,7 @@ const { values } = parseArgs({
     'stop-after': { type: 'string' }, // 'syllabus' | 'research' — stop early for review
     'no-publish': { type: 'boolean', default: false },
     syllabus: { type: 'string' }, // path to existing syllabus.json to skip regeneration
+    provider: { type: 'string' }, // 'anthropic' | 'openrouter' — defaults to whichever key is set
   },
   strict: true,
 });
@@ -96,11 +101,40 @@ if (!values.topic) {
 }
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-if (!ANTHROPIC_API_KEY) {
-  console.error('Error: ANTHROPIC_API_KEY environment variable is required');
+const providerFlag = values.provider as Provider | undefined;
+if (providerFlag && providerFlag !== 'anthropic' && providerFlag !== 'openrouter') {
+  console.error(`Error: --provider must be 'anthropic' or 'openrouter' (got '${providerFlag}')`);
   process.exit(1);
+}
+
+let PROVIDER: Provider;
+if (providerFlag) {
+  PROVIDER = providerFlag;
+} else if (ANTHROPIC_API_KEY) {
+  PROVIDER = 'anthropic';
+} else if (OPENROUTER_API_KEY) {
+  PROVIDER = 'openrouter';
+} else {
+  console.error('Error: set ANTHROPIC_API_KEY or OPENROUTER_API_KEY in the environment');
+  console.error('       (use --provider openrouter to force OpenRouter when both are set)');
+  process.exit(1);
+}
+
+const LLM_API_KEY = PROVIDER === 'openrouter' ? OPENROUTER_API_KEY : ANTHROPIC_API_KEY;
+if (!LLM_API_KEY) {
+  console.error(
+    `Error: ${PROVIDER === 'openrouter' ? 'OPENROUTER_API_KEY' : 'ANTHROPIC_API_KEY'} environment variable is required for --provider ${PROVIDER}`
+  );
+  process.exit(1);
+}
+
+if (PROVIDER === 'openrouter') {
+  console.log('Provider: OpenRouter — research stage uses Exa via the `:online` model suffix.');
+} else {
+  console.log('Provider: Anthropic-direct');
 }
 
 const OUTPUT_DIR = values.output!;
@@ -329,7 +363,8 @@ async function generatePracticeQuiz(
   log(`  Ch ${prefix} Practice quiz...`);
   const quizText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       model: MODELS.opus,
       system: buildPracticeQuizPrompt(),
       messages: [{
@@ -345,7 +380,7 @@ async function generatePracticeQuiz(
   );
   console.log('');
 
-  const balancedQuiz = await balancePracticeQuiz(quizText, ANTHROPIC_API_KEY!);
+  const balancedQuiz = await balancePracticeQuiz(quizText, LLM_API_KEY!, PROVIDER);
   await save(join(OUTPUT_DIR, 'quizzes', `${prefix}_practice.md`), balancedQuiz);
 
   try {
@@ -366,7 +401,8 @@ async function generateInClassQuiz(
   log(`  Ch ${prefix} In-class quiz...`);
   const icqText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       model: MODELS.opus,
       system: buildInClassQuizPrompt(),
       messages: [{
@@ -383,7 +419,7 @@ async function generateInClassQuiz(
   console.log('');
 
   const parsed = parseJson(icqText) as InClassQuizQuestion[];
-  const balanced = await balanceInClassQuiz(parsed, ANTHROPIC_API_KEY!);
+  const balanced = await balanceInClassQuiz(parsed, LLM_API_KEY!, PROVIDER);
   await save(join(OUTPUT_DIR, 'quizzes', `${prefix}_inclass.md`), formatInClassQuizMd(balanced, ch.title));
   await save(join(OUTPUT_DIR, 'quizzes', `${prefix}_inclass.json`), JSON.stringify(balanced, null, 2));
 
@@ -411,7 +447,8 @@ async function generateWeeklyChallenge(
 
   const challengeText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       model: MODELS.opus,
       system: buildWeeklyChallengePrompt(),
       messages: [{
@@ -453,7 +490,8 @@ async function generateDiscussion(
   log(`  Ch ${prefix} Discussion...`);
   const discText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       system: buildDiscussionPrompt(),
       messages: [{
         role: 'user',
@@ -489,7 +527,8 @@ async function generateActivities(
   log(`  Ch ${prefix} Activities...`);
   const actText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       system: buildActivitiesPrompt(),
       messages: [{
         role: 'user',
@@ -526,7 +565,8 @@ async function generateAudio(
   log(`  Ch ${prefix} Audio transcript...`);
   const transcriptText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       system: buildAudioTranscriptPrompt(),
       messages: [{
         role: 'user',
@@ -581,7 +621,8 @@ async function generateSlides(
   log(`  Ch ${prefix} Slides...`);
   const slidesText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       system: buildSlidesPrompt(),
       messages: [{
         role: 'user',
@@ -619,7 +660,8 @@ async function generateInfographic(
   // Phase 1: generate the prompt
   const promptText = await streamWithRetry(
     {
-      apiKey: ANTHROPIC_API_KEY!,
+      apiKey: LLM_API_KEY!,
+      provider: PROVIDER,
       model: MODELS.opus,
       system: buildInfographicMetaPrompt(setup.themeId),
       messages: [{
@@ -683,7 +725,8 @@ async function researchChapter(ch: ChapterSyllabus, syllabus: Syllabus): Promise
   try {
     const researchText = await streamWithRetry(
       {
-        apiKey: ANTHROPIC_API_KEY!,
+        apiKey: LLM_API_KEY!,
+        provider: PROVIDER,
         system: RESEARCH_SYSTEM_PROMPT,
         messages: [{
           role: 'user',
@@ -786,7 +829,8 @@ async function main() {
 
     const syllabusText = await streamWithRetry(
       {
-        apiKey: ANTHROPIC_API_KEY,
+        apiKey: LLM_API_KEY!,
+        provider: PROVIDER,
         model: MODELS.opus,
         system: syllabusSystem,
         messages: [{ role: 'user', content: syllabusUser }],
@@ -882,7 +926,8 @@ async function main() {
     try {
       const chapterText = await streamWithRetry(
         {
-          apiKey: ANTHROPIC_API_KEY,
+          apiKey: LLM_API_KEY!,
+          provider: PROVIDER,
           model: MODELS.opus,
           system: buildChapterPrompt(setup.themeId, hasGemini),
           messages: [{
