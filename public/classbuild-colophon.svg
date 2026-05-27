@@ -1,0 +1,27 @@
+<svg width="106" height="128" viewBox="0 0 106 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- frame -->
+  <rect x="0.75" y="0.75" width="98.5" height="118.5"
+        fill="none" stroke="#1a1814" stroke-width="1.5"/>
+
+  <!-- C  (baseline pushed down 2.4 to balance imprint dot below) -->
+  <text x="50" y="54.4" text-anchor="middle"
+        font-family="Newsreader, Georgia, serif"
+        font-size="62" font-weight="500" fill="#1a1814">C</text>
+
+  <!-- fleuron, gilt -->
+  <g transform="translate(50, 60)"
+     fill="none" stroke="#a8854a" stroke-width="1">
+    <line x1="-21" y1="0" x2="-5" y2="0"/>
+    <line x1="5" y1="0" x2="21" y2="0"/>
+    <circle r="2"/>
+    <path d="M -4 0 Q -2.5 -2 0 -1.5 Q 2.5 -2 4 0 Q 2.5 2 0 1.5 Q -2.5 2 -4 0 Z"/>
+  </g>
+
+  <!-- B  (matching downward shift) -->
+  <text x="50" y="107.4" text-anchor="middle"
+        font-family="Newsreader, Georgia, serif"
+        font-size="62" font-weight="500" fill="#1a1814">B</text>
+
+  <!-- oxblood imprint dot, outside frame -->
+  <circle cx="100" cy="122" r="5" fill="#6e1f24"/>
+</svg>

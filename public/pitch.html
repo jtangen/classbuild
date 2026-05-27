@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>ClassBuild — pitch</title>
+<meta name="viewport" content="width=1920" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500;1,6..72,600&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --cb-page:    #f1ebdd;
+    --cb-canvas:  #f8f3e6;
+    --cb-sunken:  #e8dfc7;
+    --cb-rule:    rgba(26,24,20,0.55);
+    --cb-border:  rgba(26,24,20,0.14);
+    --cb-text:    #1a1814;
+    --cb-muted:   #5d574a;
+    --cb-subtle:  #7c7464;
+    --cb-oxblood: #6e1f24;
+    --cb-gilt:    #a8854a;
+    --serif: "Newsreader", Georgia, serif;
+    --mono:  "JetBrains Mono", ui-monospace, monospace;
+  }
+  *, *::before, *::after { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--cb-page); }
+  body {
+    font-family: var(--serif);
+    color: var(--cb-text);
+    font-feature-settings: "kern", "liga", "calt";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The page itself — exact 1920×1080 frame for screenshot. */
+  .pitch {
+    width: 1920px;
+    height: 1080px;
+    background: var(--cb-page);
+    color: var(--cb-text);
+    position: relative;
+    overflow: hidden;
+    margin: 0 auto;
+  }
+
+  /* ── 1. Top strip ─────────────────────────────────────────────────── */
+  .top {
+    height: 72px;
+    padding: 0 64px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid var(--cb-rule);
+  }
+  .wordmark { display: flex; align-items: center; gap: 14px; }
+  .cb-mark { height: 48px; width: auto; display: block; }
+  .wordmark .name {
+    font-family: var(--serif);
+    font-size: 28px;
+    font-style: italic;
+    font-weight: 400;
+    letter-spacing: -0.005em;
+  }
+  .meta {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--cb-muted);
+  }
+  .meta .dot { color: var(--cb-subtle); margin: 0 8px; }
+  .meta .em { color: var(--cb-oxblood); }
+
+  /* ── 2. StageIndicator strip ──────────────────────────────────────── */
+  .stages {
+    height: 76px;
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    grid-template-rows: 76px;
+    border-bottom: 1px solid var(--cb-rule);
+    overflow: hidden;
+  }
+  .stage {
+    padding: 14px 24px 12px;
+    border-right: 1px solid var(--cb-border);
+    display: flex; flex-direction: column; gap: 2px;
+    font-family: var(--serif);
+  }
+  .stage:last-child { border-right: none; }
+  .stage.current { background: var(--cb-sunken); }
+  .stage .roman {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cb-subtle);
+    margin-bottom: 2px;
+  }
+  .stage .label {
+    font-size: 22px;
+    font-weight: 500;
+    letter-spacing: -0.005em;
+    color: var(--cb-text);
+  }
+  .stage .state {
+    font-style: italic;
+    font-size: 13px;
+    color: var(--cb-muted);
+  }
+  .stage.current .state { color: var(--cb-oxblood); }
+  .stage.done .state { color: var(--cb-muted); }
+  .stage.done .label { color: var(--cb-muted); }
+  .stage.done .roman { color: var(--cb-muted); }
+
+  /* ── 3. Hero block ────────────────────────────────────────────────── */
+  .hero {
+    padding: 56px 64px 36px;
+    display: grid;
+    grid-template-columns: 1.35fr 1fr;
+    gap: 80px;
+    align-items: end;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--cb-oxblood);
+    margin-bottom: 18px;
+  }
+  .headline {
+    font-family: var(--serif);
+    font-size: 116px;
+    line-height: 0.95;
+    font-weight: 400;
+    letter-spacing: -0.025em;
+    margin: 0;
+  }
+  .headline .it {
+    font-style: italic;
+    color: var(--cb-oxblood);
+  }
+  .lede {
+    font-family: var(--serif);
+    font-size: 21px;
+    line-height: 1.45;
+    color: var(--cb-muted);
+    font-style: italic;
+    margin: 24px 0 0;
+    max-width: 640px;
+  }
+  .lede .ink { color: var(--cb-text); font-style: normal; }
+
+  /* "A course includes" Roman-numeral aside */
+  .aside {
+    background: var(--cb-canvas);
+    border: 1px solid var(--cb-border);
+    padding: 22px 28px 24px;
+  }
+  .aside-head {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cb-subtle);
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--cb-border);
+    margin-bottom: 10px;
+  }
+  .aside ol {
+    list-style: none;
+    margin: 0; padding: 0;
+    font-family: var(--serif);
+    font-size: 18px;
+    counter-reset: roman;
+  }
+  .aside li {
+    display: grid;
+    grid-template-columns: 44px 1fr auto;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 0;
+    border-bottom: 1px dashed var(--cb-border);
+  }
+  .aside li:last-child { border-bottom: none; }
+  .aside li .num {
+    font-style: italic;
+    color: var(--cb-oxblood);
+    font-size: 17px;
+  }
+  .aside li .lbl { color: var(--cb-text); }
+  .aside li .note {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--cb-subtle);
+  }
+
+  /* ── 4. Course thumbnails strip ───────────────────────────────────── */
+  .courses {
+    padding: 28px 64px 0;
+  }
+  .courses-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 18px;
+    border-bottom: 1px solid var(--cb-rule);
+    padding-bottom: 10px;
+  }
+  .courses-head .l {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.24em;
+    text-transform: uppercase;
+    color: var(--cb-oxblood);
+  }
+  .courses-head .r {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 16px;
+    color: var(--cb-muted);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 18px;
+  }
+  .card {
+    background: var(--cb-canvas);
+    border: 1px solid var(--cb-border);
+    padding: 10px 10px 14px;
+    display: flex; flex-direction: column;
+  }
+  .card .thumb {
+    aspect-ratio: 4 / 3;
+    background: var(--cb-sunken);
+    overflow: hidden;
+    border: 1px solid var(--cb-border);
+    margin-bottom: 12px;
+  }
+  .card .thumb img {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    filter: saturate(0.92);
+  }
+  .card .theme {
+    font-family: var(--mono);
+    font-size: 9.5px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cb-oxblood);
+    margin-bottom: 4px;
+  }
+  .card .ttl {
+    font-family: var(--serif);
+    font-size: 16px;
+    line-height: 1.15;
+    font-weight: 500;
+    margin-bottom: 4px;
+  }
+  .card .ttl em { font-style: italic; }
+  .card .sub {
+    font-family: var(--serif);
+    font-style: italic;
+    font-size: 12px;
+    color: var(--cb-muted);
+    margin-top: auto;
+  }
+
+  /* ── 5. Footer strip ──────────────────────────────────────────────── */
+  .foot {
+    position: absolute;
+    bottom: 0; left: 0; right: 0;
+    padding: 14px 64px 18px;
+    border-top: 1px solid var(--cb-rule);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: var(--cb-page);
+  }
+  .foot .byok {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--cb-text);
+  }
+  .foot .byok .dot { color: var(--cb-subtle); margin: 0 8px; }
+  .foot .byok .em { color: var(--cb-oxblood); }
+  .foot .pg {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--cb-subtle);
+  }
+</style>
+</head>
+<body>
+
+<div class="pitch" data-codex-mode="parchment">
+
+  <!-- 1 ──────────────────────────────────────────────────────────────── -->
+  <div class="top">
+    <div class="wordmark">
+      <img class="cb-mark" src="/classbuild-colophon.svg" alt="ClassBuild colophon" />
+      <div class="name">ClassBuild.</div>
+    </div>
+    <div class="meta">
+      cb <span class="dot">·</span> v0.1 <span class="dot">·</span> Anthropic hackathon <span class="dot">·</span> Feb 2026
+    </div>
+  </div>
+
+  <!-- 2 ──────────────────────────────────────────────────────────────── -->
+  <div class="stages">
+    <div class="stage done">
+      <div class="roman">§ i</div><div class="label">Setup</div><div class="state">↵ revisit</div>
+    </div>
+    <div class="stage done">
+      <div class="roman">§ ii</div><div class="label">Syllabus</div><div class="state">↵ revisit</div>
+    </div>
+    <div class="stage current">
+      <div class="roman">§ iii</div><div class="label">Research</div><div class="state">— here —</div>
+    </div>
+    <div class="stage">
+      <div class="roman">§ iv</div><div class="label">Build</div><div class="state">awaiting</div>
+    </div>
+    <div class="stage">
+      <div class="roman">§ v</div><div class="label">Export</div><div class="state">awaiting</div>
+    </div>
+  </div>
+
+  <!-- 3 ──────────────────────────────────────────────────────────────── -->
+  <div class="hero">
+    <div class="hero-l">
+      <div class="eyebrow">ClassBuild &nbsp;—&nbsp; open source</div>
+      <h1 class="headline">
+        Draft a course.<br/>
+        Edit it. <span class="it">Teach it.</span>
+      </h1>
+      <p class="lede">
+        <span class="ink">A topic, an audience, a chapter count.</span>
+        ClassBuild drafts the syllabus, researches each chapter,
+        writes the slides &amp; quizzes, narrates the lectures, and
+        hands you a course you can edit in the browser.
+      </p>
+    </div>
+
+    <aside class="aside">
+      <div class="aside-head">A course includes</div>
+      <ol>
+        <li><span class="num">i.</span><span class="lbl">Reading chapter</span><span class="note">html · md</span></li>
+        <li><span class="num">ii.</span><span class="lbl">Slides</span><span class="note">pptx</span></li>
+        <li><span class="num">iii.</span><span class="lbl">In-class quiz</span><span class="note">docx</span></li>
+        <li><span class="num">iv.</span><span class="lbl">Practice quiz</span><span class="note">html</span></li>
+        <li><span class="num">v.</span><span class="lbl">Teaching pack</span><span class="note">activities</span></li>
+        <li><span class="num">vi.</span><span class="lbl">Narrated audio</span><span class="note">mp3</span></li>
+        <li><span class="num">vii.</span><span class="lbl">Weekly challenge</span><span class="note">html</span></li>
+      </ol>
+    </aside>
+  </div>
+
+  <!-- 4 ──────────────────────────────────────────────────────────────── -->
+  <div class="courses">
+    <div class="courses-head">
+      <div class="l">Six worked examples &nbsp;—&nbsp; one theme each</div>
+      <div class="r">Open one to read the chapter, hear the audio, take the quiz.</div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="thumb"><img src="/courses/science-and-art-of-tea.jpg" alt=""/></div>
+        <div class="theme">§ Press</div>
+        <div class="ttl">The Science &amp; Art of <em>Tea</em></div>
+        <div class="sub">6 chapters</div>
+      </div>
+      <div class="card">
+        <div class="thumb"><img src="/courses/raising-a-puppy.jpg" alt=""/></div>
+        <div class="theme">§ Almanac</div>
+        <div class="ttl">Raising a <em>Puppy</em></div>
+        <div class="sub">8 chapters</div>
+      </div>
+      <div class="card">
+        <div class="thumb"><img src="/courses/understanding-your-sleep.jpg" alt=""/></div>
+        <div class="theme">§ Notebook</div>
+        <div class="ttl">Understanding Your <em>Sleep</em></div>
+        <div class="sub">7 chapters</div>
+      </div>
+      <div class="card">
+        <div class="thumb"><img src="/courses/leadership-through-crisis.jpg" alt=""/></div>
+        <div class="theme">§ Studio</div>
+        <div class="ttl">Leadership through <em>Crisis</em></div>
+        <div class="sub">8 chapters</div>
+      </div>
+      <div class="card">
+        <div class="thumb"><img src="/courses/training-for-your-first-marathon.jpg" alt=""/></div>
+        <div class="theme">§ Storybook</div>
+        <div class="ttl">Training for Your First <em>Marathon</em></div>
+        <div class="sub">8 chapters</div>
+      </div>
+      <div class="card">
+        <div class="thumb"><img src="/courses/game-theory.jpg" alt=""/></div>
+        <div class="theme">§ Terminal</div>
+        <div class="ttl">The Strategy of <em>Everything</em></div>
+        <div class="sub">12 chapters</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5 ──────────────────────────────────────────────────────────────── -->
+  <div class="foot">
+    <div class="byok">
+      BYOK <span class="dot">·</span>
+      Anthropic <span class="dot">·</span>
+      OpenAI <span class="dot">·</span>
+      ElevenLabs <span class="dot">·</span>
+      <span class="em">Runs entirely in your browser</span> <span class="dot">·</span>
+      MIT-licensed
+    </div>
+    <div class="pg">classbuild.app &nbsp;·&nbsp; § 01 of 01</div>
+  </div>
+
+</div>
+
+</body>
+</html>
