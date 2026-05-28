@@ -1,6 +1,4 @@
-import { motion } from 'framer-motion';
 import { useCourseStore } from '../../store/courseStore';
-import { useApiStore } from '../../store/apiStore';
 
 interface ChapterSidebarProps {
   selectedChapterNum: number;
@@ -9,7 +7,28 @@ interface ChapterSidebarProps {
   batchCurrentChapter: number | null;
 }
 
-function countReady(ch: { htmlContent: string; practiceQuizData?: string; inClassQuizData?: unknown[]; weeklyChallengeData?: unknown; discussionData?: unknown[]; activityData?: unknown[]; audioTranscript?: string; slidesJson?: unknown[]; infographicDataUri?: string }, hasGemini: boolean): number {
+const ROMAN_UPPER = [
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+  'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+];
+
+interface MaterialCount {
+  ready: number;
+  total: number;
+}
+
+function countReady(
+  ch: {
+    htmlContent: string;
+    practiceQuizData?: string;
+    inClassQuizData?: unknown[];
+    weeklyChallengeData?: unknown;
+    discussionData?: unknown[];
+    activityData?: unknown[];
+    audioTranscript?: string;
+    slidesJson?: unknown[];
+  },
+): MaterialCount {
   let count = 0;
   if (ch.htmlContent) count++;
   if (ch.practiceQuizData) count++;
@@ -19,95 +38,231 @@ function countReady(ch: { htmlContent: string; practiceQuizData?: string; inClas
   if (ch.activityData && ch.activityData.length > 0) count++;
   if (ch.audioTranscript) count++;
   if (ch.slidesJson && ch.slidesJson.length > 0) count++;
-  if (hasGemini && ch.infographicDataUri) count++;
-  return count;
+  return { ready: count, total: 8 };
 }
 
-export function ChapterSidebar({ selectedChapterNum, onSelectChapter, disabled, batchCurrentChapter }: ChapterSidebarProps) {
+export function ChapterSidebar({
+  selectedChapterNum,
+  onSelectChapter,
+  disabled,
+  batchCurrentChapter,
+}: ChapterSidebarProps) {
   const { syllabus, chapters, researchDossiers } = useCourseStore();
-  const { geminiApiKey } = useApiStore();
-  const hasGemini = !!geminiApiKey;
-  const totalOutputs = hasGemini ? 9 : 8;
 
   if (!syllabus) return null;
 
   return (
-    <div className="w-[260px] shrink-0 border-r border-violet-500/10 overflow-y-auto pr-2">
-      <div className="px-3 py-2 mb-1">
-        <p className="text-xs text-text-muted font-medium uppercase tracking-wider">Classes</p>
+    <aside
+      data-build-sidebar
+      style={{
+        width: 280,
+        flexShrink: 0,
+        overflowY: 'auto',
+        borderRight: '0.5px solid var(--cb-border-default)',
+        background: 'var(--cb-surface-sunken)',
+        fontFamily: 'var(--font-cb-serif)',
+      }}
+    >
+      <div
+        style={{
+          padding: '20px 18px 12px',
+          borderBottom: '0.5px solid var(--cb-border-default)',
+        }}
+      >
+        <div
+          className="cb-sc"
+          style={{
+            fontSize: 13,
+            color: 'var(--cb-text-muted)',
+            letterSpacing: '0.14em',
+          }}
+        >
+          Chapters
+        </div>
       </div>
-      <div className="space-y-1">
-        {syllabus.chapters.map((ch) => {
-          const generated = chapters.find(c => c.number === ch.number);
-          const dossier = researchDossiers.find(d => d.chapterNumber === ch.number);
-          const readyCount = generated ? countReady(generated, hasGemini) : 0;
+
+      <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {syllabus.chapters.map((ch, idx) => {
+          const generated = chapters.find((c) => c.number === ch.number);
+          const dossier = researchDossiers.find(
+            (d) => d.chapterNumber === ch.number,
+          );
+          const counts = generated
+            ? countReady(generated)
+            : { ready: 0, total: 8 };
           const isSelected = ch.number === selectedChapterNum;
           const isBatchCurrent = batchCurrentChapter === ch.number;
-          const progress = readyCount / totalOutputs;
+          const fullyReady = counts.ready === counts.total && counts.ready > 0;
+          const roman = ROMAN_UPPER[idx] ?? String(ch.number);
 
           return (
             <button
               key={ch.number}
+              type="button"
               onClick={() => !disabled && onSelectChapter(ch.number)}
               disabled={disabled}
-              className={`w-full text-left px-3 py-2.5 rounded-lg transition-all border-0 ${
-                disabled ? 'cursor-default' : 'cursor-pointer'
-              } ${
-                isSelected
-                  ? 'bg-violet-500/15 border-l-2 border-l-violet-500'
-                  : 'bg-transparent hover:bg-bg-elevated'
-              }`}
+              className="cb-focus"
+              style={{
+                position: 'relative',
+                textAlign: 'left',
+                padding: '14px 16px 14px 18px',
+                background: isSelected
+                  ? 'var(--cb-accent-emphasis-quiet)'
+                  : 'transparent',
+                border: 'none',
+                borderTop:
+                  idx === 0
+                    ? 'none'
+                    : '0.5px solid var(--cb-border-subtle)',
+                cursor: disabled ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+                color: 'var(--cb-text-default)',
+                transition:
+                  'background-color 200ms cubic-bezier(0.32,0.04,0.32,1)',
+              }}
             >
-              <div className="flex items-center gap-2 mb-1">
-                {isBatchCurrent && (
-                  <motion.span
-                    className="w-2 h-2 rounded-full bg-violet-500 shrink-0"
-                    animate={{ opacity: [1, 0.3, 1] }}
-                    transition={{ duration: 1.2, repeat: Infinity }}
-                  />
-                )}
-                <span className={`text-sm font-medium truncate ${isSelected ? 'text-violet-400' : 'text-text-primary'}`}>
-                  {ch.number}. {ch.title}
+              {/* Selected left rule */}
+              {isSelected && (
+                <span
+                  aria-hidden
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    bottom: 0,
+                    width: 2,
+                    background: 'var(--cb-accent-emphasis)',
+                  }}
+                />
+              )}
+
+              {/* Roman + title row */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '32px 1fr',
+                  alignItems: 'baseline',
+                  gap: 10,
+                }}
+              >
+                <span
+                  className="cb-italic"
+                  style={{
+                    fontSize: 17,
+                    color: fullyReady
+                      ? 'var(--cb-accent-emphasis)'
+                      : counts.ready > 0
+                      ? 'var(--cb-accent-emphasis)'
+                      : 'var(--cb-text-subtle)',
+                    lineHeight: 1,
+                  }}
+                >
+                  {roman}
+                </span>
+                <span
+                  style={{
+                    fontSize: 14.5,
+                    lineHeight: 1.3,
+                    color: 'var(--cb-text-default)',
+                    fontWeight: isSelected ? 500 : 400,
+                    overflow: 'hidden',
+                    display: '-webkit-box',
+                    WebkitLineClamp: 2,
+                    WebkitBoxOrient: 'vertical',
+                  }}
+                >
+                  {ch.title}
                 </span>
               </div>
 
-              {/* Status line */}
-              <div className="flex items-center gap-2 pl-0.5">
-                {readyCount > 0 ? (
+              {/* Single status line — one status per card. */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'baseline',
+                  gap: 8,
+                  marginTop: 6,
+                  paddingLeft: 42,
+                }}
+              >
+                {isBatchCurrent ? (
                   <>
-                    <div className="flex-1 h-1 bg-bg-elevated rounded-full overflow-hidden">
-                      <div
-                        className={`h-full rounded-full transition-all duration-500 ${
-                          readyCount >= totalOutputs ? 'bg-success' : 'bg-violet-500'
-                        }`}
-                        style={{ width: `${progress * 100}%` }}
+                    <span
+                      aria-hidden
+                      style={{
+                        display: 'inline-block',
+                        width: 28,
+                        height: 1,
+                        background: 'var(--cb-border-default)',
+                        position: 'relative',
+                        overflow: 'hidden',
+                        verticalAlign: 'middle',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <span
+                        style={{
+                          position: 'absolute',
+                          inset: 0,
+                          background: 'var(--cb-accent-emphasis)',
+                          animation:
+                            'cb-pen 1.4s cubic-bezier(0.32,0.04,0.32,1) infinite',
+                        }}
                       />
-                    </div>
-                    <span className="text-[11px] text-text-muted tabular-nums shrink-0">
-                      {readyCount}/{totalOutputs}
+                    </span>
+                    <span
+                      className="cb-italic"
+                      style={{
+                        fontSize: 12.5,
+                        color: 'var(--cb-accent-emphasis)',
+                      }}
+                    >
+                      drafting
                     </span>
                   </>
+                ) : fullyReady ? (
+                  <span
+                    className="cb-italic"
+                    style={{ fontSize: 12.5, color: 'var(--cb-text-muted)' }}
+                  >
+                    — complete
+                  </span>
+                ) : counts.ready > 0 ? (
+                  <span
+                    className="cb-mono"
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--cb-accent-emphasis)',
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    {counts.ready} of {counts.total} built
+                  </span>
                 ) : (
-                  <span className="text-[11px] text-text-muted">Not started</span>
+                  <span
+                    className="cb-italic"
+                    style={{ fontSize: 12.5, color: 'var(--cb-text-muted)' }}
+                  >
+                    awaiting
+                  </span>
+                )}
+                {dossier && dossier.sources.length > 0 && counts.ready === 0 && (
+                  <span
+                    className="cb-italic"
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--cb-text-subtle)',
+                    }}
+                  >
+                    · {dossier.sources.length}{' '}
+                    {dossier.sources.length === 1 ? 'source' : 'sources'}
+                  </span>
                 )}
               </div>
-
-              {/* Research badge */}
-              {dossier && dossier.sources.length > 0 ? (
-                <div className="mt-1 pl-0.5">
-                  <span className="text-[10px] text-violet-400/70">
-                    {dossier.sources.length} source{dossier.sources.length !== 1 ? 's' : ''}
-                  </span>
-                </div>
-              ) : (
-                <div className="mt-1 pl-0.5">
-                  <span className="text-[10px] text-amber-400/60">No research</span>
-                </div>
-              )}
             </button>
           );
         })}
       </div>
-    </div>
+    </aside>
   );
 }

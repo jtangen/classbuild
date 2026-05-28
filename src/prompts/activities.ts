@@ -1,11 +1,26 @@
 function buildEnvironmentBlock(environment?: string, notes?: string): string {
-  if (!environment) return '';
   const labels: Record<string, string> = {
     'lecture-theatre': 'Lecture theatre (tiered/fixed seating — students cannot easily move or form groups)',
-    'collaborative': 'Collaborative room (group tables — students already seated in teams)',
-    'flat-classroom': 'Flat classroom (moveable desks/rows — can be rearranged for group work)',
+    'active-classroom': 'Active classroom (students can form groups easily — either moveable desks/rows that rearrange, or pre-arranged group tables; either way, group work, station rotation, and small-team activities are all feasible)',
     'online': 'Online/hybrid (breakout rooms, shared docs, chat — no physical space)',
+    // Legacy values from the four-tile picker map to the consolidated label.
+    'collaborative': 'Active classroom (students can form groups easily — pre-arranged group tables in the original setup)',
+    'flat-classroom': 'Active classroom (students can form groups easily — moveable desks that can be rearranged)',
   };
+  // When the instructor didn't pick an environment, default to the most
+  // conservative format — a tiered lecture theatre where students stay seated.
+  // This guarantees the model produces activities that can run anywhere, and
+  // never invents furniture rearrangement or movement that isn't possible.
+  if (!environment) {
+    return (
+      `\n**Teaching environment**: Not specified — default to classic LECTURE FORMAT.` +
+      `\n**Default mode**: Assume tiered/fixed seating, students cannot easily move or form groups. ` +
+      `Prefer turn-and-talks with the person next to them, hand-raise polls, think-pair-share without movement, ` +
+      `live online polling (Slido / Mentimeter / Padlet), and chalk-talk demonstrations. ` +
+      `Avoid anything that requires furniture rearrangement, students moving around the room, ` +
+      `or forming circles/stations.`
+    );
+  }
   let block = `\n**Teaching environment**: ${labels[environment] || environment}`;
   if (notes) block += `\n**Room details**: ${notes}`;
   return block;

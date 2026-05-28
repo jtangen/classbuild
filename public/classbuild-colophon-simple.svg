@@ -1,0 +1,10 @@
+<svg width="100" height="120" viewBox="0 0 100 120" xmlns="http://www.w3.org/2000/svg">
+  <rect x="0.5" y="0.5" width="99" height="119"
+        fill="none" stroke="#1a1814" stroke-width="1"/>
+  <text x="50" y="52" text-anchor="middle"
+        font-family="Newsreader, Georgia, serif"
+        font-size="62" font-weight="500" fill="#1a1814">C</text>
+  <text x="50" y="108" text-anchor="middle"
+        font-family="Newsreader, Georgia, serif"
+        font-size="62" font-weight="500" fill="#1a1814">B</text>
+</svg>

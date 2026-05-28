@@ -1,0 +1,520 @@
+/* ClassBuild chapter theme — almanac
+   Scope: body.theme-almanac or any ancestor with class="theme-almanac"
+   Markup contract: see patches/themes-six.md */
+.theme-almanac {
+  font-family: 'Lora', Georgia, serif;
+  background:
+    radial-gradient(ellipse at 20% 10%, rgba(184, 102, 42, 0.08), transparent 60%),
+    radial-gradient(ellipse at 90% 80%, rgba(58, 42, 28, 0.06), transparent 50%),
+    #f0e6cf;
+  color: #3a2a1c;
+  padding: 60px 72px 44px;
+  font-size: 15px;
+  line-height: 1.65;
+  position: relative;
+}
+.theme-almanac p { margin: 0 0 1em; }
+.theme-almanac em { font-style: italic; }
+
+/* HEAD */
+.theme-almanac .ch-head {
+  text-align: center;
+  margin-bottom: 32px;
+  padding-bottom: 28px;
+  position: relative;
+}
+.theme-almanac .ch-head::after {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 60%;
+  border-bottom: 1px solid #b8662a;
+}
+.theme-almanac .ch-head::before {
+  content: '';
+  position: absolute;
+  bottom: 0; left: 50%; transform: translateX(-50%);
+  width: 14px;
+  height: 14px;
+  background: #f0e6cf;
+  border: 1px solid #b8662a;
+  transform: translateX(-50%) rotate(45deg);
+  z-index: 1;
+}
+.theme-almanac .ch-eyebrow {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #b8662a;
+  margin-bottom: 14px;
+  font-weight: 500;
+}
+.theme-almanac .ch-eyebrow::before { content: '✻  '; }
+.theme-almanac .ch-eyebrow::after { content: '  ✻'; }
+.theme-almanac .ch-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 500;
+  font-style: italic;
+  font-size: 46px;
+  line-height: 1.05;
+  letter-spacing: 0.005em;
+  margin: 0 0 14px;
+  color: #3a2a1c;
+}
+.theme-almanac .ch-title em {
+  font-style: normal;
+  font-weight: 600;
+  color: #5e7148;
+}
+.theme-almanac .ch-subtitle {
+  font-family: 'Lora', serif;
+  font-style: italic;
+  font-size: 15.5px;
+  line-height: 1.5;
+  color: #6a543d;
+  margin: 0 auto 16px;
+  max-width: 32em;
+}
+.theme-almanac .ch-meta {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #b8662a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+}
+.theme-almanac .ch-meta-dot {
+  width: 4px; height: 4px;
+  background: #b8662a;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* HOOK */
+.theme-almanac .ch-hook {
+  margin-bottom: 30px;
+  font-size: 15.5px;
+  color: #3a2a1c;
+}
+.theme-almanac .ch-dropcap {
+  float: left;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 68px;
+  line-height: 0.85;
+  font-weight: 500;
+  padding: 8px 10px 0 0;
+  color: #b8662a;
+}
+
+/* HEADINGS */
+.theme-almanac h2 {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 30px;
+  font-weight: 500;
+  line-height: 1.2;
+  margin: 32px 0 12px;
+  color: #3a2a1c;
+  text-align: center;
+  position: relative;
+  padding-bottom: 12px;
+}
+.theme-almanac h2::after {
+  content: '❦';
+  display: block;
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 16px;
+  color: #b8662a;
+  font-style: normal;
+}
+.theme-almanac h3 {
+  font-family: 'Cormorant Garamond', serif;
+  font-weight: 600;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  margin: 22px 0 8px;
+  color: #5e7148;
+}
+
+/* KEY TERMS */
+.theme-almanac .ch-key {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 16px;
+  color: #5e7148;
+}
+
+/* CALLOUT */
+.theme-almanac .ch-callout {
+  border: 1px solid #b8662a;
+  padding: 18px 22px;
+  margin: 24px 0;
+  background: #f7eed5;
+  position: relative;
+}
+.theme-almanac .ch-callout::before,
+.theme-almanac .ch-callout::after {
+  content: '';
+  position: absolute;
+  width: 10px; height: 10px;
+  border: 1px solid #b8662a;
+  background: #f0e6cf;
+  transform: rotate(45deg);
+}
+.theme-almanac .ch-callout::before { top: -6px; left: 24px; }
+.theme-almanac .ch-callout::after { bottom: -6px; right: 24px; }
+.theme-almanac .ch-callout-label {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #b8662a;
+  margin-bottom: 6px;
+  font-weight: 600;
+}
+.theme-almanac .ch-callout p {
+  margin: 0;
+  font-style: italic;
+  font-size: 14.5px;
+  color: #3a2a1c;
+  line-height: 1.55;
+}
+
+/* DIVIDER */
+.theme-almanac .ch-divider {
+  border: none;
+  height: 18px;
+  margin: 28px 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 18'><path d='M0 9 H80 M120 9 H200' stroke='%23b8662a' fill='none' stroke-width='0.8'/><path d='M100 9 m-8 0 a8 8 0 1 0 16 0 a8 8 0 1 0 -16 0 M100 4 v10 M95 9 h10' stroke='%23b8662a' fill='none' stroke-width='0.8'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+/* WIDGET */
+.theme-almanac .ch-widget {
+  border: 1px double #b8662a;
+  padding: 20px 22px;
+  margin: 22px 0;
+  background: #f7eed5;
+}
+.theme-almanac .ch-widget-head {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid rgba(184, 102, 42, 0.4);
+  text-align: center;
+}
+.theme-almanac .ch-widget-label {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #b8662a;
+  display: block;
+  margin-bottom: 4px;
+}
+.theme-almanac .ch-widget-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 22px;
+  font-weight: 500;
+  color: #3a2a1c;
+}
+.theme-almanac .ch-widget-sub {
+  margin: 0 0 14px;
+  color: #6a543d;
+  font-size: 13.5px;
+  font-style: italic;
+  text-align: center;
+}
+.theme-almanac .ch-widget-row {
+  display: flex; gap: 14px; margin-bottom: 14px;
+}
+.theme-almanac .ch-widget-field {
+  flex: 1; display: flex; flex-direction: column; gap: 4px;
+}
+.theme-almanac .ch-widget-fieldlabel {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6a543d;
+}
+.theme-almanac .ch-widget-select {
+  background: #f0e6cf;
+  border: 1px solid #b8662a;
+  padding: 7px 10px;
+  font-family: 'Lora', serif;
+  font-size: 13.5px;
+  color: #3a2a1c;
+  font-style: italic;
+}
+.theme-almanac .ch-widget-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 22px;
+  margin-bottom: 14px;
+}
+.theme-almanac .ch-meter {
+  display: grid;
+  grid-template-columns: 84px 1fr 22px;
+  align-items: center;
+  gap: 10px;
+}
+.theme-almanac .ch-meter-label {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #3a2a1c;
+}
+.theme-almanac .ch-meter-bar {
+  height: 5px;
+  background: #e3d4a8;
+  border: 1px solid #b8662a;
+  position: relative;
+  display: block;
+}
+.theme-almanac .ch-meter-bar > span {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: #5e7148;
+  display: block;
+}
+.theme-almanac .ch-meter-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-weight: 600;
+  text-align: right;
+  font-size: 14px;
+  color: #b8662a;
+}
+.theme-almanac .ch-widget-btn {
+  background: transparent;
+  color: #b8662a;
+  border: 1px solid #b8662a;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  letter-spacing: 0.1em;
+  padding: 8px 18px;
+  cursor: pointer;
+}
+.theme-almanac .ch-widget-btn:hover {
+  background: #b8662a;
+  color: #f0e6cf;
+}
+
+/* FIGURE */
+.theme-almanac .ch-figure {
+  margin: 26px 0;
+  text-align: center;
+}
+.theme-almanac .ch-figbox {
+  background: #e3d4a8;
+  color: #5e7148;
+  height: 180px;
+  position: relative;
+  border: 1px solid #b8662a;
+  overflow: hidden;
+}
+.theme-almanac .ch-figbox svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
+.theme-almanac .ch-figbox-tag {
+  position: absolute; bottom: 10px; left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  color: #6a543d;
+  background: #f0e6cf;
+  padding: 2px 10px;
+  border: 1px solid #b8662a;
+}
+.theme-almanac .ch-figure figcaption {
+  font-family: 'Lora', serif;
+  font-style: italic;
+  font-size: 13px;
+  line-height: 1.4;
+  margin-top: 10px;
+  color: #6a543d;
+  text-align: center;
+}
+.theme-almanac .ch-fig-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-weight: 600;
+  font-size: 13px;
+  color: #b8662a;
+  margin-right: 6px;
+}
+
+/* QUOTE */
+.theme-almanac .ch-quote {
+  margin: 30px auto;
+  padding: 0 30px;
+  text-align: center;
+  position: relative;
+}
+.theme-almanac .ch-quote::before {
+  content: '“';
+  display: block;
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 60px;
+  line-height: 0.6;
+  color: #b8662a;
+  margin-bottom: 6px;
+}
+.theme-almanac .ch-quote p {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 22px;
+  line-height: 1.32;
+  color: #3a2a1c;
+  margin: 0 0 12px;
+  font-weight: 500;
+}
+.theme-almanac .ch-quote cite {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 12.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #b8662a;
+}
+.theme-almanac .ch-quote cite::before { content: '— '; }
+
+/* TAKEAWAYS */
+.theme-almanac .ch-takeaways {
+  margin: 30px 0;
+  padding: 22px 26px;
+  background: #f7eed5;
+  border-top: 1px solid #b8662a;
+  border-bottom: 1px solid #b8662a;
+}
+.theme-almanac .ch-takeaways h2 {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  border: none;
+  margin: 0 0 14px;
+  font-size: 22px;
+  color: #3a2a1c;
+  font-weight: 500;
+  padding: 0;
+  text-align: center;
+}
+.theme-almanac .ch-takeaways h2::after {
+  display: none;
+}
+.theme-almanac .ch-takeaways ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.theme-almanac .ch-takeaways li {
+  font-size: 14px;
+  line-height: 1.55;
+  position: relative;
+  padding-left: 26px;
+}
+.theme-almanac .ch-takeaways li::before {
+  content: '✻';
+  position: absolute;
+  left: 0;
+  color: #b8662a;
+  font-size: 14px;
+  top: 0;
+}
+
+/* LOOKAHEAD */
+.theme-almanac .ch-lookahead {
+  margin: 26px 0 18px;
+  text-align: center;
+  padding: 18px 20px;
+  border: 1px solid #5e7148;
+  background: rgba(94, 113, 72, 0.06);
+}
+.theme-almanac .ch-lookahead-label {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 13px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #5e7148;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.theme-almanac .ch-lookahead p {
+  margin: 0;
+  font-family: 'Lora', serif;
+  font-style: italic;
+  font-size: 14px;
+  color: #3a2a1c;
+  line-height: 1.5;
+}
+
+/* REFS */
+.theme-almanac .ch-refs {
+  margin-top: 26px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(184, 102, 42, 0.4);
+}
+.theme-almanac .ch-refs h2 {
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 14px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #b8662a;
+  margin: 0 0 10px;
+  font-weight: 600;
+  text-align: center;
+  padding: 0;
+}
+.theme-almanac .ch-refs h2::after { display: none; }
+.theme-almanac .ch-refs p {
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-indent: -1.6em;
+  padding-left: 1.6em;
+  color: #6a543d;
+  margin: 0 0 6px;
+  font-family: 'Lora', serif;
+}
+
+/* FOOT */
+.theme-almanac .ch-foot {
+  margin-top: 24px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(184, 102, 42, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'Cormorant Garamond', serif;
+  font-style: italic;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #6a543d;
+}
+.theme-almanac .ch-foot-mark {
+  color: #b8662a;
+  font-size: 16px;
+}

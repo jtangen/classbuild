@@ -10,7 +10,20 @@ export type PriorKnowledge = 'none' | 'some' | 'significant';
 
 export type ChapterLength = 'concise' | 'standard' | 'comprehensive';
 
-export type TeachingEnvironment = 'lecture-theatre' | 'collaborative' | 'flat-classroom' | 'online' | '';
+// Three meaningful modes for the activities prompt: a room where students
+// can't move (lecture theatre), a room where they can (active-classroom —
+// covers both flat rooms with moveable desks and pre-arranged group tables),
+// and an online/hybrid mode (breakout rooms, shared docs). The legacy
+// 'collaborative' and 'flat-classroom' values are kept on the type so older
+// persisted state still type-checks; both auto-migrate to 'active-classroom'
+// when the user next visits Setup.
+export type TeachingEnvironment =
+  | 'lecture-theatre'
+  | 'active-classroom'
+  | 'online'
+  | ''
+  | 'collaborative'    // legacy → 'active-classroom'
+  | 'flat-classroom';  // legacy → 'active-classroom'
 
 export interface CourseSetup {
   topic: string;
@@ -25,6 +38,9 @@ export interface CourseSetup {
   environmentNotes?: string;
   numChapters: number;
   chapterLength: ChapterLength;
+  /** Free-text override for reading length per chapter — passed verbatim to
+   *  the generator when set. Falls back to `chapterLength` enum when empty. */
+  chapterLengthBrief?: string;
   widgetsPerChapter: number;
   themeId?: string;
   voiceId?: string;
@@ -195,20 +211,27 @@ export interface GeneratedChapter {
   activityData?: Array<{ title: string; duration: string; description: string; materials: string; learningGoal: string; scalingNotes: string }>;
   activityDetails?: Record<number, ActivityDetail>;
   audioTranscript?: string;
-  audioUrl?: string; // blob URL from Gemini TTS (WAV)
+  audioUrl?: string; // blob URL from ElevenLabs (MP3)
   slidesJson?: SlideData[];
   pptxUrl?: string; // blob URL
   infographicDataUri?: string; // data:image/jpeg;base64,...
-  infographicPrompt?: string; // the Claude-written prompt for Gemini
+  infographicPrompt?: string; // the Claude-written prompt for gpt-image-2
   weeklyChallengeData?: WeeklyChallengeData;
 }
 
 export interface SlideData {
   title: string;
-  bullets: string[];
   speakerNotes: string;
+  /** gpt-image-2 prompt describing the full editorial image for this slide. */
+  imagePrompt?: string;
+  /** Rendered image (data:image/jpeg;base64,…). Cached after first render. */
+  imageDataUri?: string;
+  // ── Legacy fields, kept for backwards-compat with persisted state from the
+  // old text-layout deck system. Not used by the new image-driven exporter
+  // except as a last-ditch fallback when a slide has no imagePrompt.
+  bullets?: string[];
   layout?: 'title' | 'content' | 'section' | 'big-idea' | 'quote' | 'two-column';
-  bodyText?: string; // Used by big-idea, quote, section layouts
+  bodyText?: string;
 }
 
 export type BloomLevel = 'remember' | 'understand' | 'apply' | 'analyze' | 'evaluate' | 'create';
@@ -224,6 +247,10 @@ export interface LearningObjective {
 export interface CurriculumMap {
   objectives: LearningObjective[];
   generatedAt: string;
+  /** Hash of the syllabus content at generation time. Used to detect when the
+   *  syllabus has been revised since the map was built, in which case the map
+   *  is stale and the UI prompts the user to regenerate. */
+  syllabusHash?: string;
 }
 
 export type StageId =

@@ -1,0 +1,427 @@
+/* ClassBuild chapter theme — press
+   Scope: body.theme-press or any ancestor with class="theme-press"
+   Markup contract: see patches/themes-six.md */
+.theme-press {
+  font-family: 'Source Serif 4', Georgia, serif;
+  background: #f4efe3;
+  color: #14110d;
+  padding: 56px 70px 44px;
+  font-size: 15.5px;
+  line-height: 1.62;
+  letter-spacing: 0.005em;
+  text-rendering: optimizeLegibility;
+}
+.theme-press p { margin: 0 0 1em; }
+.theme-press em { font-style: italic; }
+
+/* HEAD */
+.theme-press .ch-head {
+  border-bottom: 1.5px solid #14110d;
+  padding-bottom: 24px;
+  margin-bottom: 32px;
+}
+.theme-press .ch-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+  border-top: 3px solid #b1342a;
+  padding-top: 13px;
+  margin-bottom: 18px;
+  display: inline-block;
+}
+.theme-press .ch-title {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-weight: 700;
+  font-size: 54px;
+  line-height: 1.02;
+  letter-spacing: -0.012em;
+  margin: 0 0 18px;
+  color: #14110d;
+}
+.theme-press .ch-title em { font-style: italic; font-weight: 400; }
+.theme-press .ch-subtitle {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 19px;
+  line-height: 1.42;
+  color: #3a342c;
+  margin: 0 0 18px;
+  max-width: 36em;
+}
+.theme-press .ch-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: #6b6357;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+}
+.theme-press .ch-meta-dot {
+  width: 3px; height: 3px; background: #6b6357; border-radius: 50%;
+  display: inline-block;
+}
+
+/* HOOK with drop cap */
+.theme-press .ch-hook { margin-bottom: 32px; }
+.theme-press .ch-dropcap {
+  float: left;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-size: 64px;
+  line-height: 0.88;
+  font-weight: 700;
+  padding: 6px 10px 0 0;
+  color: #14110d;
+}
+
+/* HEADINGS */
+.theme-press h2 {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 32px 0 14px;
+  border-bottom: 1px solid #14110d;
+  padding-bottom: 8px;
+  color: #14110d;
+}
+.theme-press h3 {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-weight: 400;
+  font-size: 21px;
+  margin: 24px 0 8px;
+  color: #14110d;
+}
+
+/* KEY TERMS */
+.theme-press .ch-key {
+  font-style: italic;
+  text-decoration: underline;
+  text-decoration-color: #b1342a;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  text-decoration-skip-ink: none;
+}
+
+/* CALLOUT */
+.theme-press .ch-callout {
+  border-left: 3px solid #b1342a;
+  padding: 14px 0 14px 20px;
+  margin: 24px 0;
+}
+.theme-press .ch-callout-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+  margin-bottom: 6px;
+}
+.theme-press .ch-callout p {
+  margin: 0;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-size: 16px;
+  color: #3a342c;
+  line-height: 1.5;
+}
+
+/* DIVIDER */
+.theme-press .ch-divider {
+  border: none;
+  border-top: 1px solid #d5c7a8;
+  margin: 30px auto;
+  width: 100%;
+  position: relative;
+}
+.theme-press .ch-divider::after {
+  content: '❦';
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #f4efe3;
+  padding: 0 14px;
+  color: #b1342a;
+  font-size: 14px;
+}
+
+/* WIDGET */
+.theme-press .ch-widget {
+  border: 1px solid #14110d;
+  padding: 20px 22px;
+  margin: 22px 0;
+  background: #fbf7eb;
+}
+.theme-press .ch-widget-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #d5c7a8;
+  padding-bottom: 10px;
+}
+.theme-press .ch-widget-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+}
+.theme-press .ch-widget-title {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-size: 19px;
+  font-weight: 700;
+}
+.theme-press .ch-widget-sub {
+  margin: 0 0 14px;
+  color: #3a342c;
+  font-size: 14px;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+}
+.theme-press .ch-widget-row {
+  display: flex; gap: 12px; margin-bottom: 14px;
+}
+.theme-press .ch-widget-field {
+  flex: 1; display: flex; flex-direction: column; gap: 5px;
+}
+.theme-press .ch-widget-fieldlabel {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #6b6357;
+}
+.theme-press .ch-widget-select {
+  background: #f4efe3;
+  border: 1px solid #14110d;
+  padding: 7px 10px;
+  font-family: 'Source Serif 4', serif;
+  font-size: 13.5px;
+}
+.theme-press .ch-widget-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 26px;
+  margin-bottom: 14px;
+}
+.theme-press .ch-meter {
+  display: grid;
+  grid-template-columns: 78px 1fr 22px;
+  align-items: center;
+  gap: 10px;
+}
+.theme-press .ch-meter-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #3a342c;
+}
+.theme-press .ch-meter-bar {
+  height: 4px;
+  background: #e8dfc8;
+  position: relative;
+  display: block;
+}
+.theme-press .ch-meter-bar > span {
+  position: absolute; left: 0; top: 0; bottom: 0;
+  background: #b1342a;
+  display: block;
+}
+.theme-press .ch-meter-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  text-align: right;
+  font-size: 12px;
+}
+.theme-press .ch-widget-btn {
+  background: #14110d;
+  color: #f4efe3;
+  border: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 9px 16px;
+  cursor: pointer;
+}
+
+/* FIGURE */
+.theme-press .ch-figure { margin: 26px 0; }
+.theme-press .ch-figbox {
+  background: #ebe4d2;
+  color: #b1342a;
+  height: 170px;
+  position: relative;
+  border: 1px solid #14110d;
+  overflow: hidden;
+}
+.theme-press .ch-figbox svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
+.theme-press .ch-figbox-tag {
+  position: absolute; bottom: 8px; left: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6b6357;
+  background: #f4efe3;
+  padding: 2px 6px;
+}
+.theme-press .ch-figure figcaption {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-size: 13.5px;
+  line-height: 1.4;
+  margin-top: 10px;
+  color: #3a342c;
+}
+.theme-press .ch-fig-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b1342a;
+  margin-right: 6px;
+}
+
+/* QUOTE */
+.theme-press .ch-quote {
+  border-left: 3px solid #14110d;
+  padding: 6px 0 6px 22px;
+  margin: 28px 0;
+}
+.theme-press .ch-quote p {
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-size: 22px;
+  line-height: 1.32;
+  color: #14110d;
+  margin: 0 0 10px;
+}
+.theme-press .ch-quote cite {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 10.5px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #6b6357;
+}
+
+/* TAKEAWAYS */
+.theme-press .ch-takeaways {
+  border-top: 1.5px solid #14110d;
+  border-bottom: 1.5px solid #14110d;
+  padding: 20px 0;
+  margin: 30px 0;
+}
+.theme-press .ch-takeaways h2 {
+  border: none;
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+  font-weight: 500;
+  padding: 0;
+}
+.theme-press .ch-takeaways ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.theme-press .ch-takeaways li {
+  font-size: 14.5px;
+  line-height: 1.5;
+  position: relative;
+  padding-left: 24px;
+}
+.theme-press .ch-takeaways li::before {
+  content: '§';
+  position: absolute;
+  left: 0;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  color: #b1342a;
+  font-style: italic;
+  font-size: 18px;
+  top: -2px;
+}
+
+/* LOOKAHEAD */
+.theme-press .ch-lookahead {
+  margin: 24px 0 18px;
+  padding: 16px 0 0;
+  border-top: 1px solid #d5c7a8;
+}
+.theme-press .ch-lookahead-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+  margin-bottom: 8px;
+}
+.theme-press .ch-lookahead p {
+  margin: 0;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-style: italic;
+  font-size: 15px;
+  color: #3a342c;
+  line-height: 1.5;
+}
+
+/* REFS */
+.theme-press .ch-refs { margin-top: 24px; }
+.theme-press .ch-refs h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #b1342a;
+  margin: 0 0 10px;
+  border: none;
+  padding: 0;
+  font-weight: 500;
+}
+.theme-press .ch-refs p {
+  font-size: 11.5px;
+  line-height: 1.5;
+  text-indent: -1.6em;
+  padding-left: 1.6em;
+  color: #3a342c;
+  margin: 0 0 6px;
+}
+
+/* FOOT */
+.theme-press .ch-foot {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1.5px solid #14110d;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  color: #6b6357;
+  text-transform: uppercase;
+}
+.theme-press .ch-foot-mark {
+  color: #b1342a;
+  font-family: 'Libre Caslon Text', Georgia, serif;
+  font-size: 16px;
+  font-style: italic;
+}

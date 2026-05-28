@@ -16,8 +16,15 @@ export function buildSyllabusPrompt(
   refinementFeedback?: string,
   _conversationHistory?: Array<{ role: string; content: string }>
 ): { systemPrompt: string; userMessage: string } {
-  const wordCount = setup.chapterLength === 'concise' ? '2,000' : setup.chapterLength === 'standard' ? '4,000' : '6,000';
-  const readTime = setup.chapterLength === 'concise' ? '10' : setup.chapterLength === 'standard' ? '20' : '30';
+  // If the user supplied a free-text reading length brief, pass it verbatim
+  // to the model. Otherwise fall back to the enum-derived word/time targets.
+  const briefTrimmed = setup.chapterLengthBrief?.trim();
+  const wordCount = briefTrimmed
+    ? briefTrimmed
+    : setup.chapterLength === 'concise' ? '2,000' : setup.chapterLength === 'standard' ? '4,000' : '6,000';
+  const readTime = briefTrimmed
+    ? '(see brief above)'
+    : setup.chapterLength === 'concise' ? '10' : setup.chapterLength === 'standard' ? '20' : '30';
 
   const systemPrompt = `You are ClassBuild, an expert course architect that designs pedagogically-principled university courses. You combine deep subject matter expertise with decades of evidence-based learning science research.
 
@@ -105,7 +112,9 @@ ${setup.textbookReference ? `**Reference text**: ${setup.textbookReference}` : '
 ${setup.learnerNotes ? `**Additional learner context**: ${setup.learnerNotes}` : ''}
 
 **Course structure**: ${setup.numChapters} classes
-**Reading length**: ~${wordCount} words each (~${readTime} min reading time)
+${briefTrimmed
+  ? `**Reading length** (verbatim from the teacher's brief): ${wordCount}`
+  : `**Reading length**: ~${wordCount} words each (~${readTime} min reading time)`}
 **Interactive widgets per chapter**: ${setup.widgetsPerChapter}
 
 Design a pedagogically outstanding course. The chapter sequence should tell a coherent intellectual story, building knowledge progressively while weaving in spaced review of earlier concepts. Each chapter should feel like it was crafted by an instructor who deeply cares about their students' learning.

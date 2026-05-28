@@ -1,0 +1,465 @@
+/* ClassBuild chapter theme — studio
+   Scope: body.theme-studio or any ancestor with class="theme-studio"
+   Markup contract: see patches/themes-six.md */
+.theme-studio {
+  font-family: 'Manrope', system-ui, sans-serif;
+  background: #fafaf7;
+  color: #0a0a0a;
+  padding: 80px 90px 56px;
+  font-size: 14.5px;
+  line-height: 1.65;
+  font-weight: 400;
+}
+.theme-studio p { margin: 0 0 1.1em; }
+.theme-studio em { font-style: italic; }
+
+/* HEAD */
+.theme-studio .ch-head {
+  margin-bottom: 56px;
+  padding-bottom: 0;
+  border: none;
+}
+.theme-studio .ch-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #0a0a0a;
+  font-weight: 500;
+  margin-bottom: 36px;
+}
+.theme-studio .ch-eyebrow::after {
+  content: '';
+  display: inline-block;
+  width: 32px;
+  height: 1px;
+  background: #c9a382;
+  vertical-align: middle;
+  margin-left: 14px;
+}
+.theme-studio .ch-title {
+  font-family: 'Instrument Serif', serif;
+  font-weight: 400;
+  font-size: 76px;
+  line-height: 0.98;
+  letter-spacing: -0.022em;
+  margin: 0 0 24px;
+  color: #0a0a0a;
+  max-width: 14ch;
+}
+.theme-studio .ch-title em {
+  font-style: italic;
+}
+.theme-studio .ch-subtitle {
+  font-family: 'Manrope', sans-serif;
+  font-weight: 300;
+  font-size: 17px;
+  line-height: 1.4;
+  color: #4a4a4a;
+  margin: 0 0 28px;
+  max-width: 38em;
+  letter-spacing: -0.005em;
+}
+.theme-studio .ch-meta {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #888;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  text-transform: uppercase;
+}
+.theme-studio .ch-meta-dot {
+  width: 3px; height: 3px;
+  background: #c9a382;
+  display: inline-block;
+}
+
+/* HOOK */
+.theme-studio .ch-hook {
+  margin-bottom: 56px;
+  font-family: 'Instrument Serif', serif;
+  font-size: 24px;
+  font-style: italic;
+  line-height: 1.32;
+  color: #0a0a0a;
+  font-weight: 400;
+  max-width: 22em;
+  margin-left: auto;
+  margin-right: auto;
+}
+.theme-studio .ch-hook p { margin: 0 0 0.6em; }
+.theme-studio .ch-dropcap { color: inherit; }
+.theme-studio .ch-hook em { font-style: normal; color: #c9a382; }
+
+/* HEADINGS */
+.theme-studio h2 {
+  font-family: 'Instrument Serif', serif;
+  font-size: 46px;
+  font-weight: 400;
+  font-style: italic;
+  line-height: 1.1;
+  letter-spacing: -0.018em;
+  margin: 60px 0 18px;
+  color: #0a0a0a;
+  max-width: 18ch;
+}
+.theme-studio h3 {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 500;
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  margin: 36px 0 12px;
+  color: #c9a382;
+}
+
+/* KEY TERMS */
+.theme-studio .ch-key {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 16.5px;
+  color: #0a0a0a;
+  border-bottom: 1px solid #c9a382;
+  padding-bottom: 1px;
+}
+
+/* CALLOUT */
+.theme-studio .ch-callout {
+  margin: 36px 0;
+  padding: 0;
+  border-top: 1px solid #0a0a0a;
+  border-bottom: 1px solid #0a0a0a;
+  padding: 22px 0;
+}
+.theme-studio .ch-callout-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #c9a382;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.theme-studio .ch-callout p {
+  margin: 0;
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 22px;
+  color: #0a0a0a;
+  line-height: 1.32;
+  max-width: 24em;
+}
+
+/* DIVIDER */
+.theme-studio .ch-divider {
+  border: none;
+  margin: 48px auto;
+  width: 80px;
+  border-top: 1px solid #c9a382;
+}
+
+/* WIDGET */
+.theme-studio .ch-widget {
+  margin: 36px 0;
+  padding: 28px 0 0;
+  border-top: 1px solid #0a0a0a;
+}
+.theme-studio .ch-widget-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 18px;
+  gap: 24px;
+}
+.theme-studio .ch-widget-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #c9a382;
+  font-weight: 500;
+}
+.theme-studio .ch-widget-title {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 32px;
+  font-weight: 400;
+  color: #0a0a0a;
+  letter-spacing: -0.01em;
+}
+.theme-studio .ch-widget-sub {
+  margin: 0 0 22px;
+  color: #4a4a4a;
+  font-size: 13.5px;
+  font-weight: 300;
+  max-width: 36em;
+}
+.theme-studio .ch-widget-row {
+  display: flex; gap: 16px; margin-bottom: 22px;
+}
+.theme-studio .ch-widget-field {
+  flex: 1; display: flex; flex-direction: column; gap: 6px;
+}
+.theme-studio .ch-widget-fieldlabel {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #888;
+}
+.theme-studio .ch-widget-select {
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #0a0a0a;
+  padding: 6px 0;
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 18px;
+  color: #0a0a0a;
+}
+.theme-studio .ch-widget-meters {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 36px;
+  margin-bottom: 22px;
+}
+.theme-studio .ch-meter {
+  display: grid;
+  grid-template-columns: 90px 1fr 28px;
+  align-items: center;
+  gap: 12px;
+}
+.theme-studio .ch-meter-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #0a0a0a;
+}
+.theme-studio .ch-meter-bar {
+  height: 1px;
+  background: #e0ddd4;
+  position: relative;
+  display: block;
+}
+.theme-studio .ch-meter-bar > span {
+  position: absolute; left: 0; top: -1px; bottom: -1px;
+  background: #c9a382;
+  display: block;
+}
+.theme-studio .ch-meter-num {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-weight: 400;
+  text-align: right;
+  font-size: 20px;
+  color: #0a0a0a;
+}
+.theme-studio .ch-widget-btn {
+  background: transparent;
+  color: #0a0a0a;
+  border: none;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  padding: 0;
+  cursor: pointer;
+  font-weight: 500;
+  border-bottom: 1px solid #0a0a0a;
+  padding-bottom: 3px;
+}
+.theme-studio .ch-widget-btn::after { content: ' →'; }
+
+/* FIGURE */
+.theme-studio .ch-figure { margin: 48px -20px; }
+.theme-studio .ch-figbox {
+  background: #ecebe6;
+  color: #c9a382;
+  height: 280px;
+  position: relative;
+  overflow: hidden;
+}
+.theme-studio .ch-figbox svg {
+  position: absolute; inset: 0; width: 100%; height: 100%;
+}
+.theme-studio .ch-figbox-tag {
+  position: absolute; bottom: 14px; left: 18px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #6a6a6a;
+}
+.theme-studio .ch-figure figcaption {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10.5px;
+  line-height: 1.55;
+  margin-top: 14px;
+  color: #4a4a4a;
+  padding: 0 20px;
+  letter-spacing: 0.01em;
+}
+.theme-studio .ch-figure figcaption em {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 13px;
+}
+.theme-studio .ch-fig-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: #c9a382;
+  margin-right: 10px;
+  font-weight: 500;
+}
+
+/* QUOTE */
+.theme-studio .ch-quote {
+  margin: 56px 0;
+  padding: 0;
+  text-align: center;
+}
+.theme-studio .ch-quote p {
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 34px;
+  line-height: 1.22;
+  color: #0a0a0a;
+  margin: 0 0 18px;
+  max-width: 20em;
+  margin-left: auto;
+  margin-right: auto;
+  letter-spacing: -0.018em;
+}
+.theme-studio .ch-quote cite {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: #c9a382;
+}
+
+/* TAKEAWAYS */
+.theme-studio .ch-takeaways {
+  margin: 48px 0;
+  padding: 28px 0;
+  border-top: 1px solid #0a0a0a;
+  border-bottom: 1px solid #0a0a0a;
+}
+.theme-studio .ch-takeaways h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  border: none;
+  margin: 0 0 18px;
+  font-size: 10.5px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #c9a382;
+  font-weight: 500;
+  padding: 0;
+  max-width: none;
+}
+.theme-studio .ch-takeaways ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  counter-reset: tk;
+}
+.theme-studio .ch-takeaways li {
+  font-size: 14.5px;
+  line-height: 1.55;
+  position: relative;
+  padding-left: 44px;
+  counter-increment: tk;
+  color: #0a0a0a;
+}
+.theme-studio .ch-takeaways li::before {
+  content: counter(tk, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: #c9a382;
+  letter-spacing: 0.06em;
+}
+
+/* LOOKAHEAD */
+.theme-studio .ch-lookahead {
+  margin: 36px 0 24px;
+}
+.theme-studio .ch-lookahead-label {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #c9a382;
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+.theme-studio .ch-lookahead p {
+  margin: 0;
+  font-family: 'Instrument Serif', serif;
+  font-style: italic;
+  font-size: 22px;
+  color: #0a0a0a;
+  line-height: 1.32;
+  max-width: 24em;
+}
+
+/* REFS */
+.theme-studio .ch-refs {
+  margin-top: 36px;
+  padding-top: 18px;
+  border-top: 1px solid #c9a382;
+}
+.theme-studio .ch-refs h2 {
+  font-family: 'JetBrains Mono', monospace;
+  font-style: normal;
+  font-size: 10px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: #c9a382;
+  margin: 0 0 10px;
+  font-weight: 500;
+  max-width: none;
+}
+.theme-studio .ch-refs p {
+  font-size: 11px;
+  line-height: 1.55;
+  text-indent: -1.6em;
+  padding-left: 1.6em;
+  color: #4a4a4a;
+  margin: 0 0 6px;
+  font-family: 'Manrope', sans-serif;
+}
+
+/* FOOT */
+.theme-studio .ch-foot {
+  margin-top: 32px;
+  padding-top: 18px;
+  border-top: 1px solid #0a0a0a;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  color: #888;
+  text-transform: uppercase;
+}
+.theme-studio .ch-foot-mark {
+  color: #c9a382;
+  font-family: 'Instrument Serif', serif;
+  font-size: 18px;
+  font-style: italic;
+}

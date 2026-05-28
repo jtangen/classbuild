@@ -1,77 +1,60 @@
 /**
- * Node.js Gemini image generation — skips browser canvas compression,
- * saves raw PNG base64 directly.
+ * Node.js wrapper around OpenAI gpt-image-2 — returns raw base64 plus the
+ * mime type, leaving the data-URI assembly to the caller.
  */
 
-interface GeminiPart {
-  text?: string;
-  inlineData?: { mimeType: string; data: string };
-  thought?: boolean;
+interface ImageResponse {
+  data?: Array<{ b64_json?: string }>;
+  error?: { message?: string };
 }
 
-interface GeminiResponse {
-  candidates?: Array<{
-    content?: {
-      parts?: GeminiPart[];
-    };
-  }>;
-  error?: { message: string };
+export interface NodeImageOptions {
+  size?: string;
+  quality?: 'low' | 'medium' | 'high' | 'auto';
 }
 
-/**
- * Generate an infographic using Gemini's image generation model.
- * Returns raw base64 image data (no data URI prefix).
- */
-export async function generateInfographicNode(
+export async function generateImageNode(
   prompt: string,
   apiKey: string,
+  options: NodeImageOptions = {},
 ): Promise<{ base64: string; mimeType: string }> {
-  const model = 'gemini-3.1-flash-image-preview';
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
-
   const body = {
-    contents: [{ parts: [{ text: prompt }] }],
-    generationConfig: {
-      responseModalities: ['TEXT', 'IMAGE'],
-    },
+    model: 'gpt-image-2',
+    prompt,
+    n: 1,
+    size: options.size ?? '1024x1024',
+    quality: options.quality ?? 'high',
+    output_format: 'jpeg',
+    output_compression: 90,
   };
 
-  const res = await fetch(url, {
+  const res = await fetch('https://api.openai.com/v1/images/generations', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`Gemini API error (${res.status}): ${errBody.slice(0, 200)}`);
-  }
-
-  const data: GeminiResponse = await res.json();
-
-  if (data.error) {
-    throw new Error(`Gemini error: ${data.error.message}`);
-  }
-
-  const parts = data.candidates?.[0]?.content?.parts;
-  if (!parts || parts.length === 0) {
-    throw new Error('Gemini returned no content');
-  }
-
-  // Find the last non-thought image part
-  let imagePart: GeminiPart | undefined;
-  for (const part of parts) {
-    if (part.inlineData && !part.thought) {
-      imagePart = part;
+    let detail = '';
+    try {
+      const errBody = (await res.json()) as ImageResponse;
+      detail = errBody.error?.message ?? '';
+    } catch {
+      detail = await res.text().catch(() => '');
     }
+    throw new Error(`OpenAI image API ${res.status}: ${detail.slice(0, 300)}`);
   }
 
-  if (!imagePart?.inlineData) {
-    throw new Error('Gemini returned no image');
+  const json = (await res.json()) as ImageResponse;
+  const b64 = json.data?.[0]?.b64_json;
+  if (!b64) {
+    throw new Error('OpenAI returned no image data.');
   }
-
-  return {
-    base64: imagePart.inlineData.data,
-    mimeType: imagePart.inlineData.mimeType,
-  };
+  return { base64: b64, mimeType: 'image/jpeg' };
 }
+
+/** Backwards-compat alias for the previous helper name. */
+export const generateInfographicNode = generateImageNode;

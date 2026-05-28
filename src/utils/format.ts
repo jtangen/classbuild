@@ -10,23 +10,53 @@ export function slugify(text: string): string {
 }
 
 /**
- * Extract a standalone HTML document from a Claude response that may wrap it
- * in a ```html fence, start mid-prose, or include commentary after </html>.
+ * Extract chapter HTML from a Claude response. Handles three formats:
+ *
+ *  1. NEW contract (current chapter prompt): `<article class="ch">…</article>`
+ *     plus any trailing `<script>` blocks for widget logic. Returned as a
+ *     fragment — the wrapping `<!DOCTYPE html>` envelope is added by
+ *     `wrapChapterHtml` from `src/themes/themes.config.ts`.
+ *
+ *  2. LEGACY full document (chapters generated under the old prompt):
+ *     `<!DOCTYPE html>…</html>`. Returned as-is so existing courseStore
+ *     entries keep rendering.
+ *
+ *  3. Either of the above wrapped in a ```html fence, or surrounded by
+ *     incidental prose. The wrapper is stripped.
  */
 export function extractHtml(text: string): string {
-  const htmlMatch = text.match(/```html\s*\n?([\s\S]*?)\n?```/);
-  if (htmlMatch) return htmlMatch[1];
-  const trimmed = text.trim();
-  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) return trimmed;
-  const docIdx = text.indexOf('<!DOCTYPE');
-  const htmlIdx = text.indexOf('<html');
+  const fenced = text.match(/```html\s*\n?([\s\S]*?)\n?```/);
+  const body = fenced ? fenced[1] : text;
+  const trimmed = body.trim();
+
+  // Legacy full HTML document.
+  if (trimmed.startsWith('<!DOCTYPE') || trimmed.startsWith('<html')) {
+    const endHtml = trimmed.lastIndexOf('</html>');
+    return endHtml !== -1 ? trimmed.slice(0, endHtml + 7) : trimmed;
+  }
+
+  // New contract: starts with <article class="ch">.
+  const articleStart = body.indexOf('<article');
+  if (articleStart !== -1) {
+    // Extend to the last </script> (widgets) or </article> (no widgets).
+    const lastScript = body.lastIndexOf('</script>');
+    const lastArticle = body.lastIndexOf('</article>');
+    const endIdx = Math.max(lastScript === -1 ? -1 : lastScript + 9, lastArticle === -1 ? -1 : lastArticle + 10);
+    if (endIdx > articleStart) return body.slice(articleStart, endIdx);
+    return body.slice(articleStart);
+  }
+
+  // Fallback: legacy doc somewhere mid-response.
+  const docIdx = body.indexOf('<!DOCTYPE');
+  const htmlIdx = body.indexOf('<html');
   const startIdx = docIdx !== -1 ? docIdx : htmlIdx;
   if (startIdx !== -1) {
-    const endIdx = text.lastIndexOf('</html>');
-    if (endIdx !== -1) return text.slice(startIdx, endIdx + 7);
-    return text.slice(startIdx);
+    const endIdx = body.lastIndexOf('</html>');
+    if (endIdx !== -1) return body.slice(startIdx, endIdx + 7);
+    return body.slice(startIdx);
   }
-  return text;
+
+  return trimmed;
 }
 
 /**

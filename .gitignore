@@ -32,3 +32,14 @@ vision/
 # Generated course output + deploy artifacts
 output/
 deploy-courses/
+
+# Design scratch + internal references (not for the public repo)
+ClassBuild Redesign/
+public/ClassBuild Themes.zip
+public/gpt-image-2.md
+
+# Stale Gemini-era voice samples — app fetches previews from the ElevenLabs API
+public/voices/
+
+# Pitch scratch — not part of the app
+pitch/

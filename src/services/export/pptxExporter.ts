@@ -1,516 +1,175 @@
 import PptxGenJS from 'pptxgenjs';
 import type { SlideData } from '../../types/course';
-import { getTheme } from '../../themes';
-
-// Strip '#' prefix from hex color for pptxgenjs
-function hex(color: string): string {
-  return color.replace(/^#/, '');
-}
-
-// Build PPTX theme constants from a visual theme
-function buildPptxTheme(themeId?: string) {
-  const t = getTheme(themeId);
-  return {
-    bg: hex(t.pageBg),
-    title: hex(t.textPrimary),
-    body: hex(t.textSecondary),
-    accent: hex(t.accent),
-    accentLight: hex(t.accentLight),
-    muted: hex(t.textMuted),
-    cardBg: hex(t.cardBg),
-    amber: hex(t.warmAccent),
-    font: 'Segoe UI',
-  };
-}
-
-// Default theme for module-level references
-let THEME = buildPptxTheme();
+import { generateImageWithRetry } from '../openai/imageGen';
+import { withSafetyClause } from '../openai/safetyClause';
 
 /**
- * Adds a slide number label in the bottom-right corner.
+ * Slide generation now renders each slide as a single 4K (3840×2160)
+ * editorial image via gpt-image-2 — the image carries the slide's title,
+ * key text, and visuals together. pptxgenjs is used as the container: each
+ * slide is a 16:9 frame with the rendered image filling the full bleed, and
+ * the AI-written speaker notes attached natively.
+ *
+ * The slides themselves contain no native PowerPoint text — the image *is*
+ * the slide. Speaker notes remain native pptx notes so the presenter can
+ * read them in slide-show view.
  */
-function addSlideNumber(slide: PptxGenJS.Slide, num: number, total: number): void {
-  slide.addText(`${num} / ${total}`, {
-    x: 8.2,
-    y: 5.2,
-    w: 1.5,
-    h: 0.3,
-    fontSize: 9,
-    color: THEME.muted,
-    fontFace: THEME.font,
-    align: 'right',
-  });
+
+export type SlideImageProgress = (slideIndex: number, total: number, phase: 'rendering' | 'packing') => void;
+
+interface GeneratePptxOptions {
+  /** Image quality for each rendered slide. Defaults to 'high'. */
+  imageQuality?: 'low' | 'medium' | 'high' | 'auto';
+  /** Pixel size requested from gpt-image-2 per slide. Defaults to 4K landscape. */
+  imageSize?: string;
+  /**
+   * Number of gpt-image-2 requests in flight at once. Defaults to 6. The
+   * Image API tolerates concurrent calls well; setting too high risks
+   * hitting per-minute rate limits, but the retry layer handles that
+   * gracefully with exponential backoff.
+   */
+  concurrency?: number;
+  /** Notified for every step so the UI can show progress. */
+  onProgress?: SlideImageProgress;
+  /**
+   * Fires as soon as each slide image is rendered. Callers use this to
+   * persist `imageDataUri` to the course store incrementally — so navigating
+   * away mid-render (or a crash) doesn't lose finished work.
+   */
+  onSlideRendered?: (slideIndex: number, dataUri: string) => void;
+  /**
+   * If the caller already has rendered image data URIs (e.g. cached from a
+   * prior render), pass them here keyed by slide index — they're used as-is
+   * and OpenAI isn't called for those slides.
+   */
+  preRendered?: Record<number, string>;
 }
 
 /**
- * Title slide: large centered chapter title with hook subtitle.
- */
-function buildTitleSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  courseTitle: string,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.bg };
-
-  // Chapter title
-  slide.addText(slideData.title, {
-    x: 1.0,
-    y: 1.2,
-    w: 8.0,
-    h: 1.8,
-    fontSize: 36,
-    bold: true,
-    color: THEME.title,
-    fontFace: THEME.font,
-    align: 'center',
-    valign: 'bottom',
-  });
-
-  // Accent bar
-  slide.addShape('rect', {
-    x: 4.0,
-    y: 3.2,
-    w: 2.0,
-    h: 0.06,
-    fill: { color: THEME.accent },
-    rectRadius: 0.03,
-  });
-
-  // Hook / subtitle
-  if (slideData.bodyText) {
-    slide.addText(slideData.bodyText, {
-      x: 1.0,
-      y: 3.5,
-      w: 8.0,
-      h: 0.8,
-      fontSize: 16,
-      italic: true,
-      color: THEME.body,
-      fontFace: THEME.font,
-      align: 'center',
-      valign: 'top',
-    });
-  }
-
-  // Course name
-  slide.addText(courseTitle, {
-    x: 1.0,
-    y: 4.6,
-    w: 8.0,
-    h: 0.5,
-    fontSize: 12,
-    color: THEME.muted,
-    fontFace: THEME.font,
-    align: 'center',
-  });
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Section divider: large bold title with subtle subtitle.
- */
-function buildSectionSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.cardBg };
-
-  // Left accent bar
-  slide.addShape('rect', {
-    x: 0.6,
-    y: 1.5,
-    w: 0.08,
-    h: 2.5,
-    fill: { color: THEME.accent },
-    rectRadius: 0.04,
-  });
-
-  // Section title
-  slide.addText(slideData.title, {
-    x: 1.1,
-    y: 1.5,
-    w: 8.0,
-    h: 1.4,
-    fontSize: 32,
-    bold: true,
-    color: THEME.title,
-    fontFace: THEME.font,
-    align: 'left',
-    valign: 'middle',
-  });
-
-  // Section subtitle
-  if (slideData.bodyText) {
-    slide.addText(slideData.bodyText, {
-      x: 1.1,
-      y: 3.0,
-      w: 8.0,
-      h: 0.8,
-      fontSize: 16,
-      color: THEME.body,
-      fontFace: THEME.font,
-      align: 'left',
-      valign: 'top',
-    });
-  }
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Content slide: title + bullet points.
- */
-function buildContentSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.bg };
-
-  // Title
-  slide.addText(slideData.title, {
-    x: 0.7,
-    y: 0.3,
-    w: 8.6,
-    h: 0.8,
-    fontSize: 24,
-    bold: true,
-    color: THEME.title,
-    fontFace: THEME.font,
-    align: 'left',
-    valign: 'middle',
-  });
-
-  // Accent underline
-  slide.addShape('rect', {
-    x: 0.7,
-    y: 1.15,
-    w: 8.6,
-    h: 0.025,
-    fill: { color: THEME.accent },
-  });
-
-  // Bullets
-  if (slideData.bullets && slideData.bullets.length > 0) {
-    const bulletRows: PptxGenJS.TextProps[] = slideData.bullets.map((bullet) => ({
-      text: bullet,
-      options: {
-        fontSize: 16,
-        color: THEME.body,
-        fontFace: THEME.font,
-        bullet: {
-          code: '25CF',
-          color: THEME.accent,
-          fontSize: 10,
-        },
-        paraSpaceBefore: 8,
-        paraSpaceAfter: 4,
-        lineSpacing: 22,
-      },
-    }));
-
-    slide.addText(bulletRows, {
-      x: 0.9,
-      y: 1.4,
-      w: 8.2,
-      h: 3.8,
-      valign: 'top',
-    });
-  }
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Big-idea slide: single large statement centered on screen.
- */
-function buildBigIdeaSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.bg };
-
-  // Small label at top
-  slide.addText(slideData.title, {
-    x: 1.0,
-    y: 0.8,
-    w: 8.0,
-    h: 0.5,
-    fontSize: 12,
-    bold: true,
-    color: THEME.accent,
-    fontFace: THEME.font,
-    align: 'center',
-    charSpacing: 3,
-  });
-
-  // Big statement
-  if (slideData.bodyText) {
-    slide.addText(slideData.bodyText, {
-      x: 1.0,
-      y: 1.6,
-      w: 8.0,
-      h: 2.8,
-      fontSize: 28,
-      bold: true,
-      color: THEME.title,
-      fontFace: THEME.font,
-      align: 'center',
-      valign: 'middle',
-      lineSpacing: 36,
-    });
-  }
-
-  // Bottom accent dots
-  for (let i = 0; i < 3; i++) {
-    slide.addShape('ellipse', {
-      x: 4.7 + i * 0.25,
-      y: 4.8,
-      w: 0.1,
-      h: 0.1,
-      fill: { color: i === 1 ? THEME.accent : THEME.muted },
-    });
-  }
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Quote slide: large italic quote with attribution.
- */
-function buildQuoteSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.bg };
-
-  // Large opening quote mark
-  slide.addText('\u201C', {
-    x: 0.8,
-    y: 0.4,
-    w: 1.0,
-    h: 1.2,
-    fontSize: 72,
-    color: THEME.accent,
-    fontFace: 'Georgia',
-    align: 'left',
-    bold: true,
-  });
-
-  // Quote body
-  if (slideData.bodyText) {
-    slide.addText(slideData.bodyText, {
-      x: 1.2,
-      y: 1.4,
-      w: 7.6,
-      h: 2.4,
-      fontSize: 22,
-      italic: true,
-      color: THEME.title,
-      fontFace: THEME.font,
-      align: 'left',
-      valign: 'middle',
-      lineSpacing: 32,
-    });
-  }
-
-  // Attribution line
-  slide.addShape('rect', {
-    x: 1.2,
-    y: 4.0,
-    w: 1.5,
-    h: 0.04,
-    fill: { color: THEME.accent },
-    rectRadius: 0.02,
-  });
-
-  slide.addText(slideData.title, {
-    x: 1.2,
-    y: 4.2,
-    w: 7.6,
-    h: 0.5,
-    fontSize: 14,
-    color: THEME.accentLight,
-    fontFace: THEME.font,
-    align: 'left',
-  });
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Two-column slide: left and right bullet lists for comparison.
- */
-function buildTwoColumnSlide(
-  pptx: PptxGenJS,
-  slideData: SlideData,
-  slideNum: number,
-  totalSlides: number,
-): void {
-  const slide = pptx.addSlide();
-  slide.background = { fill: THEME.bg };
-
-  // Title
-  slide.addText(slideData.title, {
-    x: 0.7,
-    y: 0.3,
-    w: 8.6,
-    h: 0.8,
-    fontSize: 24,
-    bold: true,
-    color: THEME.title,
-    fontFace: THEME.font,
-    align: 'left',
-    valign: 'middle',
-  });
-
-  slide.addShape('rect', {
-    x: 0.7,
-    y: 1.15,
-    w: 8.6,
-    h: 0.025,
-    fill: { color: THEME.accent },
-  });
-
-  // Left column
-  const leftItems = slideData.bullets || [];
-  if (leftItems.length > 0) {
-    const leftRows: PptxGenJS.TextProps[] = leftItems.map((item) => ({
-      text: item,
-      options: {
-        fontSize: 14,
-        color: THEME.body,
-        fontFace: THEME.font,
-        bullet: { code: '25CF', color: THEME.accent, fontSize: 8 },
-        paraSpaceBefore: 6,
-        paraSpaceAfter: 3,
-        lineSpacing: 20,
-      },
-    }));
-    slide.addText(leftRows, {
-      x: 0.7,
-      y: 1.4,
-      w: 4.0,
-      h: 3.8,
-      valign: 'top',
-    });
-  }
-
-  // Center divider
-  slide.addShape('rect', {
-    x: 4.95,
-    y: 1.5,
-    w: 0.03,
-    h: 3.2,
-    fill: { color: THEME.muted },
-  });
-
-  // Right column
-  let rightItems: string[] = [];
-  if (slideData.bodyText) {
-    try {
-      rightItems = JSON.parse(slideData.bodyText);
-    } catch {
-      rightItems = [slideData.bodyText];
-    }
-  }
-  if (rightItems.length > 0) {
-    const rightRows: PptxGenJS.TextProps[] = rightItems.map((item) => ({
-      text: item,
-      options: {
-        fontSize: 14,
-        color: THEME.body,
-        fontFace: THEME.font,
-        bullet: { code: '25CF', color: THEME.amber, fontSize: 8 },
-        paraSpaceBefore: 6,
-        paraSpaceAfter: 3,
-        lineSpacing: 20,
-      },
-    }));
-    slide.addText(rightRows, {
-      x: 5.3,
-      y: 1.4,
-      w: 4.0,
-      h: 3.8,
-      valign: 'top',
-    });
-  }
-
-  if (slideData.speakerNotes) slide.addNotes(slideData.speakerNotes);
-  addSlideNumber(slide, slideNum, totalSlides);
-}
-
-/**
- * Generates a .pptx file from an array of SlideData objects.
+ * Render every slide image via gpt-image-2 (or reuse cached ones), then pack
+ * everything into a .pptx where each slide is a full-bleed 16:9 image with
+ * the AI-written notes attached.
  */
 export async function generatePptx(
   slides: SlideData[],
   courseTitle: string,
   chapterTitle: string,
-  themeId?: string,
-): Promise<Blob> {
-  THEME = buildPptxTheme(themeId);
-  // Handle CJS/ESM interop: in some Node.js environments the default import
-  // wraps the constructor in a { default: ... } object
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const Ctor = typeof PptxGenJS === 'function' ? PptxGenJS : (PptxGenJS as any).default;
-  const pptx = new Ctor();
+  _themeId: string | undefined,
+  apiKey: string,
+  options: GeneratePptxOptions = {},
+): Promise<{ blob: Blob; renderedImages: Record<number, string> }> {
+  if (!slides || slides.length === 0) {
+    throw new Error('Cannot build a deck from zero slides.');
+  }
+  if (!apiKey?.trim()) {
+    throw new Error('OpenAI API key is required to render slide images.');
+  }
 
-  pptx.author = 'ClassBuild';
-  pptx.title = chapterTitle;
-  pptx.subject = courseTitle;
-  pptx.layout = 'LAYOUT_16x9';
+  const renderedImages: Record<number, string> = { ...(options.preRendered ?? {}) };
+  const size = options.imageSize ?? '3840x2160';
+  const quality = options.imageQuality ?? 'high';
 
-  const totalSlides = slides.length;
-
+  // Render images with bounded concurrency (3 in flight) so a 12-slide deck
+  // finishes in a few minutes rather than a few minutes per slide.
+  const todo: number[] = [];
   for (let i = 0; i < slides.length; i++) {
-    const slideData = slides[i];
-    const slideNum = i + 1;
-    const layout = slideData.layout || 'content';
+    if (renderedImages[i]) continue;
+    if (!slides[i].imagePrompt?.trim()) continue;
+    todo.push(i);
+  }
 
-    switch (layout) {
-      case 'title':
-        buildTitleSlide(pptx, slideData, courseTitle, slideNum, totalSlides);
-        break;
-      case 'section':
-        buildSectionSlide(pptx, slideData, slideNum, totalSlides);
-        break;
-      case 'big-idea':
-        buildBigIdeaSlide(pptx, slideData, slideNum, totalSlides);
-        break;
-      case 'quote':
-        buildQuoteSlide(pptx, slideData, slideNum, totalSlides);
-        break;
-      case 'two-column':
-        buildTwoColumnSlide(pptx, slideData, slideNum, totalSlides);
-        break;
-      case 'content':
-      default:
-        buildContentSlide(pptx, slideData, slideNum, totalSlides);
-        break;
+  let completed = 0;
+  const concurrency = Math.min(options.concurrency ?? 6, todo.length);
+  let cursor = 0;
+  options.onProgress?.(0, slides.length, 'rendering');
+
+  async function worker() {
+    while (true) {
+      const next = cursor++;
+      if (next >= todo.length) return;
+      const i = todo[next];
+      const prompt = withSafetyClause(slides[i].imagePrompt!.trim());
+      try {
+        const dataUri = await generateImageWithRetry(prompt, apiKey, {
+          size,
+          quality,
+          compression: 88,
+        });
+        renderedImages[i] = dataUri;
+        // Persist immediately so a tab-switch or refresh doesn't lose work.
+        options.onSlideRendered?.(i, dataUri);
+      } catch (err) {
+        // Surface failure but keep going — packing logic falls back to a
+        // text-only slide so the deck still ships.
+        console.error(`Slide ${i + 1} image gen failed:`, err);
+      }
+      completed++;
+      options.onProgress?.(completed, slides.length, 'rendering');
     }
   }
 
-  const output = await pptx.write({ outputType: 'blob' });
-  return output as Blob;
+  await Promise.all(Array.from({ length: concurrency }, worker));
+
+  options.onProgress?.(slides.length, slides.length, 'packing');
+
+  const pptx = new PptxGenJS();
+  pptx.layout = 'LAYOUT_WIDE'; // 13.333" × 7.5", standard 16:9
+  pptx.title = `${chapterTitle} — ${courseTitle}`;
+  pptx.author = 'ClassBuild';
+
+  const slideWidth = 13.333;
+  const slideHeight = 7.5;
+
+  slides.forEach((slide, i) => {
+    const s = pptx.addSlide();
+    const dataUri = renderedImages[i];
+
+    if (dataUri) {
+      // Full-bleed image, sized to the entire slide.
+      s.addImage({
+        data: dataUri,
+        x: 0,
+        y: 0,
+        w: slideWidth,
+        h: slideHeight,
+        sizing: { type: 'cover', w: slideWidth, h: slideHeight },
+      });
+    } else {
+      // Fallback: text-only slide if image generation failed for this slide.
+      s.background = { color: 'F1EBDD' }; // parchment, theme-neutral
+      s.addText(slide.title ?? `Slide ${i + 1}`, {
+        x: 0.8,
+        y: 0.8,
+        w: slideWidth - 1.6,
+        h: 1.2,
+        fontSize: 36,
+        fontFace: 'Georgia',
+        color: '14110D',
+        bold: false,
+      });
+      if (slide.bodyText || slide.bullets?.length) {
+        const body =
+          slide.bodyText ??
+          (slide.bullets ?? []).map((b) => `• ${b}`).join('\n');
+        s.addText(body, {
+          x: 0.8,
+          y: 2.4,
+          w: slideWidth - 1.6,
+          h: slideHeight - 3.6,
+          fontSize: 20,
+          fontFace: 'Georgia',
+          color: '3A342C',
+          valign: 'top',
+        });
+      }
+    }
+
+    // Speaker notes attach natively — visible in slide-show view.
+    if (slide.speakerNotes?.trim()) {
+      s.addNotes(slide.speakerNotes);
+    }
+  });
+
+  const blob = (await pptx.write({ outputType: 'blob' })) as Blob;
+  return { blob, renderedImages };
 }

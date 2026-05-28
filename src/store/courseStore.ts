@@ -43,6 +43,19 @@ interface CourseState {
   addResearchDossier: (dossier: ResearchDossier) => void;
   addChapter: (chapter: GeneratedChapter) => void;
   updateChapter: (number: number, updates: Partial<GeneratedChapter>) => void;
+  /**
+   * Atomically write a single slide's rendered image into a chapter's
+   * slidesJson. Used by the slide-render flow so concurrent gpt-image-2
+   * workers writing different slides don't clobber each other's progress.
+   */
+  setSlideImage: (chapterNum: number, slideIndex: number, dataUri: string) => void;
+  /** Refine one slide (image prompt and/or rendered image) without disturbing
+   *  the rest of the deck. Used by the per-slide "Regenerate image" flow. */
+  updateSlide: (
+    chapterNum: number,
+    slideIndex: number,
+    updates: Partial<import('../types/course').SlideData>,
+  ) => void;
   resetDownstream: () => void;
   reset: () => void;
 }
@@ -56,9 +69,11 @@ const defaultSetup: CourseSetup = {
   numChapters: 12,
   chapterLength: 'standard',
   widgetsPerChapter: 2,
-  themeId: 'midnight',
+  themeId: 'press',
   voiceId: 'Kore',
 };
+
+const LEGACY_THEME_IDS = new Set(['midnight', 'classic', 'ocean', 'warm']);
 
 export const useCourseStore = create<CourseState>()(
   persist(
@@ -114,6 +129,34 @@ export const useCourseStore = create<CourseState>()(
           ),
         })),
 
+      setSlideImage: (chapterNum, slideIndex, dataUri) =>
+        set((state) => ({
+          chapters: state.chapters.map((c) => {
+            if (c.number !== chapterNum) return c;
+            const slides = c.slidesJson ?? [];
+            return {
+              ...c,
+              slidesJson: slides.map((s, i) =>
+                i === slideIndex ? { ...s, imageDataUri: dataUri } : s,
+              ),
+            };
+          }),
+        })),
+
+      updateSlide: (chapterNum, slideIndex, updates) =>
+        set((state) => ({
+          chapters: state.chapters.map((c) => {
+            if (c.number !== chapterNum) return c;
+            const slides = c.slidesJson ?? [];
+            return {
+              ...c,
+              slidesJson: slides.map((s, i) =>
+                i === slideIndex ? { ...s, ...updates } : s,
+              ),
+            };
+          }),
+        })),
+
       resetDownstream: () =>
         set({
           completedStages: [],
@@ -139,7 +182,7 @@ export const useCourseStore = create<CourseState>()(
     {
       name: 'classbuild-course',
       storage: idbStorage,
-      version: 3,
+      version: 4,
       migrate(persisted, version) {
         const state = persisted as Record<string, unknown>;
         // v0→v1: migrate old preview/generate stages to build
@@ -161,6 +204,20 @@ export const useCourseStore = create<CourseState>()(
           if (!('curriculumMap' in state)) state.curriculumMap = null;
         }
         // v2→v3: move to IndexedDB (no schema changes)
+        // v3→v4: replace retired chapter themes (midnight / classic / ocean /
+        // warm) with the new default 'press' — those CSS files no longer ship
+        // and getTheme() falls back to 'press' anyway, but normalize so the
+        // ExportPage picker shows the right selection on first render.
+        if (version === undefined || version < 4) {
+          const setupRecord = state.setup as Record<string, unknown> | undefined;
+          if (setupRecord) {
+            const stale = setupRecord.themeId;
+            if (typeof stale === 'string' && LEGACY_THEME_IDS.has(stale)) {
+              setupRecord.themeId = 'press';
+            }
+            if (!setupRecord.themeId) setupRecord.themeId = 'press';
+          }
+        }
         return state;
       },
       partialize: (state) => ({

@@ -7,15 +7,24 @@ PROCESS:
 2. Search for seminal papers, textbooks, and authoritative reviews
 3. Synthesize findings into a structured dossier
 
+VERIFICATION — IMPORTANT:
+Every source you emit will be automatically verified against Semantic Scholar, Crossref, and Unpaywall after you finish. Unverified sources are flagged in the UI; hallucinated DOIs are stripped; open-access URLs are added where they exist.
+
+Therefore:
+- Only include papers/books you are CONFIDENT exist. If you didn't see it in a search result, don't cite it.
+- Never invent or guess a DOI. If you don't have the exact DOI from a search result, omit the field — the verifier will look it up by title.
+- Provide the most accurate title you can — title is what the verifier matches against.
+- Prefer peer-reviewed journal articles, seminal textbooks, and authoritative reviews.
+
 After completing your research, output your dossier as JSON:
 {
   "sources": [
     {
-      "title": "Full paper/book title",
+      "title": "Full paper/book title — be precise; this is what the verifier matches against",
       "authors": "Author names",
       "year": "Publication year",
-      "url": "URL if found",
-      "doi": "DOI if available",
+      "url": "URL if found (the verifier may replace this with an open-access link)",
+      "doi": "DOI if you saw it in a search result — omit if unsure",
       "summary": "Brief summary of key findings relevant to the chapter",
       "relevance": "How this source supports the chapter content",
       "isVerified": true
@@ -24,7 +33,7 @@ After completing your research, output your dossier as JSON:
   "synthesisNotes": "How these sources collectively inform the chapter content and key pedagogical takeaways"
 }
 
-Find 5-8 high-quality sources per chapter. Prefer peer-reviewed journal articles, seminal textbooks, and authoritative reviews. Output ONLY the JSON dossier.`;
+Find 5-8 high-quality sources per chapter. Output ONLY the JSON dossier.`;
 
 export function buildResearchUserPrompt(chapterTitle: string, chapterNarrative: string, keyConcepts: string[]) {
   return `Research the following chapter topic and build a dossier of real academic sources.

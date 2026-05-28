@@ -1,5 +1,5 @@
 /**
- * Convert an error from Claude, Gemini, ElevenLabs, or a raw fetch into a
+ * Convert an error from Claude, OpenAI, ElevenLabs, or a raw fetch into a
  * short, user-facing sentence. Used by the UI so tab-error banners and
  * toasts don't leak internal API noise like "HTTP 429: {"error":..."}.
  *

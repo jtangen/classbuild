@@ -7,7 +7,26 @@
  *
  * Based on the PSYC2371 practice quiz design.
  */
-import { getTheme } from '../themes';
+import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
+
+/** Each chapter theme implies a different chrome aesthetic — modernist hard
+ *  corners for Studio, friendly rounded blocks for Storybook, hairline serifs
+ *  for Press. These knobs let the quiz inherit the right typographic register
+ *  and the right radius rhythm rather than defaulting to one generic look. */
+function themeChrome(themeId: string): {
+  cardRadius: number;
+  pillRadius: number;
+} {
+  switch (themeId) {
+    case 'press':      return { cardRadius: 2, pillRadius: 12 };
+    case 'notebook':   return { cardRadius: 2, pillRadius: 8  };
+    case 'almanac':    return { cardRadius: 3, pillRadius: 14 };
+    case 'storybook':  return { cardRadius: 8, pillRadius: 20 };
+    case 'studio':     return { cardRadius: 0, pillRadius: 0  };
+    case 'terminal':   return { cardRadius: 4, pillRadius: 10 };
+    default:           return { cardRadius: 4, pillRadius: 12 };
+  }
+}
 
 export function buildQuizHtml(
   quizTitle: string,
@@ -17,6 +36,8 @@ export function buildQuizHtml(
 ): string {
   const escapedQuizData = JSON.stringify(quizData);
   const t = getTheme(themeId);
+  const ct = getChapterTheme(themeId);
+  const chrome = themeChrome(ct.id);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -25,6 +46,9 @@ export function buildQuizHtml(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${quizTitle}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="${FONTS_URL}">
     <style>
         :root {
             --primary-purple: ${t.accent};
@@ -43,6 +67,14 @@ export function buildQuizHtml(
             --on-accent: ${t.isDark ? '#1a1a2e' : '#ffffff'};
             --shadow: 0 4px 12px rgba(0, 0, 0, ${t.isDark ? '0.4' : '0.15'});
             --transition: all 0.3s ease;
+            /* Theme-driven typography and chrome — mirror the chapter aesthetic
+               so the quiz feels like a continuation of the reading, not a
+               separate app. */
+            --qz-font-display: ${ct.displayFont}, Georgia, serif;
+            --qz-font-body: ${ct.bodyFont}, system-ui, sans-serif;
+            --qz-font-mono: ${ct.monoFont}, ui-monospace, monospace;
+            --qz-card-radius: ${chrome.cardRadius}px;
+            --qz-pill-radius: ${chrome.pillRadius}px;
         }
 
         * {
@@ -52,20 +84,22 @@ export function buildQuizHtml(
         }
 
         body {
-            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, Oxygen, Ubuntu, sans-serif;
+            font-family: var(--qz-font-body);
             line-height: 1.6;
             color: var(--black);
             background-color: ${t.pageBg};
             padding: 20px;
             min-height: 100vh;
             font-size: 12pt;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .quiz-container {
             max-width: 800px;
             margin: 0 auto;
             background-color: ${t.cardBg};
-            border-radius: 12px;
+            border-radius: var(--qz-card-radius);
             box-shadow: var(--shadow);
             overflow: hidden;
             position: relative;
@@ -80,14 +114,21 @@ export function buildQuizHtml(
         }
 
         .header h1 {
+            font-family: var(--qz-font-display);
             margin-bottom: 5px;
-            font-size: 1.8rem;
-            font-weight: 600;
+            font-size: 2rem;
+            font-weight: 500;
+            font-variation-settings: '"opsz" 22';
+            letter-spacing: -0.005em;
+            font-style: ${ct.id === 'studio' ? 'italic' : 'normal'};
         }
 
         .header-subtitle {
-            font-size: 1rem;
-            opacity: 0.8;
+            font-family: var(--qz-font-mono);
+            font-size: 0.82rem;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            opacity: 0.75;
             margin-bottom: 15px;
         }
 
@@ -633,11 +674,14 @@ export function buildQuizHtml(
             padding: 15px;
             margin-bottom: 12px;
             border: 2px solid var(--light-grey);
-            border-radius: 8px;
+            border-radius: var(--qz-card-radius);
             cursor: pointer;
             transition: var(--transition);
             position: relative;
             padding-left: 50px;
+            font-family: var(--qz-font-body);
+            font-size: 1rem;
+            line-height: 1.5;
         }
 
         .option:hover {
@@ -679,8 +723,13 @@ export function buildQuizHtml(
         }
 
         #question-text h3 {
+            font-family: var(--qz-font-display);
+            font-size: 1.35rem;
+            font-weight: 500;
+            font-variation-settings: '"opsz" 18';
+            letter-spacing: -0.003em;
             margin-bottom: 20px;
-            line-height: 1.5;
+            line-height: 1.4;
             color: var(--light-purple);
         }
 

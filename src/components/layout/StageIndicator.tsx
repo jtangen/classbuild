@@ -1,4 +1,3 @@
-import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { STAGES } from '../../types/course';
 import { useCourseStore } from '../../store/courseStore';
@@ -7,71 +6,131 @@ export function StageIndicator() {
   const navigate = useNavigate();
   const location = useLocation();
   const { currentStage, completedStages, chapters } = useCourseStore();
-  const currentIndex = STAGES.findIndex((s) => s.id === currentStage);
   const hasChapters = chapters.length > 0;
+  // Treat the route the user is actually on as the current stage — covers
+  // the case where the store still says 'landing' but the user has navigated
+  // straight to /setup.
+  const routeStage = STAGES.find((s) => s.path === location.pathname)?.id;
+  const effectiveCurrent = routeStage ?? currentStage;
+  const currentIndex = STAGES.findIndex((s) => s.id === effectiveCurrent);
 
   return (
-    <div className="flex items-center justify-center gap-1 py-4">
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${STAGES.length}, 1fr)`,
+        borderTop: '0.5px solid var(--cb-border-rule)',
+        borderBottom: '0.5px solid var(--cb-border-rule)',
+        background: 'var(--cb-ground-page)',
+        fontFamily: 'var(--font-cb-serif)',
+      }}
+    >
       {STAGES.map((stage, i) => {
         const isComplete = completedStages.includes(stage.id);
-        const isCurrent = stage.id === currentStage;
+        const isCurrent = stage.id === effectiveCurrent;
         const isPast = i < currentIndex;
         const isOnThisPage = location.pathname === stage.path;
-        // Allow Generate/Export once any chapter exists (partial export)
-        const isUnlockedByContent = hasChapters && (stage.id === 'build' || stage.id === 'export');
-        const isClickable = !isOnThisPage && (isComplete || isPast || isCurrent || isUnlockedByContent);
+        const isUnlockedByContent =
+          hasChapters && (stage.id === 'build' || stage.id === 'export');
+        const isClickable =
+          !isOnThisPage &&
+          (isComplete || isPast || isCurrent || isUnlockedByContent);
+
+        const state: 'done' | 'current' | 'upcoming' = isCurrent
+          ? 'current'
+          : isComplete || isPast
+          ? 'done'
+          : 'upcoming';
+
+        const labelColor =
+          state === 'upcoming'
+            ? 'var(--cb-text-subtle)'
+            : 'var(--cb-text-default)';
 
         return (
-          <div key={stage.id} className="flex items-center">
-            <button
-              className={`flex flex-col items-center gap-1 bg-transparent border-0 p-0 ${isClickable ? 'cursor-pointer' : 'cursor-default'}`}
-              onClick={() => isClickable && navigate(stage.path)}
-              disabled={!isClickable}
+          <button
+            key={stage.id}
+            type="button"
+            onClick={() => isClickable && navigate(stage.path)}
+            disabled={!isClickable}
+            className="cb-focus"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              padding: '14px 22px',
+              borderLeft:
+                i === 0 ? 'none' : '0.5px solid var(--cb-border-default)',
+              background:
+                state === 'current' ? 'var(--cb-accent-emphasis-quiet)' : 'transparent',
+              border: 'none',
+              cursor: isClickable ? 'pointer' : 'default',
+              textAlign: 'left',
+              transition: 'background-color 200ms cubic-bezier(0.32,0.04,0.32,1)',
+              fontFamily: 'inherit',
+            }}
+            onMouseEnter={(e) => {
+              if (isClickable && state !== 'current') {
+                e.currentTarget.style.background = 'var(--cb-surface-sunken)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background =
+                state === 'current' ? 'var(--cb-accent-emphasis-quiet)' : 'transparent';
+            }}
+          >
+            <span
+              style={{
+                fontSize: 15.5,
+                fontWeight: state === 'current' ? 500 : 400,
+                color: labelColor,
+                display: 'inline-flex',
+                alignItems: 'baseline',
+                gap: 6,
+              }}
             >
-              <motion.div
-                className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-medium transition-all duration-300 ${
-                  isCurrent
-                    ? 'bg-violet-500 text-white shadow-lg shadow-violet-500/30'
-                    : isComplete
-                    ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                    : isPast || isUnlockedByContent
-                    ? 'bg-violet-500/15 text-violet-400'
-                    : 'bg-bg-elevated text-text-muted'
-                }`}
-                animate={isCurrent ? { scale: [1, 1.05, 1] } : {}}
-                transition={{ duration: 2, repeat: Infinity }}
-                whileHover={isClickable && !isCurrent ? { scale: 1.1 } : {}}
-              >
-                {isComplete ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                ) : (
-                  stage.number
-                )}
-              </motion.div>
-              <span
-                className={`text-xs transition-colors ${
-                  isCurrent ? 'text-violet-400 font-medium' : isClickable ? 'text-text-secondary' : 'text-text-muted'
-                }`}
-              >
-                {stage.label}
-              </span>
-            </button>
-            {i < STAGES.length - 1 && (
-              <div className="relative w-10 mx-0.5 mb-5">
-                <div className="h-px bg-bg-elevated w-full" />
-                {(isPast || isComplete) && (
-                  <motion.div
-                    className="absolute top-0 left-0 h-px bg-gradient-to-r from-violet-500/60 to-violet-500/30"
-                    initial={{ width: 0 }}
-                    animate={{ width: '100%' }}
-                    transition={{ duration: 0.5, delay: i * 0.1 }}
-                  />
-                )}
-              </div>
-            )}
-          </div>
+              {state === 'done' && (
+                <span
+                  aria-hidden
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: 14,
+                    height: 14,
+                    borderRadius: '50%',
+                    background: 'var(--cb-accent-emphasis)',
+                    color: '#fff',
+                    fontSize: 9,
+                    lineHeight: 1,
+                    flexShrink: 0,
+                    transform: 'translateY(-1px)',
+                  }}
+                >
+                  ✓
+                </span>
+              )}
+              {stage.label}
+            </span>
+            <span
+              className="cb-italic"
+              style={{
+                fontSize: 13,
+                color:
+                  state === 'current'
+                    ? 'var(--cb-accent-emphasis)'
+                    : 'var(--cb-text-muted)',
+              }}
+            >
+              {state === 'done'
+                ? isClickable
+                  ? '↵ revisit'
+                  : 'done'
+                : state === 'current'
+                ? '— here —'
+                : 'awaiting'}
+            </span>
+          </button>
         );
       })}
     </div>

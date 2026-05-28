@@ -19,10 +19,37 @@ function App() {
 
   if (!hydrated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-bg-primary">
-        <div className="flex items-center gap-3 text-text-muted text-sm">
-          <div className="w-5 h-5 border-2 border-violet-500 border-t-transparent rounded-full animate-spin" />
-          Loading course data...
+      <div
+        style={{
+          minHeight: '100vh',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          background: 'var(--cb-ground-page)',
+          fontFamily: 'var(--font-cb-serif)',
+        }}
+      >
+        <div
+          className="cb-italic"
+          style={{
+            fontSize: 15,
+            color: 'var(--cb-text-muted)',
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 10,
+          }}
+        >
+          <span
+            className="cb-sc cb-mono"
+            style={{
+              fontSize: 12,
+              letterSpacing: '0.14em',
+              color: 'var(--cb-accent-emphasis)',
+            }}
+          >
+            cb · loading
+          </span>
+          <span>fetching local course data…</span>
         </div>
       </div>
     );

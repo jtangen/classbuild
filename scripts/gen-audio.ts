@@ -1,43 +1,25 @@
 #!/usr/bin/env node
 /**
- * One-off: generate Gemini TTS audiobooks for every chapter that has a
- * transcript but no audio file yet. Writes WAV, then transcodes to MP3 via
- * ffmpeg (if available).
+ * One-off: generate ElevenLabs audiobooks for every chapter that has a
+ * transcript but no audio file yet. Native MP3 output — no transcoding step.
  *
- * Usage: GEMINI_API_KEY=... npx tsx scripts/gen-audio.ts ./output/my-course [voiceName]
+ * Usage: ELEVENLABS_API_KEY=... npx tsx scripts/gen-audio.ts ./output/my-course [voiceId]
  */
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { existsSync, readdirSync } from 'node:fs';
-import { promisify } from 'node:util';
-import { execFile } from 'node:child_process';
-import { generateAudiobook } from '../src/services/gemini/tts';
+import { generateAudiobook } from '../src/services/elevenLabs/tts';
 import { getVoiceOption } from '../src/themes';
 
-const execFileAsync = promisify(execFile);
-
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-if (!GEMINI_API_KEY) {
-  console.error('Error: GEMINI_API_KEY environment variable is required');
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+if (!ELEVENLABS_API_KEY) {
+  console.error('Error: ELEVENLABS_API_KEY environment variable is required');
   process.exit(1);
 }
 
 const OUTPUT_DIR = process.argv[2] || './output/raising-a-puppy';
-const VOICE_NAME = process.argv[3] || undefined; // uses default (Kore) if not set
+const VOICE_ID = process.argv[3] || undefined;
 const AUDIO_DIR = join(OUTPUT_DIR, 'audio');
-
-async function wavToMp3(wavPath: string): Promise<string> {
-  const mp3Path = wavPath.replace(/\.wav$/, '.mp3');
-  try {
-    await execFileAsync('ffmpeg', ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', '-qscale:a', '2', mp3Path]);
-    await unlink(wavPath);
-    return mp3Path;
-  } catch {
-    console.log('  Warning: ffmpeg not available — keeping WAV output');
-    try { await unlink(mp3Path); } catch { /* ignore */ }
-    return wavPath;
-  }
-}
 
 async function main() {
   const files = readdirSync(AUDIO_DIR)
@@ -45,14 +27,13 @@ async function main() {
     .sort();
 
   console.log(`Found ${files.length} transcripts in ${AUDIO_DIR}`);
-  if (VOICE_NAME) console.log(`Using voice: ${VOICE_NAME}`);
+  if (VOICE_ID) console.log(`Using voice id: ${VOICE_ID}`);
 
   for (const file of files) {
     const prefix = file.replace('_transcript.md', '');
     const mp3Path = join(AUDIO_DIR, `${prefix}.mp3`);
-    const wavPath = join(AUDIO_DIR, `${prefix}.wav`);
 
-    if (existsSync(mp3Path) || existsSync(wavPath)) {
+    if (existsSync(mp3Path)) {
       console.log(`  ${prefix}: audio already exists, skipping`);
       continue;
     }
@@ -62,19 +43,18 @@ async function main() {
 
     console.log(`  ${prefix}: Generating audio (${transcript.length} chars)...`);
     try {
-      const voice = getVoiceOption(VOICE_NAME);
-      const audioBlob = await generateAudiobook(transcript, GEMINI_API_KEY!, {
-        voiceName: voice.id,
-        accent: voice.accent,
-        onProgress: (current, total) => process.stdout.write(`    chunk ${current}/${total}\r`),
+      const voice = getVoiceOption(VOICE_ID);
+      const audioBlob = await generateAudiobook(transcript, ELEVENLABS_API_KEY!, {
+        voiceId: voice.id,
+        onProgress: (current, total) =>
+          process.stdout.write(`    chunk ${current}/${total}\r`),
       });
       console.log('');
 
       const arrayBuffer = await audioBlob.arrayBuffer();
-      await writeFile(wavPath, Buffer.from(arrayBuffer));
-      const finalPath = await wavToMp3(wavPath);
+      await writeFile(mp3Path, Buffer.from(arrayBuffer));
       const sizeMb = (arrayBuffer.byteLength / 1024 / 1024).toFixed(1);
-      console.log(`  ${prefix}: Saved ${finalPath.endsWith('.mp3') ? 'MP3' : 'WAV'} (${sizeMb} MB source)`);
+      console.log(`  ${prefix}: Saved MP3 (${sizeMb} MB)`);
     } catch (err) {
       console.error(`  ${prefix}: ERROR — ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -83,4 +63,7 @@ async function main() {
   console.log('Done!');
 }
 
-main().catch(err => { console.error(err); process.exit(1); });
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

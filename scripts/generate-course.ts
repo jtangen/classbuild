@@ -28,7 +28,7 @@ import { streamWithRetry } from '../src/services/claude/streaming';
 import { MODELS } from '../src/services/claude/client';
 import { buildSyllabusPrompt, parseSyllabusResponse } from '../src/prompts/syllabus';
 import { buildChapterPrompt, buildChapterUserPrompt } from '../src/prompts/chapter';
-import { replaceGeminiImagePlaceholdersNode } from './lib/node-image-placer';
+import { replaceAiImagePlaceholdersNode } from './lib/node-image-placer';
 import { buildPracticeQuizPrompt, buildPracticeQuizUserPrompt } from '../src/prompts/practiceQuiz';
 import { buildInClassQuizPrompt, buildInClassQuizUserPrompt } from '../src/prompts/inClassQuiz';
 import { buildDiscussionPrompt, buildDiscussionUserPrompt } from '../src/prompts/discussion';
@@ -38,15 +38,26 @@ import { buildSlidesPrompt, buildSlidesUserPrompt } from '../src/prompts/slides'
 import { buildInfographicMetaPrompt, buildInfographicMetaUserPrompt } from '../src/prompts/infographic';
 import { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } from '../src/prompts/weeklyChallenge';
 import { RESEARCH_SYSTEM_PROMPT, buildResearchUserPrompt, parseResearchResponse } from '../src/prompts/research';
+import {
+  buildLearningObjectivesPrompt,
+  buildLearningObjectivesUserPrompt,
+  parseCurriculumMapResponse,
+} from '../src/prompts/learningObjectives';
+import {
+  buildOutcomesPage,
+  buildOutcomesCsv,
+  hashSyllabus,
+} from '../src/templates/outcomesTableTemplate';
 import { balancePracticeQuiz, balanceInClassQuiz } from '../src/services/quiz/answerBalancer';
 import { buildQuizHtml } from '../src/templates/quizTemplate';
 import { buildWeeklyChallengeHtml } from '../src/templates/weeklyChallengeTemplate';
 import { generateQuizDocPackage } from '../src/services/export/quizDocExporter';
 import { generatePptx } from '../src/services/export/pptxExporter';
-import { validateDois } from '../src/utils/doiValidator';
+import { enrichDossier } from '../src/services/academic';
 import { generateInfographicNode } from './lib/node-image';
 import { buildDiscussionDocx, buildActivitiesDocx, buildTranscriptDocx, buildResearchDocx, buildSyllabusDocx } from './lib/docx-helpers';
 import { slugify, extractHtml, parseJson } from '../src/utils/format';
+import { renderChapterHtml } from '../src/themes';
 
 import type {
   CourseSetup,
@@ -70,7 +81,7 @@ const { values } = parseArgs({
     chapters: { type: 'string', default: '12' },
     level: { type: 'string', default: 'advanced-undergrad' },
     output: { type: 'string', default: './output' },
-    theme: { type: 'string', default: 'midnight' },
+    theme: { type: 'string', default: 'press' },
     length: { type: 'string', default: 'standard' },
     widgets: { type: 'string', default: '3' },
     cohort: { type: 'string', default: '60' },
@@ -96,7 +107,8 @@ if (!values.topic) {
 }
 
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 if (!ANTHROPIC_API_KEY) {
   console.error('Error: ANTHROPIC_API_KEY environment variable is required');
@@ -548,23 +560,21 @@ async function generateAudio(
     log(`    Ch ${prefix} Transcript DOCX error: ${err instanceof Error ? err.message : String(err)}`);
   }
 
-  // TTS if Gemini key available
-  if (GEMINI_API_KEY) {
-    log(`    Ch ${prefix} Synthesizing audio with Gemini TTS...`);
+  // TTS if ElevenLabs key available
+  if (ELEVENLABS_API_KEY) {
+    log(`    Ch ${prefix} Synthesizing audio with ElevenLabs...`);
     try {
-      const { generateAudiobook } = await import('../src/services/gemini/tts');
+      const { generateAudiobook } = await import('../src/services/elevenLabs/tts');
       const { getVoiceOption } = await import('../src/themes');
       const voice = getVoiceOption(setup.voiceId);
-      const audioBlob = await generateAudiobook(transcriptText, GEMINI_API_KEY, {
-        voiceName: voice.id,
-        accent: voice.accent,
+      const audioBlob = await generateAudiobook(transcriptText, ELEVENLABS_API_KEY, {
+        voiceId: voice.id,
         onProgress: (current, total) => log(`      Ch ${prefix} TTS chunk ${current}/${total}`),
       });
       const arrayBuffer = await audioBlob.arrayBuffer();
-      const wavPath = join(OUTPUT_DIR, 'audio', `${prefix}.wav`);
-      await save(wavPath, Buffer.from(arrayBuffer));
-      const finalPath = await wavToMp3(wavPath);
-      log(`    Ch ${prefix} Saved ${finalPath.endsWith('.mp3') ? 'MP3' : 'WAV'} audio`);
+      const mp3Path = join(OUTPUT_DIR, 'audio', `${prefix}.mp3`);
+      await save(mp3Path, Buffer.from(arrayBuffer));
+      log(`    Ch ${prefix} Saved MP3 audio (ElevenLabs)`);
     } catch (err) {
       log(`    Ch ${prefix} TTS error: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -582,7 +592,7 @@ async function generateSlides(
   const slidesText = await streamWithRetry(
     {
       apiKey: ANTHROPIC_API_KEY!,
-      system: buildSlidesPrompt(),
+      system: buildSlidesPrompt(setup.themeId),
       messages: [{
         role: 'user',
         content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, chapterHtml),
@@ -598,8 +608,24 @@ async function generateSlides(
   await save(join(OUTPUT_DIR, 'slides', `${prefix}_slides.md`), formatSlidesMd(slides, ch.title));
   await save(join(OUTPUT_DIR, 'slides', `${prefix}_slides.json`), JSON.stringify(slides, null, 2));
 
+  if (!OPENAI_API_KEY) {
+    log(`    Ch ${prefix} Skipped PPTX render (no OPENAI_API_KEY for slide images)`);
+    return;
+  }
   try {
-    const pptxBlob = await generatePptx(slides, syllabus.courseTitle, ch.title, setup.themeId);
+    const { blob: pptxBlob } = await generatePptx(
+      slides,
+      syllabus.courseTitle,
+      ch.title,
+      setup.themeId,
+      OPENAI_API_KEY,
+      {
+        imageQuality: 'high',
+        imageSize: '3840x2160',
+        onProgress: (i, total, phase) =>
+          log(`      Ch ${prefix} slide ${phase} ${i}/${total}`),
+      },
+    );
     const pptxBuffer = Buffer.from(await pptxBlob.arrayBuffer());
     await save(join(OUTPUT_DIR, 'slides', `${prefix}_slides.pptx`), pptxBuffer);
     log(`    Ch ${prefix} Saved slides (+ PPTX)`);
@@ -613,7 +639,7 @@ async function generateInfographic(
   chapterHtml: string,
   prefix: string,
 ) {
-  if (!GEMINI_API_KEY) return;
+  if (!OPENAI_API_KEY) return;
 
   log(`  Ch ${prefix} Infographic...`);
   // Phase 1: generate the prompt
@@ -634,7 +660,10 @@ async function generateInfographic(
   console.log('');
 
   // Phase 2: generate the image
-  const { base64, mimeType } = await generateInfographicNode(promptText, GEMINI_API_KEY);
+  const { base64, mimeType } = await generateInfographicNode(promptText, OPENAI_API_KEY, {
+    size: '3840x2160',
+    quality: 'high',
+  });
   const ext = mimeType.includes('png') ? 'png' : 'jpg';
   await save(
     join(OUTPUT_DIR, 'infographic', `${prefix}.${ext}`),
@@ -665,7 +694,7 @@ async function generateChapterMaterials(
     { label: `Ch${prefix}-audio`, fn: () => generateAudio(ch, chapterHtml, syllabus, prefix) },
     { label: `Ch${prefix}-slides`, fn: () => generateSlides(ch, chapterHtml, syllabus, prefix) },
   ];
-  if (GEMINI_API_KEY) {
+  if (OPENAI_API_KEY) {
     sonnetTasks.push({ label: `Ch${prefix}-infographic`, fn: () => generateInfographic(ch, chapterHtml, prefix) });
   }
 
@@ -709,19 +738,19 @@ async function researchChapter(ch: ChapterSyllabus, syllabus: Syllabus): Promise
       };
     }
 
-    // Validate DOIs
-    const dois = dossier.sources.map(s => s.doi).filter((d): d is string => !!d);
-    if (dois.length > 0) {
+    // Verify + enrich sources against Semantic Scholar, Crossref, Unpaywall.
+    if (dossier.sources.length > 0) {
       try {
-        const validity = await validateDois(dois);
-        dossier.sources = dossier.sources.map(s => {
-          if (s.doi && validity.has(s.doi) && !validity.get(s.doi)) {
-            return { ...s, doi: undefined };
-          }
-          return s;
+        const { dossier: enriched, stats } = await enrichDossier(dossier, {
+          concurrency: 4,
         });
-      } catch {
-        // DOI validation failed — keep as-is
+        dossier = enriched;
+        const verified = stats.doiVerified + stats.doiResolved;
+        log(
+          `    ${verified}/${stats.total} verified · ${stats.oaFound} open access · ${stats.unverified} unverified`,
+        );
+      } catch (err) {
+        log(`    Verification failed: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
@@ -765,7 +794,7 @@ async function main() {
   log(`Output directory: ${OUTPUT_DIR}`);
   log(`Models: Opus=${MODELS.opus}, Sonnet=${MODELS.sonnet}`);
   if (setup.learnerNotes) log(`Notes: ${setup.learnerNotes}`);
-  if (GEMINI_API_KEY) log('Gemini API key detected — infographics and TTS enabled');
+  if (OPENAI_API_KEY) log('OpenAI key detected — image gen enabled; add ELEVENLABS_API_KEY for TTS');
 
   await ensureDir(OUTPUT_DIR);
 
@@ -827,6 +856,46 @@ async function main() {
     return;
   }
 
+  // ── Stage 1b: Learning outcomes table ──────────────────────────
+  log('');
+  log('═══ Stage 1b: Learning Outcomes ═══');
+  let curriculumMap: import('../src/types/course').CurriculumMap | null = null;
+  try {
+    const loText = await streamWithRetry(
+      {
+        apiKey: ANTHROPIC_API_KEY,
+        model: MODELS.haiku,
+        system: buildLearningObjectivesPrompt(),
+        messages: [
+          { role: 'user', content: buildLearningObjectivesUserPrompt(syllabus) },
+        ],
+        maxTokens: 6000,
+      },
+      {},
+    );
+    curriculumMap = parseCurriculumMapResponse(loText);
+    if (curriculumMap) {
+      curriculumMap.syllabusHash = hashSyllabus(syllabus);
+      await save(
+        join(OUTPUT_DIR, 'curriculum-map.json'),
+        JSON.stringify(curriculumMap, null, 2),
+      );
+      await save(
+        join(OUTPUT_DIR, 'learning-outcomes.csv'),
+        buildOutcomesCsv(curriculumMap, syllabus),
+      );
+      await save(
+        join(OUTPUT_DIR, 'learning-outcomes.html'),
+        buildOutcomesPage(curriculumMap, syllabus, setup.themeId),
+      );
+      log(`  ${curriculumMap.objectives.length} objectives mapped to ${syllabus.chapters.length} chapters`);
+    } else {
+      log('  Warning: Could not parse learning-outcomes response.');
+    }
+  } catch (err) {
+    log(`  Learning-outcomes generation failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
+
   // ── Stage 2: Research (3 chapters concurrently) ────────────────
   log('');
   log('═══ Stage 2: Research (3 concurrent) ═══');
@@ -858,7 +927,7 @@ async function main() {
   log('');
   log('═══ Stage 3: Building Course Materials ═══');
 
-  const hasGemini = !!GEMINI_API_KEY;
+  const hasImageGen = !!OPENAI_API_KEY;
 
   for (const ch of syllabus.chapters) {
     const prefix = pad(ch.number);
@@ -884,11 +953,13 @@ async function main() {
         {
           apiKey: ANTHROPIC_API_KEY,
           model: MODELS.opus,
-          system: buildChapterPrompt(setup.themeId, hasGemini),
+          system: buildChapterPrompt(setup.themeId, hasImageGen),
           messages: [{
             role: 'user',
             content: buildChapterUserPrompt(
-              syllabus.courseTitle, ch, setup.chapterLength, researchSources, hasGemini,
+              syllabus.courseTitle, ch, setup.chapterLength,
+              { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes },
+              researchSources, hasImageGen, setup.chapterLengthBrief,
             ),
           }],
           thinkingBudget: 'high',
@@ -903,12 +974,15 @@ async function main() {
       chapterHtml = extractHtml(chapterText);
 
       // Replace Gemini image placeholders with actual generated images
-      if (GEMINI_API_KEY) {
+      if (OPENAI_API_KEY) {
         log(`    Ch ${prefix} Replacing image placeholders...`);
-        chapterHtml = await replaceGeminiImagePlaceholdersNode(chapterHtml, GEMINI_API_KEY);
+        chapterHtml = await replaceAiImagePlaceholdersNode(chapterHtml, OPENAI_API_KEY);
       }
 
-      await save(join(OUTPUT_DIR, 'chapters', `${prefix}_${slug}.html`), chapterHtml);
+      await save(
+        join(OUTPUT_DIR, 'chapters', `${prefix}_${slug}.html`),
+        renderChapterHtml(chapterHtml, setup.themeId, ch.title),
+      );
       log(`    Ch ${prefix} Saved chapter HTML`);
     } catch (err) {
       log(`    Ch ${prefix} ERROR: ${err instanceof Error ? err.message : String(err)}`);
@@ -924,6 +998,7 @@ async function main() {
     setup,
     syllabus,
     researchDossiers: dossiers,
+    curriculumMap,
     generatedAt: new Date().toISOString(),
   };
   await save(join(OUTPUT_DIR, 'course.json'), JSON.stringify(course, null, 2));

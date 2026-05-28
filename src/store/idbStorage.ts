@@ -81,8 +81,11 @@ const idbStateStorage: StateStorage = {
     try {
       const db = await getDb();
       await idbSet(db, name, value);
+      // Stamp the timestamp so the Header can show "Saved · Xs ago".
+      // Dynamic import keeps this circular ref a true cycle break.
+      const { useUiStore } = await import('./uiStore');
+      useUiStore.getState().setLastSavedAt(Date.now());
     } catch (err) {
-      // Dynamic import to avoid circular dependency
       const { useUiStore } = await import('./uiStore');
       useUiStore.getState().setPersistError(
         `Failed to save: ${err instanceof Error ? err.message : String(err)}`

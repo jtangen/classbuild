@@ -1,51 +1,208 @@
+/* Codex fonts — Newsreader for prose, JetBrains Mono for code/metadata,
+   Noto Serif JP as CJK fallback. Must precede @import "tailwindcss". */
+@import url("https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;0,6..72,600;0,6..72,700;1,6..72,400;1,6..72,500;1,6..72,600&family=JetBrains+Mono:wght@300;400;500;600&family=Noto+Serif+JP:wght@300;400;500;600;700&display=swap");
 @import "tailwindcss";
 
 @theme {
-  /* Background */
+  /* ───────── Codex (SPA chrome) — Parchment defaults ───────── */
+  --color-cb-ground-page:        #f1ebdd;
+  --color-cb-ground-canvas:      #f8f3e6;
+  --color-cb-surface-default:    #f1ebdd;
+  --color-cb-surface-raised:     #f8f3e6;
+  --color-cb-surface-sunken:     #e8dfc7;
+  --color-cb-surface-well:       #ddd1b3;
+  --color-cb-neutral-1:          #e8dfc7;
+  --color-cb-neutral-2:          #cfc6ad;
+  --color-cb-neutral-3:          #a89f88;
+  --color-cb-neutral-4:          #7c7464;
+  --color-cb-neutral-5:          #5d574a;
+  --color-cb-neutral-6:          #3e3a32;
+  --color-cb-neutral-7:          #25221d;
+  --color-cb-text-default:       #1a1814;
+  --color-cb-text-muted:         #5d574a;
+  --color-cb-text-subtle:        #7c7464;
+  --color-cb-text-inverse:       #f8f3e6;
+  --color-cb-accent-emphasis:    #6e1f24;
+  --color-cb-accent-emphasis-hv: #842830;
+  --color-cb-accent-emphasis-ac: #56171b;
+  --color-cb-accent-emphasis-quiet: oklch(0.30 0.10 20 / 0.10);
+  --color-cb-accent-link:        #1f2e4a;
+  --color-cb-accent-link-hv:     #2a4068;
+  --color-cb-accent-gilt:        #a8854a;
+  --color-cb-status-success:     #3d5c33;
+  --color-cb-status-warning:     #b07a1f;
+  --color-cb-status-danger:      #a8332b;
+  --color-cb-status-info:        #1f2e4a;
+  --color-cb-focus-ring:         #1f2e4a;
+
+  --font-cb-serif: "Newsreader", "Source Serif 4", Georgia, serif;
+  --font-cb-mono:  "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-cb-cjk:   "Noto Serif JP", "Newsreader", serif;
+
+  /* Type scale (px). Bumped from the original Codex spec for real-world reading.
+     opsz values track each step so the type stays optically tuned across sizes. */
+  --text-cb-display-2xl: 96px;
+  --text-cb-display-xl:  72px;
+  --text-cb-display-lg:  60px;
+  --text-cb-h1:          46px;
+  --text-cb-h2:          34px;
+  --text-cb-h3:          26px;
+  --text-cb-h4:          22px;
+  --text-cb-h5:          19px;
+  --text-cb-overline:    13px;
+  --text-cb-body-lg:     20px;
+  --text-cb-body:        17px;
+  --text-cb-body-sm:     15px;
+  --text-cb-caption:     14.5px;
+  --text-cb-mono-lg:     15px;
+  --text-cb-mono:        13.5px;
+  --text-cb-mono-sm:     12px;
+
+  /* ───────── Legacy — retained while other pages still render in the
+     previous violet/dark scheme. Removed once those pages adopt Codex. */
   --color-bg-primary: #0f0f1a;
   --color-bg-card: #1a1a2e;
   --color-bg-elevated: #252540;
   --color-bg-hover: #2a2a4a;
 
-  /* Accent - Electric Violet */
   --color-violet-400: #a78bfa;
   --color-violet-500: #8b5cf6;
   --color-violet-600: #7c3aed;
   --color-violet-700: #6d28d9;
 
-  /* Warm accent - Amber */
   --color-amber-400: #fbbf24;
   --color-amber-500: #f59e0b;
 
-  /* Science overlay colors */
   --color-science-spacing: #8b5cf6;
   --color-science-interleaving: #06b6d4;
   --color-science-retrieval: #f59e0b;
   --color-science-examples: #22c55e;
   --color-science-dual-coding: #3b82f6;
 
-  /* Text */
   --color-text-primary: #f1f5f9;
   --color-text-secondary: #94a3b8;
   --color-text-muted: #64748b;
 
-  /* Status */
   --color-success: #22c55e;
   --color-error: #ef4444;
   --color-warning: #f59e0b;
 
-  /* Fonts */
   --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
   --font-serif: 'Source Serif 4', 'Georgia', serif;
 }
 
+/* ───────── Codex CSS variables — referenced by inline styles in
+   src/components/codex/*. Kept in sync with the @theme block above. */
+:root,
+[data-codex-mode="parchment"] {
+  --cb-ground-page:       #f1ebdd;
+  --cb-ground-canvas:     #f8f3e6;
+  --cb-surface-default:   #f1ebdd;
+  --cb-surface-raised:    #f8f3e6;
+  --cb-surface-sunken:    #e8dfc7;
+  --cb-surface-well:      #ddd1b3;
+  --cb-neutral-1: #e8dfc7;
+  --cb-neutral-2: #cfc6ad;
+  --cb-neutral-3: #a89f88;
+  --cb-neutral-4: #7c7464;
+  --cb-neutral-5: #5d574a;
+  --cb-neutral-6: #3e3a32;
+  --cb-neutral-7: #25221d;
+  --cb-text-default: #1a1814;
+  --cb-text-muted:   #5d574a;
+  --cb-text-subtle:  #7c7464;
+  --cb-text-inverse: #f8f3e6;
+  --cb-border-subtle:  rgba(26,24,20,0.08);
+  --cb-border-default: rgba(26,24,20,0.14);
+  --cb-border-strong:  rgba(26,24,20,0.35);
+  --cb-border-rule:    rgba(26,24,20,0.55);
+  --cb-accent-emphasis:        #6e1f24;
+  --cb-accent-emphasis-hover:  #842830;
+  --cb-accent-emphasis-active: #56171b;
+  --cb-accent-emphasis-quiet:  rgba(110,31,36,0.10);
+  --cb-accent-link:            #1f2e4a;
+  --cb-accent-link-hover:      #2a4068;
+  --cb-accent-link-visited:    #4a3a68;
+  --cb-accent-gilt:            #a8854a;
+  --cb-status-success:    #3d5c33;
+  --cb-status-success-bg: rgba(61,92,51,0.10);
+  --cb-status-warning:    #b07a1f;
+  --cb-status-warning-bg: rgba(176,122,31,0.12);
+  --cb-status-danger:     #a8332b;
+  --cb-status-danger-bg:  rgba(168,51,43,0.10);
+  --cb-status-info:       #1f2e4a;
+  --cb-status-info-bg:    rgba(31,46,74,0.08);
+  --cb-focus-ring:        #1f2e4a;
+  --cb-focus-ring-offset: #f1ebdd;
+  --cb-shadow-sheet: 0 1px 0 rgba(26,24,20,0.04), 0 18px 50px -28px rgba(26,24,20,0.32);
+  --cb-shadow-modal: 0 2px 0 rgba(26,24,20,0.06), 0 28px 80px -32px rgba(26,24,20,0.42);
+
+  --cb-duration-1: 120ms;
+  --cb-duration-2: 200ms;
+  --cb-duration-3: 320ms;
+  --cb-duration-4: 500ms;
+  --cb-ease-paper: cubic-bezier(0.32, 0.04, 0.32, 1);
+  --cb-ease-quick: cubic-bezier(0.4, 0, 0.2, 1);
+  --cb-ease-out:   cubic-bezier(0, 0, 0.22, 1);
+}
+
+[data-codex-mode="vespers"] {
+  --cb-ground-page:       #1c1a16;
+  --cb-ground-canvas:     #16140f;
+  --cb-surface-default:   #1c1a16;
+  --cb-surface-raised:    #272320;
+  --cb-surface-sunken:    #100e0a;
+  --cb-surface-well:      #0a0907;
+  --cb-neutral-1: #272320;
+  --cb-neutral-2: #3a3530;
+  --cb-neutral-3: #524c43;
+  --cb-neutral-4: #756d5e;
+  --cb-neutral-5: #9a9080;
+  --cb-neutral-6: #b6ad9a;
+  --cb-neutral-7: #d6cbb5;
+  --cb-text-default: #ebe1cb;
+  --cb-text-muted:   #9a9080;
+  --cb-text-subtle:  #756d5e;
+  --cb-text-inverse: #1a1814;
+  --cb-border-subtle:  rgba(235,225,203,0.08);
+  --cb-border-default: rgba(235,225,203,0.14);
+  --cb-border-strong:  rgba(235,225,203,0.32);
+  --cb-border-rule:    rgba(235,225,203,0.55);
+  --cb-accent-emphasis:        #c6924e;
+  --cb-accent-emphasis-hover:  #dba764;
+  --cb-accent-emphasis-active: #a87a3a;
+  --cb-accent-emphasis-quiet:  rgba(198,146,78,0.14);
+  --cb-accent-link:            #9bb4d6;
+  --cb-accent-link-hover:      #b3c6e0;
+  --cb-accent-link-visited:    #b09cd1;
+  --cb-accent-gilt:            #a8854a;
+  --cb-status-success:    #86a574;
+  --cb-status-success-bg: rgba(134,165,116,0.14);
+  --cb-status-warning:    #d4a04e;
+  --cb-status-warning-bg: rgba(212,160,78,0.14);
+  --cb-status-danger:     #d97070;
+  --cb-status-danger-bg:  rgba(217,112,112,0.14);
+  --cb-status-info:       #9bb4d6;
+  --cb-status-info-bg:    rgba(155,180,214,0.10);
+  --cb-focus-ring:        #c6924e;
+  --cb-focus-ring-offset: #1c1a16;
+  --cb-shadow-sheet: 0 1px 0 rgba(0,0,0,0.30), 0 18px 50px -22px rgba(0,0,0,0.65);
+  --cb-shadow-modal: 0 2px 0 rgba(0,0,0,0.40), 0 28px 80px -28px rgba(0,0,0,0.78);
+}
+
+/* The chrome (header + page background) lives on the Codex Parchment ground
+   even when route-specific content is still in the legacy palette. Individual
+   pages can override `[data-codex-page]` on their root to apply the parchment
+   page treatment; until they do, they keep their legacy backgrounds. */
 @layer base {
   html {
-    background-color: var(--color-bg-primary);
-    color: var(--color-text-primary);
-    font-family: var(--font-sans);
+    background-color: var(--cb-ground-page);
+    color: var(--cb-text-default);
+    font-family: var(--font-cb-serif);
+    font-feature-settings: "kern", "liga", "calt";
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
   }
 
   body {
@@ -53,21 +210,111 @@
     margin: 0;
   }
 
-  ::selection {
-    background-color: color-mix(in srgb, var(--color-violet-500) 40%, transparent);
+  /* CJK locale fallback */
+  :lang(ja),
+  :lang(zh) {
+    font-family: var(--font-cb-cjk);
   }
 
+  /* Editorial selection — quiet, not loud */
+  ::selection {
+    background-color: var(--cb-accent-emphasis-quiet);
+    color: var(--cb-text-default);
+  }
+
+  /* Scrollbars in the Codex palette */
   ::-webkit-scrollbar {
-    width: 8px;
+    width: 10px;
+    height: 10px;
   }
   ::-webkit-scrollbar-track {
-    background: var(--color-bg-primary);
+    background: var(--cb-surface-sunken);
   }
   ::-webkit-scrollbar-thumb {
-    background: var(--color-bg-elevated);
-    border-radius: 4px;
+    background: var(--cb-neutral-3);
+    border: 2px solid var(--cb-surface-sunken);
+    border-radius: 6px;
   }
   ::-webkit-scrollbar-thumb:hover {
-    background: var(--color-violet-500);
+    background: var(--cb-neutral-4);
   }
+}
+
+/* ───────── Codex utility classes used by primitives & pages ───────── */
+.cb-sc {
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.14em;
+}
+
+.cb-italic {
+  font-style: italic;
+}
+
+.cb-mono {
+  font-family: var(--font-cb-mono);
+}
+
+/* Focus ring — only on keyboard navigation. */
+.cb-focus:focus-visible,
+.cb-focus :focus-visible {
+  outline: 2px solid var(--cb-focus-ring);
+  outline-offset: 2px;
+}
+
+/* Pen-stroke animation for in-flight states. */
+@keyframes cb-pen {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Pulsing dot for in-flight chip indicators. */
+@keyframes cb-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.9); }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* ── Mobile reflow ─────────────────────────────────────────────────────
+ * ClassBuild is laptop-first; these breakpoints keep things from snapping
+ * catastrophically on a narrow viewport rather than committing to a full
+ * mobile-first redesign. The BuildPage layout stacks (sidebar → top), the
+ * sidebar relaxes its fixed width, and pill-grid columns collapse to a
+ * single column when there's no room for the chip text. */
+@media (max-width: 900px) {
+  .cb-build-layout {
+    flex-direction: column !important;
+    height: auto !important;
+  }
+  .cb-build-layout > [data-build-sidebar] {
+    width: 100% !important;
+    max-height: 280px;
+    overflow-y: auto;
+    border-right: none !important;
+    border-bottom: 0.5px solid var(--cb-border-default);
+  }
+  .cb-build-content {
+    padding: 18px 16px !important;
+  }
+  .cb-research-grid,
+  .cb-syllabus-grid {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .cb-build-content {
+    padding: 14px 12px !important;
+  }
+}
+
+/* Folio — foot rule + centred italic page number. */
+.cb-folio {
+  text-align: center;
+  padding-top: 14px;
+  margin-top: 28px;
+  border-top: 0.5px solid var(--cb-border-rule);
+  font-style: italic;
+  font-size: 15px;
+  color: var(--cb-text-muted);
+  font-variation-settings: "opsz" 12;
 }

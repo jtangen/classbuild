@@ -1,5 +1,5 @@
 import { Component } from 'react';
-import type { ReactNode, ErrorInfo } from 'react';
+import type { ReactNode, ErrorInfo, CSSProperties } from 'react';
 import { useUiStore } from '../../store/uiStore';
 
 interface Props {
@@ -24,7 +24,6 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, info.componentStack);
-    // Reset generating state so the header indicator doesn't get stuck
     useUiStore.getState().setIsGenerating(false);
   }
 
@@ -32,34 +31,106 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       if (this.props.fallback) return this.props.fallback;
 
+      const wrapStyle: CSSProperties = {
+        maxWidth: 640,
+        margin: '0 auto',
+        padding: '80px 24px',
+        fontFamily: 'var(--font-cb-serif)',
+        color: 'var(--cb-text-default)',
+        textAlign: 'center',
+      };
+
       return (
-        <div className="max-w-xl mx-auto py-20 px-6 text-center">
-          <div className="w-16 h-16 mx-auto mb-6 rounded-2xl bg-error/10 flex items-center justify-center">
-            <svg className="w-8 h-8 text-error" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="10" />
-              <line x1="12" y1="8" x2="12" y2="12" />
-              <line x1="12" y1="16" x2="12.01" y2="16" />
-            </svg>
+        <div style={wrapStyle}>
+          <div
+            className="cb-sc"
+            style={{
+              fontSize: 12,
+              letterSpacing: '0.18em',
+              color: 'var(--cb-accent-emphasis)',
+              marginBottom: 6,
+            }}
+          >
+            something gave way
           </div>
-          <h2 className="text-xl font-bold mb-2">Something went wrong</h2>
-          <p className="text-text-secondary text-sm mb-2">
+          <h2
+            className="cb-italic"
+            style={{
+              margin: '0 0 10px',
+              fontSize: 34,
+              fontWeight: 500,
+              lineHeight: 1.1,
+              fontVariationSettings: '"opsz" 28',
+            }}
+          >
+            We caught it before it tipped over.
+          </h2>
+          <p
+            className="cb-italic"
+            style={{
+              margin: '0 auto 4px',
+              fontSize: 16,
+              lineHeight: 1.55,
+              color: 'var(--cb-text-muted)',
+              maxWidth: 520,
+            }}
+          >
             {this.state.error?.message || 'An unexpected error occurred.'}
           </p>
-          <p className="text-text-muted text-xs mb-6">
-            Your course data has been saved. You can safely reload.
+          <p
+            style={{
+              margin: '0 auto 28px',
+              fontSize: 13.5,
+              color: 'var(--cb-text-subtle)',
+              maxWidth: 520,
+              fontStyle: 'italic',
+            }}
+          >
+            Your course data is saved locally — reload is safe.
           </p>
-          <div className="flex items-center justify-center gap-3">
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: 10,
+              flexWrap: 'wrap',
+            }}
+          >
             <button
+              type="button"
               onClick={() => this.setState({ hasError: false, error: null })}
-              className="px-4 py-2 rounded-lg bg-violet-500 text-white text-sm font-medium hover:bg-violet-600 transition cursor-pointer"
+              className="cb-mono cb-focus"
+              style={{
+                background: 'var(--cb-accent-emphasis)',
+                color: '#fff',
+                border: 0,
+                padding: '8px 16px',
+                borderRadius: 2,
+                fontSize: 12,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
             >
-              Try Again
+              Try again
             </button>
             <button
+              type="button"
               onClick={() => window.location.reload()}
-              className="px-4 py-2 rounded-lg bg-bg-elevated text-text-secondary text-sm font-medium hover:bg-bg-card transition cursor-pointer"
+              className="cb-mono cb-focus"
+              style={{
+                background: 'transparent',
+                color: 'var(--cb-text-muted)',
+                border: '1px solid var(--cb-border-default)',
+                padding: '8px 16px',
+                borderRadius: 2,
+                fontSize: 12,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
             >
-              Reload Page
+              Reload page
             </button>
           </div>
         </div>

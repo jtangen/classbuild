@@ -1,5 +1,6 @@
-import type { Syllabus, GeneratedChapter } from '../types/course';
-import { getTheme } from '../themes';
+import type { Syllabus, GeneratedChapter, CurriculumMap } from '../types/course';
+import { getTheme, renderChapterHtml, FONTS_URL } from '../themes';
+import { buildOutcomesTableFragment } from './outcomesTableTemplate';
 
 interface ChapterWithQuiz extends GeneratedChapter {
   quizHtml?: string;
@@ -8,6 +9,33 @@ interface ChapterWithQuiz extends GeneratedChapter {
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/** Hex → "r, g, b" for use inside `rgba(var(--accent-rgb), 0.XX)`. */
+function hexToRgbCsv(hex: string): string {
+  const v = hex.replace('#', '');
+  const s = v.length === 3 ? v.split('').map((c) => c + c).join('') : v;
+  const r = parseInt(s.slice(0, 2), 16);
+  const g = parseInt(s.slice(2, 4), 16);
+  const b = parseInt(s.slice(4, 6), 16);
+  return `${r}, ${g}, ${b}`;
+}
+
+/** Pick #fff or #1a1a1a as readable text over a given hex background (WCAG-ish). */
+function contrastTextOn(hex: string): string {
+  const v = hex.replace('#', '');
+  const s = v.length === 3 ? v.split('').map((c) => c + c).join('') : v;
+  const r = parseInt(s.slice(0, 2), 16) / 255;
+  const g = parseInt(s.slice(2, 4), 16) / 255;
+  const b = parseInt(s.slice(4, 6), 16) / 255;
+  // Relative luminance per WCAG 2.1
+  const channel = (c: number) =>
+    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  const L = 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+  // Contrast ratio against pure white (L=1) and near-black (L≈0.0103).
+  const ratioWhite = (1 + 0.05) / (L + 0.05);
+  const ratioDark = (L + 0.05) / (0.0103 + 0.05);
+  return ratioDark >= ratioWhite ? '#1a1a1a' : '#ffffff';
 }
 
 function escapeSrcdoc(html: string): string {
@@ -33,6 +61,7 @@ export function buildCourseViewerHtml(
   syllabus: Syllabus,
   chapters: ChapterWithQuiz[],
   themeId?: string,
+  curriculumMap?: CurriculumMap | null,
 ): string {
   const t = getTheme(themeId);
   const sortedChapters = [...chapters].sort((a, b) => a.number - b.number);
@@ -40,6 +69,15 @@ export function buildCourseViewerHtml(
   const sidebarItems = sortedChapters.map((ch) => {
     return `<button class="nav-item" data-chapter="${ch.number}" onclick="showChapter(${ch.number})">${escapeHtml(`Class ${ch.number}: ${ch.title}`)}</button>`;
   }).join('\n          ');
+
+  // Course-level "Learning outcomes" nav item — sits above the chapter list when present.
+  const hasOutcomes = !!curriculumMap && curriculumMap.objectives.length > 0;
+  const outcomesNav = hasOutcomes
+    ? `<button class="nav-item nav-item-course" data-course-view="outcomes" onclick="showCourseView('outcomes')">Learning outcomes</button>`
+    : '';
+  const outcomesPanel = hasOutcomes
+    ? `<div class="course-panel" data-course-view="outcomes" style="display:none">${buildOutcomesTableFragment(curriculumMap, syllabus, themeId)}</div>`
+    : '';
 
   const chapterSections = sortedChapters.map((ch) => {
     const syllCh = syllabus.chapters.find(sc => sc.number === ch.number);
@@ -56,14 +94,12 @@ export function buildCourseViewerHtml(
     if (ch.challengeHtml) {
       subTabs.push('<button class="sub-tab" data-subtab="challenge" onclick="showSubTab(this, \'challenge\')">Weekly Challenge</button>');
     }
-    if (ch.infographicDataUri) {
-      subTabs.push('<button class="sub-tab" data-subtab="infographic" onclick="showSubTab(this, \'infographic\')">Infographic</button>');
-    }
 
-    // Reading iframe
+    // Reading iframe — wrap the stored fragment in the chosen theme.
+    const readingHtml = renderChapterHtml(ch.htmlContent, themeId, ch.title);
     sections.push(`
         <div class="sub-content active" data-subcontent="reading">
-          <iframe class="reading-frame" srcdoc="${escapeSrcdoc(withResizeShim(ch.htmlContent))}" sandbox="allow-scripts"></iframe>
+          <iframe class="reading-frame" srcdoc="${escapeSrcdoc(withResizeShim(readingHtml))}" sandbox="allow-scripts"></iframe>
         </div>`);
 
     // Practice quiz iframe
@@ -99,14 +135,6 @@ export function buildCourseViewerHtml(
         </div>`);
     }
 
-    // Infographic
-    if (ch.infographicDataUri) {
-      sections.push(`
-        <div class="sub-content" data-subcontent="infographic">
-          <img src="${ch.infographicDataUri}" alt="Infographic for ${escapeHtml(ch.title)}" class="infographic-img" />
-        </div>`);
-    }
-
     return `
       <div class="chapter-panel" data-chapter="${ch.number}" style="display:none">
         <div class="chapter-header">
@@ -125,6 +153,9 @@ export function buildCourseViewerHtml(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>${escapeHtml(syllabus.courseTitle)}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="${FONTS_URL}">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -133,28 +164,40 @@ export function buildCourseViewerHtml(
       --card: ${t.cardBg};
       --elevated: ${t.elevated};
       --accent: ${t.accent};
+      --accent-rgb: ${hexToRgbCsv(t.accent)};
       --accent-light: ${t.accentLight};
       --text: ${t.textPrimary};
+      --text-rgb: ${hexToRgbCsv(t.textPrimary)};
       --text-sec: ${t.textSecondary};
       --text-muted: ${t.textMuted};
       --success: ${t.success};
-      --font: ${t.headingFont};
+      --on-accent: ${contrastTextOn(t.accent)};
+      --font-display: ${t.headingFont}, Georgia, serif;
+      --font-body: ${t.bodyFont}, system-ui, sans-serif;
+      --rule: rgba(var(--text-rgb), ${t.isDark ? '0.10' : '0.08'});
+      --rule-strong: rgba(var(--text-rgb), ${t.isDark ? '0.16' : '0.12'});
+      --hover-tint: rgba(var(--text-rgb), ${t.isDark ? '0.06' : '0.04'});
+      --active-tint: rgba(var(--accent-rgb), ${t.isDark ? '0.14' : '0.10'});
     }
 
+    html { background: var(--bg); }
     body {
-      font-family: var(--font);
+      font-family: var(--font-body);
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
       display: flex;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
     }
 
-    /* Sidebar */
+    /* ── Sidebar ─────────────────────────────────────────────────────── */
     .sidebar {
-      width: 280px;
+      width: 296px;
       min-height: 100vh;
       background: var(--card);
-      border-right: 1px solid ${t.isDark ? 'rgba(139,92,246,0.1)' : 'rgba(0,0,0,0.1)'};
+      border-right: 1px solid var(--rule);
       display: flex;
       flex-direction: column;
       position: fixed;
@@ -166,225 +209,328 @@ export function buildCourseViewerHtml(
     }
 
     .sidebar-header {
-      padding: 1.5rem;
-      border-bottom: 1px solid ${t.isDark ? 'rgba(139,92,246,0.1)' : 'rgba(0,0,0,0.08)'};
+      padding: 1.75rem 1.5rem 1.5rem;
+      border-bottom: 1px solid var(--rule);
+    }
+
+    .sidebar-eyebrow {
+      font-family: var(--font-body);
+      font-size: 10.5px;
+      font-weight: 600;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 0.6rem;
+      display: block;
     }
 
     .sidebar-header h1 {
-      font-size: 1.1rem;
-      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 1.25rem;
+      font-weight: 600;
       color: var(--text);
-      line-height: 1.3;
+      line-height: 1.25;
+      letter-spacing: -0.005em;
     }
 
     .sidebar-header p {
-      font-size: 0.75rem;
+      font-family: var(--font-body);
+      font-size: 0.78rem;
       color: var(--text-muted);
-      margin-top: 0.5rem;
-      line-height: 1.4;
+      margin-top: 0.65rem;
+      line-height: 1.55;
     }
 
     .nav-list {
       flex: 1;
-      padding: 0.5rem;
+      padding: 0.65rem 0.5rem;
+    }
+
+    .nav-list-label {
+      font-family: var(--font-body);
+      font-size: 10px;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      padding: 0.25rem 0.85rem 0.5rem;
+      font-weight: 600;
     }
 
     .nav-item {
+      position: relative;
       display: block;
       width: 100%;
-      padding: 0.75rem 1rem;
+      padding: 0.65rem 0.85rem 0.65rem 1rem;
       text-align: left;
       background: none;
       border: none;
-      border-radius: 8px;
+      border-radius: 6px;
       color: var(--text-sec);
-      font-size: 0.85rem;
-      font-family: var(--font);
+      font-size: 0.86rem;
+      line-height: 1.4;
+      font-family: var(--font-body);
+      font-weight: 400;
       cursor: pointer;
-      transition: all 0.2s;
-      margin-bottom: 2px;
+      transition: background-color 0.18s ease, color 0.18s ease;
+      margin-bottom: 1px;
     }
 
     .nav-item:hover {
-      background: ${t.isDark ? 'rgba(139,92,246,0.08)' : 'rgba(0,0,0,0.04)'};
+      background: var(--hover-tint);
       color: var(--text);
     }
 
     .nav-item.active {
-      background: ${t.isDark ? 'rgba(139,92,246,0.15)' : 'rgba(30,58,95,0.1)'};
-      color: var(--accent);
+      background: var(--active-tint);
+      color: var(--text);
       font-weight: 600;
     }
 
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 8px;
+      bottom: 8px;
+      width: 2px;
+      background: var(--accent);
+      border-radius: 0 2px 2px 0;
+    }
+
+    /* Course-level nav items (Learning outcomes, etc.) — distinguished from
+       chapter list by a leading bullet glyph. */
+    .nav-item-course {
+      font-weight: 500;
+    }
+    .nav-item-course::after {
+      content: '§';
+      position: absolute;
+      right: 0.85rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--accent);
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: 0.9rem;
+      opacity: 0.7;
+    }
+    .nav-list-divider {
+      height: 1px;
+      background: var(--rule);
+      margin: 0.6rem 0.85rem 0.45rem;
+    }
+
+    /* Course-level content panels (outcomes table, etc.) */
+    .course-panel {
+      padding: 0;
+    }
+
     .sidebar-footer {
-      padding: 1rem 1.5rem;
-      border-top: 1px solid ${t.isDark ? 'rgba(139,92,246,0.1)' : 'rgba(0,0,0,0.08)'};
+      padding: 1rem 1.5rem 1.25rem;
+      border-top: 1px solid var(--rule);
       font-size: 0.7rem;
       color: var(--text-muted);
       text-align: center;
+      letter-spacing: 0.02em;
     }
 
     .sidebar-footer a {
       color: var(--accent);
       text-decoration: none;
+      font-weight: 500;
     }
 
-    /* Main content */
+    .sidebar-footer a:hover { text-decoration: underline; }
+
+    /* ── Main content ────────────────────────────────────────────────── */
     .main {
       flex: 1;
-      margin-left: 280px;
+      margin-left: 296px;
       min-height: 100vh;
     }
 
     .chapter-panel { padding: 0; }
 
     .chapter-header {
-      padding: 2rem 2.5rem;
-      border-bottom: 1px solid ${t.isDark ? 'rgba(139,92,246,0.1)' : 'rgba(0,0,0,0.08)'};
+      padding: 2.25rem 2.75rem 1.75rem;
+      border-bottom: 1px solid var(--rule);
+      max-width: 1100px;
     }
 
     .chapter-label {
       display: inline-block;
+      font-family: var(--font-body);
       font-size: 0.7rem;
-      font-weight: 700;
+      font-weight: 600;
       text-transform: uppercase;
-      letter-spacing: 0.1em;
+      letter-spacing: 0.16em;
       color: var(--accent);
-      margin-bottom: 0.5rem;
+      margin-bottom: 0.65rem;
     }
 
     .chapter-title {
-      font-size: 1.8rem;
-      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 600;
       color: var(--text);
-      line-height: 1.2;
+      line-height: 1.18;
+      letter-spacing: -0.01em;
     }
 
     .chapter-desc {
-      font-size: 0.9rem;
+      font-family: var(--font-body);
+      font-size: 0.95rem;
       color: var(--text-sec);
-      margin-top: 0.75rem;
-      line-height: 1.5;
+      margin-top: 0.85rem;
+      line-height: 1.55;
+      max-width: 64ch;
     }
 
-    /* Sub-tabs */
+    /* ── Sub-tabs ────────────────────────────────────────────────────── */
     .sub-tabs {
       display: flex;
       gap: 0.25rem;
-      padding: 0.75rem 2.5rem;
-      border-bottom: 1px solid ${t.isDark ? 'rgba(139,92,246,0.08)' : 'rgba(0,0,0,0.06)'};
+      padding: 0.85rem 2.75rem;
+      border-bottom: 1px solid var(--rule);
       background: var(--card);
+      position: sticky;
+      top: 0;
+      z-index: 5;
     }
 
     .sub-tab {
-      padding: 0.5rem 1rem;
-      font-size: 0.8rem;
-      font-family: var(--font);
+      padding: 0.5rem 0.95rem;
+      font-size: 0.82rem;
+      font-family: var(--font-body);
+      font-weight: 500;
       border: none;
-      border-radius: 6px;
+      border-radius: 5px;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: background-color 0.18s ease, color 0.18s ease;
       background: none;
       color: var(--text-muted);
     }
 
-    .sub-tab:hover { color: var(--text-sec); }
+    .sub-tab:hover {
+      color: var(--text);
+      background: var(--hover-tint);
+    }
+
     .sub-tab.active {
       background: var(--accent);
-      color: white;
+      color: var(--on-accent);
     }
 
     .sub-content { display: none; }
     .sub-content.active { display: block; }
 
-    /* Iframes */
+    /* ── Iframes ─────────────────────────────────────────────────────── */
     .reading-frame, .quiz-frame {
       width: 100%;
       border: none;
       min-height: 80vh;
+      display: block;
+      background: var(--bg);
     }
 
-    /* Discussion */
+    /* ── Discussion ──────────────────────────────────────────────────── */
     .discussion-list {
-      padding: 2rem 2.5rem;
+      padding: 2.25rem 2.75rem;
       display: flex;
       flex-direction: column;
-      gap: 1rem;
+      gap: 0.85rem;
+      max-width: 880px;
     }
 
     .discussion-card {
       display: flex;
-      gap: 1rem;
-      padding: 1.25rem;
+      gap: 1.1rem;
+      padding: 1.35rem 1.4rem;
       background: var(--card);
-      border-radius: 10px;
-      border: 1px solid ${t.isDark ? 'rgba(139,92,246,0.1)' : 'rgba(0,0,0,0.08)'};
+      border-radius: 8px;
+      border: 1px solid var(--rule-strong);
     }
 
     .discussion-num {
       width: 2rem;
       height: 2rem;
       border-radius: 50%;
-      background: ${t.isDark ? 'rgba(139,92,246,0.15)' : 'rgba(30,58,95,0.1)'};
+      background: var(--active-tint);
       color: var(--accent);
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.8rem;
+      font-family: var(--font-body);
+      font-size: 0.82rem;
       font-weight: 700;
       flex-shrink: 0;
     }
 
     .discussion-prompt {
-      font-size: 0.95rem;
+      font-family: var(--font-body);
+      font-size: 0.97rem;
       color: var(--text);
-      line-height: 1.5;
+      line-height: 1.55;
       font-weight: 500;
     }
 
     .discussion-hook {
-      font-size: 0.8rem;
+      font-family: var(--font-body);
+      font-size: 0.85rem;
       color: var(--text-muted);
-      margin-top: 0.5rem;
-      line-height: 1.4;
+      margin-top: 0.55rem;
+      line-height: 1.5;
       font-style: italic;
     }
 
-    /* Infographic */
-    .infographic-img {
-      width: 100%;
-      max-width: 900px;
-      display: block;
-      margin: 2rem auto;
-      border-radius: 10px;
-    }
-
-    /* Welcome screen */
+    /* ── Welcome screen ──────────────────────────────────────────────── */
     .welcome {
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      min-height: 80vh;
+      min-height: 100vh;
       text-align: center;
       padding: 2rem;
     }
 
+    .welcome-eyebrow {
+      font-family: var(--font-body);
+      font-size: 11px;
+      letter-spacing: 0.22em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 1.5rem;
+      font-weight: 600;
+    }
+
     .welcome h2 {
-      font-size: 1.5rem;
-      font-weight: 700;
+      font-family: var(--font-display);
+      font-size: 2.4rem;
+      font-weight: 600;
       color: var(--text);
-      margin-bottom: 0.75rem;
+      margin-bottom: 1rem;
+      max-width: 22ch;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
     }
 
     .welcome p {
-      font-size: 0.9rem;
+      font-family: var(--font-body);
+      font-size: 0.95rem;
       color: var(--text-sec);
-      max-width: 400px;
-      line-height: 1.5;
+      max-width: 44ch;
+      line-height: 1.6;
     }
 
-    /* Mobile */
+    .welcome-rule {
+      width: 48px;
+      height: 1px;
+      background: var(--accent);
+      margin: 1.75rem 0 0;
+    }
+
+    /* ── Mobile ──────────────────────────────────────────────────────── */
     .menu-toggle {
       display: none;
       position: fixed;
@@ -392,22 +538,26 @@ export function buildCourseViewerHtml(
       left: 1rem;
       z-index: 20;
       background: var(--card);
-      border: 1px solid ${t.isDark ? 'rgba(139,92,246,0.2)' : 'rgba(0,0,0,0.1)'};
-      border-radius: 8px;
+      border: 1px solid var(--rule-strong);
+      border-radius: 6px;
       padding: 0.5rem 0.75rem;
       color: var(--text);
       font-size: 1.2rem;
       cursor: pointer;
     }
 
-    @media (max-width: 768px) {
+    @media (max-width: 900px) {
       .menu-toggle { display: block; }
       .sidebar {
         transform: translateX(-100%);
-        transition: transform 0.3s;
+        transition: transform 0.3s ease;
+        box-shadow: 0 0 24px rgba(0,0,0,0.18);
       }
       .sidebar.open { transform: translateX(0); }
       .main { margin-left: 0; }
+      .chapter-header { padding: 4rem 1.5rem 1.5rem; }
+      .sub-tabs { padding: 0.75rem 1.5rem; overflow-x: auto; }
+      .discussion-list { padding: 1.5rem; }
     }
   </style>
 </head>
@@ -416,22 +566,28 @@ export function buildCourseViewerHtml(
 
   <nav class="sidebar">
     <div class="sidebar-header">
+      <span class="sidebar-eyebrow">Course</span>
       <h1>${escapeHtml(syllabus.courseTitle)}</h1>
       <p>${escapeHtml(syllabus.courseOverview.slice(0, 150))}${syllabus.courseOverview.length > 150 ? '...' : ''}</p>
     </div>
     <div class="nav-list">
+      ${hasOutcomes ? `<div class="nav-list-label">Course</div>${outcomesNav}<div class="nav-list-divider"></div>` : ''}
+      <div class="nav-list-label">Classes</div>
       ${sidebarItems}
     </div>
     <div class="sidebar-footer">
-      Built with <a href="#">ClassBuild</a>
+      Built with <a href="https://classbuild.app" target="_blank" rel="noopener">ClassBuild</a>
     </div>
   </nav>
 
   <main class="main">
     <div class="welcome" id="welcome">
+      <span class="welcome-eyebrow">${syllabus.chapters.length} ${syllabus.chapters.length === 1 ? 'class' : 'classes'}</span>
       <h2>${escapeHtml(syllabus.courseTitle)}</h2>
-      <p>Select a class from the sidebar to begin.</p>
+      <p>${escapeHtml(syllabus.courseOverview.slice(0, 220))}${syllabus.courseOverview.length > 220 ? '…' : ''}</p>
+      <div class="welcome-rule"></div>
     </div>
+    ${outcomesPanel}
     ${chapterSections}
   </main>
 
@@ -454,16 +610,17 @@ export function buildCourseViewerHtml(
       var welcome = document.getElementById('welcome');
       if (welcome) welcome.style.display = 'none';
 
-      // Hide all chapters, show selected
-      document.querySelectorAll('.chapter-panel').forEach(function(el) {
+      // Hide all chapters + course-level panels
+      document.querySelectorAll('.chapter-panel, .course-panel').forEach(function(el) {
         el.style.display = 'none';
       });
       var target = document.querySelector('.chapter-panel[data-chapter="' + num + '"]');
       if (target) target.style.display = 'block';
 
-      // Update nav active state
+      // Update nav active state — match the chapter button, clear course-view buttons
       document.querySelectorAll('.nav-item').forEach(function(el) {
-        el.classList.toggle('active', el.getAttribute('data-chapter') == num);
+        var isMatch = el.getAttribute('data-chapter') == num;
+        el.classList.toggle('active', isMatch);
       });
 
       // Close mobile menu
@@ -487,6 +644,21 @@ export function buildCourseViewerHtml(
       btn.classList.add('active');
       var target = panel.querySelector('.sub-content[data-subcontent="' + tabName + '"]');
       if (target) target.classList.add('active');
+    }
+
+    function showCourseView(view) {
+      var welcome = document.getElementById('welcome');
+      if (welcome) welcome.style.display = 'none';
+      document.querySelectorAll('.chapter-panel, .course-panel').forEach(function(el) {
+        el.style.display = 'none';
+      });
+      var target = document.querySelector('.course-panel[data-course-view="' + view + '"]');
+      if (target) target.style.display = 'block';
+      document.querySelectorAll('.nav-item').forEach(function(el) {
+        var isMatch = el.getAttribute('data-course-view') === view;
+        el.classList.toggle('active', isMatch);
+      });
+      document.querySelector('.sidebar').classList.remove('open');
     }
 
     // Auto-show first chapter if only one

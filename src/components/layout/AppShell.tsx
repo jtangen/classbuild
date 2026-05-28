@@ -8,14 +8,16 @@ export function AppShell() {
   const isLanding = location.pathname === '/';
 
   return (
-    <div className="min-h-screen bg-bg-primary">
+    <div
+      style={{
+        minHeight: '100vh',
+        background: 'var(--cb-ground-page)',
+        color: 'var(--cb-text-default)',
+      }}
+    >
       <Header />
-      <main className="pt-16">
-        {!isLanding && (
-          <div className="max-w-7xl mx-auto px-6 pt-4">
-            <StageIndicator />
-          </div>
-        )}
+      <main style={{ paddingTop: 64 }}>
+        {!isLanding && <StageIndicator />}
         <div className="max-w-7xl mx-auto px-6 pb-12">
           <ErrorBoundary key={location.pathname}>
             <Outlet />
