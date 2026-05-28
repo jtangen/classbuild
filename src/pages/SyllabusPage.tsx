@@ -46,6 +46,8 @@ export function SyllabusPage() {
   const [partialTitle, setPartialTitle] = useState('');
   const [partialOverview, setPartialOverview] = useState('');
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [thinkingText, setThinkingText] = useState('');
+  const [elapsedSec, setElapsedSec] = useState(0);
   const fullTextRef = useRef('');
   const generationStarted = useRef(false);
 
@@ -57,6 +59,8 @@ export function SyllabusPage() {
       setPartialTitle('');
       setPartialOverview('');
       setOverviewOpen(false);
+      setThinkingText('');
+      setElapsedSec(0);
       setError(null);
       fullTextRef.current = '';
 
@@ -86,7 +90,11 @@ export function SyllabusPage() {
             model: MODELS.opus,
             system: systemPrompt,
             messages,
-            thinkingBudget: feedbackText ? 'high' : 'max',
+            // 'high' (not 'max'): on Opus 4.8 the effort levels were
+            // recalibrated and 'max' overthinks — it stalled ~7 min before the
+            // first token. 'high' matches the (fast) chapter build and is the
+            // recommended floor for intelligence-sensitive work.
+            thinkingBudget: 'high',
             maxTokens: 16000,
           },
           {
@@ -100,6 +108,7 @@ export function SyllabusPage() {
                 setPartialChapters(partial.chapters);
               }
             },
+            onThinking: (text) => setThinkingText((prev) => prev + text),
             onError: (err) => setError(err.message),
           },
         );
@@ -134,6 +143,19 @@ export function SyllabusPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Live elapsed counter for the thinking trace — gives the Opus planning
+  // pause a visible heartbeat instead of a frozen label.
+  useEffect(() => {
+    if (!isGenerating) return;
+    setElapsedSec(0);
+    const startedAt = Date.now();
+    const id = window.setInterval(
+      () => setElapsedSec(Math.floor((Date.now() - startedAt) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(id);
+  }, [isGenerating]);
 
   const handleProceed = () => {
     completeStage('syllabus');
@@ -176,6 +198,10 @@ export function SyllabusPage() {
           onRegenerate={() => void generateSyllabus()}
           onProceed={handleProceed}
         />
+
+        {phase === 'thinking' && (
+          <ThinkingTrace thinkingText={thinkingText} elapsedSec={elapsedSec} />
+        )}
 
         <OverviewDisclosure
           overview={displayOverview}
@@ -220,6 +246,90 @@ export function SyllabusPage() {
         {/* Folio hidden during generation */}
         {phase === 'settled' && <div className="cb-folio">— 02 —</div>}
       </div>
+    </div>
+  );
+}
+
+// ─── ThinkingTrace (Opus planning pause) ──────────────────────────────────
+function formatElapsed(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return m > 0 ? `${m}:${String(s).padStart(2, '0')}` : `${s}s`;
+}
+
+// Surfaces Opus's summarized reasoning (thinking.display = 'summarized') while
+// it plans the course, so the pre-output pause reads as live progress rather
+// than a frozen "Designing the course architecture…" label.
+function ThinkingTrace({
+  thinkingText,
+  elapsedSec,
+}: {
+  thinkingText: string;
+  elapsedSec: number;
+}) {
+  return (
+    <div style={{ marginTop: 18 }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          fontSize: 14.5,
+          color: 'var(--cb-text-muted)',
+        }}
+      >
+        <PenStroke width={48} />
+        <span className="cb-italic">
+          {thinkingText
+            ? `Reasoning through the course architecture · ${formatElapsed(elapsedSec)}`
+            : `Warming up Opus · ${formatElapsed(elapsedSec)}`}
+        </span>
+      </div>
+
+      {!thinkingText && elapsedSec >= 6 && (
+        <p
+          className="cb-italic"
+          style={{
+            margin: '12px 0 0',
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: 'var(--cb-text-muted)',
+            maxWidth: '72ch',
+          }}
+        >
+          Opus plans the whole course before it writes — the arc, the chapter
+          sequence, and how the learning-science principles thread through. The
+          outline streams in as it settles. You can click away; we'll keep
+          going.
+        </p>
+      )}
+
+      {thinkingText && (
+        <div
+          style={{
+            marginTop: 14,
+            maxHeight: 220,
+            overflow: 'hidden',
+            maskImage: 'linear-gradient(to bottom, transparent 0, #000 32px)',
+            WebkitMaskImage:
+              'linear-gradient(to bottom, transparent 0, #000 32px)',
+          }}
+        >
+          <pre
+            className="cb-mono"
+            style={{
+              margin: 0,
+              fontSize: 11.5,
+              lineHeight: 1.7,
+              color: 'var(--cb-text-muted)',
+              whiteSpace: 'pre-wrap',
+              maxWidth: '80ch',
+            }}
+          >
+            {thinkingText.slice(-900)}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }

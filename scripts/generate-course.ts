@@ -819,7 +819,7 @@ async function main() {
         model: MODELS.opus,
         system: syllabusSystem,
         messages: [{ role: 'user', content: syllabusUser }],
-        thinkingBudget: 'max',
+        thinkingBudget: 'high',
         maxTokens: 16000,
       },
       {
