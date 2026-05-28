@@ -698,8 +698,8 @@ export function LandingPage() {
           <FooterCol
             heading="About"
             links={[
-              { label: 'The maker', href: 'https://jasontangen.com' },
-              { label: 'Code with Claude · Tokyo', href: 'https://www.anthropic.com/events' },
+              { label: 'The maker', href: 'https://tangenlab.com' },
+              { label: 'Code with Claude · Tokyo', href: 'https://claude.com/code-with-claude/tokyo' },
             ]}
           />
           <FooterCol
