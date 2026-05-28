@@ -12,25 +12,27 @@
 
 [**Try it live at ClassBuild.ai**](https://classbuild.ai) · [LLM-readable docs](/llm.txt)
 
-![ClassBuild — AI Course Generator](public/hero.png)
+![ClassBuild — Draft a course. Edit it. Teach it.](public/classbuild_hero.png)
 
 ---
 
 ## What is ClassBuild?
 
-Describe your subject and ClassBuild produces a full course: interactive chapters with embedded widgets, gamified quizzes with confidence calibration, PowerPoint slides with speaker notes, AI-narrated audiobooks, infographics, and a teaching pack — all woven with five evidence-based learning principles.
+A topic, an audience, a chapter count. ClassBuild drafts the syllabus, researches each chapter, writes the slides and quizzes, narrates the lectures, and hands you a course you can edit in the browser — all woven with five evidence-based learning principles.
 
 ## What does ClassBuild produce per chapter?
 
-- Interactive HTML reading with embedded visualizations and callout boxes
-- Gamified practice quiz with confidence calibration, streaks, and achievements
-- In-class quiz (5 shuffled versions + answer keys)
-- PowerPoint slides with speaker notes
-- AI-narrated audiobook (Gemini TTS)
-- AI-generated infographic (Gemini)
-- Teaching pack: discussion starters, activities, and current events hooks
-- Weekly mastery challenge with 6 question types and SCORM 2004 for Blackboard
-- Research dossier with sources and synthesis notes
+- **Reading chapter** — interactive HTML (and Markdown) with embedded visualisations and callout boxes
+- **Slides** — PowerPoint deck, one full-bleed editorial image per slide, with speaker notes (PPTX)
+- **In-class quiz** — five shuffled versions plus answer keys (DOCX)
+- **Practice quiz** — gamified, with confidence calibration, streaks, and achievements (HTML)
+- **Teaching pack** — discussion starters, classroom activities, and current-events hooks
+- **Narrated audio** — AI-narrated audiobook of the chapter (MP3)
+- **Weekly challenge** — mastery challenge with six question types, plus a SCORM 2004 package for Blackboard (HTML)
+
+Every chapter is also grounded by a **research dossier** (web-sourced references and synthesis notes) gathered during the Research stage.
+
+Reading, practice quiz, and weekly challenge all render in the course's chosen **chapter theme**, so a downloaded course is visually consistent end to end.
 
 ## How do I install ClassBuild?
 
@@ -49,20 +51,21 @@ Open [localhost:5173](http://localhost:5173) and enter your API key on the Setup
 
 | Key | Required | Purpose |
 |-----|----------|---------|
-| Anthropic Claude | Yes | Course generation (all stages) |
-| Google Gemini | No | Voice narration (TTS) and AI-generated infographics |
+| Anthropic Claude | Yes | Course generation — syllabus, research, chapters, quizzes, slides, teaching pack |
+| OpenAI | For images | Slide images and chapter figures (gpt-image-2) |
+| ElevenLabs | For audio | Audiobook narration (text-to-speech) |
 
 ## How does ClassBuild work?
 
-ClassBuild is a six-stage pipeline:
+ClassBuild is a five-stage pipeline:
 
 1. **Setup** — Define your topic, audience level, chapter count, and preferences
 2. **Syllabus** — Claude designs the full course arc: chapter narratives, key concepts, and learning science annotations
 3. **Research** — Web search gathers real-world sources and examples to ground every chapter
-4. **Build** — Generate all materials live: chapters, quizzes, slides, audio, and infographics stream in real time
-5. **Export** — Download as ZIP, PowerPoint, or publish as a standalone course viewer site
+4. **Build** — Generate all materials live: chapters, quizzes, slides, teaching pack, and audio stream in real time, editable in a two-panel workspace
+5. **Export** — Download as ZIP or PowerPoint, package SCORM for an LMS, or publish a standalone course viewer site
 
-Four visual themes (Midnight, Classic, Ocean, Warm) carry through every output — chapters, quizzes, slides, and the published course viewer.
+Six **chapter themes** — Press, Notebook, Almanac, Storybook, Studio, and Terminal — each a distinct editorial look that carries through the reading, practice quiz, slides, and weekly challenge. The ClassBuild app itself is dressed in its own "Codex" parchment design system.
 
 ## How do I generate a course from the command line?
 
@@ -73,13 +76,13 @@ ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
   --topic "The Psychology of Prejudice" \
   --chapters 12 \
   --level advanced-undergrad \
-  --theme midnight \
+  --theme terminal \
   --length comprehensive \
   --notes "University of Queensland, Australia. Use international and Australian examples." \
   --output ./output/prejudice
 ```
 
-Set `GEMINI_API_KEY` as an environment variable to enable audio narration and infographics. Install `ffmpeg` if you want the CLI to transcode WAV output to MP3.
+Set `OPENAI_API_KEY` to render slide images and chapter figures, and `ELEVENLABS_API_KEY` to narrate the audiobooks. Text-only generation needs just `ANTHROPIC_API_KEY`.
 
 ## What does each CLI flag do?
 
@@ -88,13 +91,13 @@ Set `GEMINI_API_KEY` as an environment variable to enable audio narration and in
 | `--topic` | *(required)* | Course topic |
 | `--chapters` | `12` | Number of chapters |
 | `--level` | `advanced-undergrad` | `general-public`, `professional`, `advanced-undergrad` |
-| `--theme` | `midnight` | `midnight`, `classic`, `ocean`, `warm` |
+| `--theme` | `press` | `press`, `notebook`, `almanac`, `storybook`, `studio`, `terminal` |
 | `--length` | `standard` | `concise`, `standard`, `comprehensive` |
 | `--widgets` | `3` | Interactive widgets per chapter |
 | `--cohort` | `60` | Expected class size |
 | `--environment` | `lecture-theatre` | `lecture-theatre`, `collaborative`, `flat-classroom`, `online-hybrid` |
 | `--notes` | — | Additional context for the AI (audience, tone, specific topics) |
-| `--voice-id` | — | Gemini TTS voice name for audiobook narration (e.g. `Kore`, `Puck`, `Charon`) |
+| `--voice-id` | — | ElevenLabs voice ID for audiobook narration (defaults to a neutral narrator) |
 | `--syllabus` | — | Path to existing syllabus.json (skip regeneration) |
 | `--stop-after` | — | `syllabus` or `research` — stop early for review |
 | `--no-publish` | `false` | Skip course viewer assembly |
@@ -107,7 +110,7 @@ See 6 example courses built with the CLI at [courses.classbuild.ai](https://cour
 
 ## How do I use ClassBuild's prompt library in my own project?
 
-ClassBuild's 11 prompt builders in `src/prompts/` can be imported directly. Each returns a system prompt and user message for the Anthropic messages API:
+ClassBuild's 12 prompt builders in `src/prompts/` can be imported directly. Each returns a system prompt and user message for the Anthropic messages API:
 
 ```typescript
 import { buildSyllabusPrompt, parseSyllabusResponse } from 'classbuild/src/prompts/syllabus';
@@ -141,6 +144,7 @@ const syllabus = parseSyllabusResponse(response.content[0].text);
 | `audioTranscript.ts` | `buildAudioTranscriptPrompt()`, `buildAudioTranscriptUserPrompt()` | Audiobook narration |
 | `learningObjectives.ts` | — | Learning objectives (Bloom's taxonomy) |
 | `infographic.ts` | `buildInfographicMetaPrompt()`, `buildInfographicMetaUserPrompt()` | Infographic briefs |
+| `weeklyChallenge.ts` | `buildWeeklyChallengePrompt()`, `buildWeeklyChallengeUserPrompt()` | Weekly mastery challenge |
 
 ## What learning science does ClassBuild apply?
 
@@ -156,7 +160,7 @@ The syllabus stage annotates every chapter with the specific principles it empha
 
 ## Built with
 
-React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 · Gemini (image generation + TTS)
+React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
 
 Built with Claude for the [Anthropic Hackathon](https://docs.google.com/forms/d/e/1FAIpQLSdAmDqfWux_oP_E55aSaXRahq6lkSi3jBWG4PlMOmhgVUhg-w/viewform) (Feb 2026).
 
