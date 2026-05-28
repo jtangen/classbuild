@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { downloadFile } from '../utils/download';
+import { normalizeActivityDetail } from '../utils/activityDetail';
 import { KeyMissingBanner } from '../components/build/artifactHelpers';
 import { QuizTab } from '../components/build/tabs/QuizTab';
 import { WeeklyChallengeTab } from '../components/build/tabs/WeeklyChallengeTab';
@@ -439,7 +440,7 @@ export function BuildPage() {
       lines.push(`Learning Goal: ${a.learningGoal}`);
       lines.push(`Scaling: ${a.scalingNotes}`);
 
-      const detail = expandedActivities[i];
+      const detail = normalizeActivityDetail(expandedActivities[i]);
       if (detail) {
         lines.push('');
         lines.push(`--- Step-by-Step Guide ---`);

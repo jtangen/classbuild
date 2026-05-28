@@ -1,6 +1,7 @@
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArtifactStatusLine, ArtifactEmpty } from '../artifactHelpers';
 import type { ActivityDetail } from '../../../types/course';
+import { normalizeActivityDetail } from '../../../utils/activityDetail';
 
 export interface Activity {
   title: string;
@@ -82,7 +83,7 @@ export function ActivitiesTab({
         </button>
       </div>
       {activities.map((a, i) => {
-        const detail = expandedActivities[i];
+        const detail = normalizeActivityDetail(expandedActivities[i]);
         const isExpanding = expandingActivity === i;
         const isExpanded = !!detail;
 
@@ -100,7 +101,7 @@ export function ActivitiesTab({
                 <div className="flex items-center gap-2 shrink-0">
                   <button
                     onClick={() => {
-                      const d = expandedActivities[i];
+                      const d = detail;
                       let text = `${a.title}  (${a.duration})\n\n${a.description}\n\nMaterials: ${a.materials}\nLearning Goal: ${a.learningGoal}\nScaling: ${a.scalingNotes}`;
                       if (d) {
                         text += '\n\nStep-by-Step Guide:\n' + d.steps.map(s => `  [${s.timing}] ${s.instruction}${s.studentAction ? `\n    → Students: ${s.studentAction}` : ''}`).join('\n');
@@ -188,7 +189,7 @@ export function ActivitiesTab({
             </div>
 
             <AnimatePresence>
-              {isExpanded && (
+              {detail && (
                 <motion.div
                   initial={{ height: 0, opacity: 0 }}
                   animate={{ height: 'auto', opacity: 1 }}

@@ -60,7 +60,6 @@ export async function streamMessage(
 
     if (thinkingBudget) {
       const budgetTokens = getThinkingTokens(thinkingBudget);
-      params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
       if (model === MODELS.opus) {
         // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
         // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
@@ -72,9 +71,17 @@ export async function streamMessage(
         // field is still sent through to the API, so cast.
         params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
         params.output_config = { effort: thinkingBudget };
+        // Adaptive thinking tokens count toward max_tokens. Reserve generous
+        // headroom ABOVE the caller's intended output so a deep think can't eat
+        // the output budget and truncate the answer — a truncated JSON material
+        // (quiz, weekly challenge) then fails to parse and silently reverts.
+        // Capped at the 128k output ceiling.
+        params.max_tokens = Math.min(128000, maxTokens + budgetTokens * 2);
       } else {
-        // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking.
+        // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking, where
+        // budget_tokens must fit inside max_tokens.
         params.thinking = { type: 'enabled', budget_tokens: budgetTokens };
+        params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
       }
     }
 
@@ -217,7 +224,6 @@ export async function sendMessage(
 
   if (thinkingBudget) {
     const budgetTokens = getThinkingTokens(thinkingBudget);
-    params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
     if (model === MODELS.opus) {
       // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
       // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
@@ -229,9 +235,17 @@ export async function sendMessage(
       // field is still sent through to the API, so cast.
       params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
       params.output_config = { effort: thinkingBudget };
+      // Adaptive thinking tokens count toward max_tokens. Reserve generous
+      // headroom ABOVE the caller's intended output so a deep think can't eat
+      // the output budget and truncate the answer — a truncated JSON material
+      // (quiz, weekly challenge) then fails to parse and silently reverts.
+      // Capped at the 128k output ceiling.
+      params.max_tokens = Math.min(128000, maxTokens + budgetTokens * 2);
     } else {
-      // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking.
+      // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking, where
+      // budget_tokens must fit inside max_tokens.
       params.thinking = { type: 'enabled', budget_tokens: budgetTokens };
+      params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
     }
   }
 

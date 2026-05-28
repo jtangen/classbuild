@@ -18,6 +18,7 @@ import {
 import { buildSlidesPrompt, buildSlidesUserPrompt } from '../../prompts/slides';
 import { friendlyError } from '../../utils/errors';
 import { parseJson } from '../../utils/format';
+import { normalizeActivityDetail } from '../../utils/activityDetail';
 import { getVoiceOption } from '../../themes';
 import type {
   Syllabus,
@@ -629,12 +630,16 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
         );
 
         try {
-          const parsed = parseJson(fullText, '{') as ActivityDetail;
-          setExpandedActivities((prev) => {
-            const updated = { ...prev, [index]: parsed };
-            updateChapter(selectedChapterNum, { activityDetails: updated });
-            return updated;
-          });
+          const parsed = normalizeActivityDetail(
+            parseJson(fullText, '{') as Partial<ActivityDetail>,
+          );
+          if (parsed) {
+            setExpandedActivities((prev) => {
+              const updated = { ...prev, [index]: parsed };
+              updateChapter(selectedChapterNum, { activityDetails: updated });
+              return updated;
+            });
+          }
         } catch (parseErr) {
           setError(
             `Failed to parse activity details: ${
