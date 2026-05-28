@@ -160,7 +160,7 @@ The syllabus stage annotates every chapter with the specific principles it empha
 
 ## Built with
 
-React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.6 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
+React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.8 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
 
 Built with Claude for the [Anthropic Hackathon](https://docs.google.com/forms/d/e/1FAIpQLSdAmDqfWux_oP_E55aSaXRahq6lkSi3jBWG4PlMOmhgVUhg-w/viewform) (Feb 2026).
 

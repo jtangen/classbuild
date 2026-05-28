@@ -59,11 +59,23 @@ export async function streamMessage(
     }
 
     if (thinkingBudget) {
-      params.thinking = {
-        type: 'enabled',
-        budget_tokens: getThinkingTokens(thinkingBudget),
-      };
-      params.max_tokens = Math.max(maxTokens, getThinkingTokens(thinkingBudget) + maxTokens);
+      const budgetTokens = getThinkingTokens(thinkingBudget);
+      params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
+      if (model === MODELS.opus) {
+        // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
+        // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
+        // Two non-obvious defaults on 4.7+: adaptive thinking is OFF unless you
+        // set it explicitly (effort alone does NOT make Opus think), and the
+        // thinking summary text is omitted by default — `display: 'summarized'`
+        // restores the streamed reasoning the UI shows via onThinking.
+        // SDK 0.74.0 doesn't type `display` on the adaptive config yet; the
+        // field is still sent through to the API, so cast.
+        params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
+        params.output_config = { effort: thinkingBudget };
+      } else {
+        // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking.
+        params.thinking = { type: 'enabled', budget_tokens: budgetTokens };
+      }
     }
 
     if (tools && tools.length > 0) {
@@ -204,11 +216,23 @@ export async function sendMessage(
   }
 
   if (thinkingBudget) {
-    params.thinking = {
-      type: 'enabled',
-      budget_tokens: getThinkingTokens(thinkingBudget),
-    };
-    params.max_tokens = Math.max(maxTokens, getThinkingTokens(thinkingBudget) + maxTokens);
+    const budgetTokens = getThinkingTokens(thinkingBudget);
+    params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
+    if (model === MODELS.opus) {
+      // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
+      // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
+      // Two non-obvious defaults on 4.7+: adaptive thinking is OFF unless you
+      // set it explicitly (effort alone does NOT make Opus think), and the
+      // thinking summary text is omitted by default — `display: 'summarized'`
+      // restores the streamed reasoning the UI shows via onThinking.
+      // SDK 0.74.0 doesn't type `display` on the adaptive config yet; the
+      // field is still sent through to the API, so cast.
+      params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
+      params.output_config = { effort: thinkingBudget };
+    } else {
+      // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking.
+      params.thinking = { type: 'enabled', budget_tokens: budgetTokens };
+    }
   }
 
   if (tools && tools.length > 0) {
