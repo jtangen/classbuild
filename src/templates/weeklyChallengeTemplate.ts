@@ -29,9 +29,16 @@ export function buildWeeklyChallengeHtml(
     const s = String(val);
     let out = '';
     for (let i = 0; i < s.length; i++) {
-      out += String.fromCharCode(s.charCodeAt(i) ^ xorKey.charCodeAt(i % xorKey.length));
+      // Mask to a byte so this matches Buffer's latin1 truncation (used by the
+      // Node CLI) and so btoa() — which rejects code points > 0xFF — is safe.
+      out += String.fromCharCode((s.charCodeAt(i) ^ xorKey.charCodeAt(i % xorKey.length)) & 0xff);
     }
-    return Buffer.from(out, 'binary').toString('base64');
+    // btoa, NOT Buffer: this template renders in the BROWSER (Build page) as
+    // well as the Node CLI, and `Buffer` is undefined in the browser — the
+    // ReferenceError was swallowed, so the in-browser challenge (and its SCORM
+    // export) silently never rendered. btoa works in both (browser global;
+    // Node >= 16) and the runtime decoder already uses atob.
+    return btoa(out);
   }
 
   // Deep clone and strip answers

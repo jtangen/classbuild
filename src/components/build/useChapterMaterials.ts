@@ -463,8 +463,15 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
                 setup.themeId,
               );
               setWeeklyChallengeHtml(html);
-            } catch {
-              /* template failed */
+            } catch (templateErr) {
+              // Surface (don't swallow) — a swallowed throw here is exactly why
+              // the challenge silently reverted to the button for so long.
+              setTabError(
+                'weeklychallenge',
+                `Challenge generated, but rendering the preview failed: ${
+                  templateErr instanceof Error ? templateErr.message : String(templateErr)
+                }`,
+              );
             }
           }
         } catch {
