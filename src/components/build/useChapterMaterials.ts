@@ -158,6 +158,21 @@ async function runGenerationLifecycle({
   }
 }
 
+// An ElevenLabsTtsError with no HTTP status = the request never reached the API
+// (the local-block / rejected-fetch path in tts.ts); its message is already
+// actionable, so surface it verbatim. Errors carrying a status (401/429/5xx)
+// still go through friendlyError for the mapped copy ("API key rejected", etc.).
+function ttsErrorMessage(err: unknown): string {
+  if (
+    err instanceof Error &&
+    err.name === 'ElevenLabsTtsError' &&
+    (err as { status?: number }).status == null
+  ) {
+    return err.message;
+  }
+  return friendlyError(err, 'Audio synthesis failed.');
+}
+
 export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapterMaterialsResult {
   const {
     syllabus,
@@ -724,7 +739,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             if (selectedChapterRef.current === chapterNum) setAudioUrl(url);
             updateChapter(chapterNum, { audioUrl: url });
           } catch (err) {
-            const msg = friendlyError(err, 'Audio synthesis failed.');
+            const msg = ttsErrorMessage(err);
             console.error('ElevenLabs TTS failed:', err);
             if (selectedChapterRef.current === chapterNum) setAudioError(msg);
           }
@@ -765,7 +780,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setAudioUrl(url);
       updateChapter(selectedChapterNum, { audioUrl: url });
     } catch (err) {
-      const msg = friendlyError(err, 'Audio synthesis failed.');
+      const msg = ttsErrorMessage(err);
       console.error('ElevenLabs TTS retry failed:', err);
       setAudioError(msg);
     } finally {

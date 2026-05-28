@@ -113,13 +113,23 @@ async function synthesizeChunk(
         }),
       });
     } catch (err) {
-      if (attempt === MAX_ATTEMPTS) {
-        throw new ElevenLabsTtsError(
-          `Network error calling ElevenLabs: ${err instanceof Error ? err.message : String(err)}`,
-        );
-      }
-      await sleep(500 * attempt);
-      continue;
+      // A REJECTED fetch (vs an HTTP error response, handled below) means the
+      // request never reached ElevenLabs. ElevenLabs allows direct browser
+      // calls — its TTS endpoint returns permissive CORS — so this is almost
+      // always a *local* block of api.elevenlabs.io (a content/ad/privacy
+      // blocker, browser extension, VPN, or iCloud Private Relay), not a
+      // transient blip. Don't burn retries on a non-transient block; fail fast
+      // with guidance that points at the real, user-fixable cause. (No status
+      // is attached, which is how the caller knows to show this verbatim rather
+      // than running it through friendlyError.)
+      throw new ElevenLabsTtsError(
+        `Couldn't reach ElevenLabs — the request to api.elevenlabs.io was blocked before it got a response. ` +
+          `This isn't your API key or ElevenLabs itself (it allows direct browser calls). The usual cause is ` +
+          `something on your device or network blocking that domain: a content/ad/privacy blocker or browser ` +
+          `extension, a VPN, or iCloud Private Relay. Try disabling content blockers and "Prevent Cross-Site ` +
+          `Tracking" for this site, turning off any VPN/Private Relay, or switching browser or network. ` +
+          `(Underlying: ${err instanceof Error ? err.message : String(err)})`,
+      );
     }
 
     if (!res.ok) {
