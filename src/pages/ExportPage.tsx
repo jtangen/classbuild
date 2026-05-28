@@ -204,7 +204,11 @@ export function ExportPage() {
 
   const handleDownloadWeeklyChallengeSCORM = useCallback(async (chapterNum: number) => {
     const chapter = chapters.find(c => c.number === chapterNum);
-    if (!chapter?.weeklyChallengeData || !syllabus) return;
+    if (!syllabus) return;
+    if (!chapter?.weeklyChallengeData?.questions?.length) {
+      setError('No weekly challenge to package yet — generate the mastery challenge for this chapter first, then export the SCORM package.');
+      return;
+    }
     try {
       const { buildWeeklyChallengeHtml } = await import('../templates/weeklyChallengeTemplate');
       const { default: JSZip } = await import('jszip');

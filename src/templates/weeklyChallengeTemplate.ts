@@ -24,7 +24,7 @@ export function buildWeeklyChallengeHtml(
   // ── Build-time answer obfuscation ──
   // Strip answer fields from questions and encode them so they don't appear
   // as plaintext in the HTML source. The JS runtime decodes them.
-  const xorKey = 'wc' + (challengeData.metadata.weekNumber || 1);
+  const xorKey = 'wc' + (challengeData.metadata?.weekNumber || 1);
   function obf(val: string | number): string {
     const s = String(val);
     let out = '';
@@ -36,7 +36,7 @@ export function buildWeeklyChallengeHtml(
 
   // Deep clone and strip answers
   const sanitised = JSON.parse(JSON.stringify(challengeData)) as WeeklyChallengeData;
-  for (const q of sanitised.questions) {
+  for (const q of (sanitised.questions || [])) {
     // Strip answer fields from variants too
     const allVersions = [q, ...(q.variants || []) as Record<string, unknown>[]];
     for (const v of allVersions) {
