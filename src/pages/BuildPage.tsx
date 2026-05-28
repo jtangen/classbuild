@@ -1584,7 +1584,7 @@ Teacher feedback: "${feedback}"`;
               aria-modal="true"
               aria-labelledby="batch-confirm-title"
             >
-              <div className="p-5 rounded-xl bg-cb-status-warning border border-cb-status-warning">
+              <div className="p-5 rounded-xl bg-cb-status-warning-bg border border-cb-status-warning">
                 <h3 id="batch-confirm-title" className="text-sm font-semibold text-cb-status-warning mb-2">
                   Generate {researched} class{researched !== 1 ? 'es' : ''} at once?
                 </h3>

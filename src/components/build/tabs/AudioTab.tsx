@@ -76,7 +76,7 @@ export function AudioTab({
           </div>
         )}
         {!audioUrl && hasElevenLabsKey && audioError && (
-          <div className="bg-cb-status-warning border border-cb-status-warning rounded-xl p-4">
+          <div className="bg-cb-status-warning-bg border border-cb-status-warning rounded-xl p-4">
             <p className="text-cb-status-warning text-sm mb-1">
               Audio synthesis failed: {audioError}
             </p>
