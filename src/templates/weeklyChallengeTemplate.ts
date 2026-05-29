@@ -2739,7 +2739,15 @@ export function buildWeeklyChallengeHtml(
             return null;
         }
 
-        const scormAPI = findSCORM2004API(window);
+        // findSCORM2004API walks up to window.parent; in a sandboxed / cross-
+        // origin embed (e.g. ClassBuild's preview iframe, which has no
+        // allow-same-origin) reading win.API_1484_11 on the parent throws a
+        // SecurityError. Without this guard the throw aborts init before the
+        // "Begin Challenge" button is wired, so the preview looks dead while the
+        // downloaded file (not sandboxed) works. Guard it: a missing LMS just
+        // means run standalone.
+        let scormAPI = null;
+        try { scormAPI = findSCORM2004API(window); } catch (e) { scormAPI = null; }
         let scormConnected = false;
 
         function scormInit() {

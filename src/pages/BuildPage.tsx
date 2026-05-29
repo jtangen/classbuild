@@ -923,8 +923,9 @@ Teacher feedback: "${feedback}"`;
     if (activities.length === 0) tasks.push(generateActivities().catch(logFailure('activities')));
     if (slidesData.length === 0) tasks.push(generateSlides().catch(logFailure('slides')));
     if (!audioTranscript) tasks.push(generateAudio().catch(logFailure('audio')));
+    if (!currentChapter.weeklyChallengeData) tasks.push(generateWeeklyChallengeContent().catch(logFailure('weekly-challenge')));
     await Promise.allSettled(tasks);
-  }, [currentChapter, syllabusChapter, syllabus, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio]);
+  }, [currentChapter, syllabusChapter, syllabus, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio, generateWeeklyChallengeContent]);
 
   // Keep the ref pointing at the latest generateAllOutputs so refineChapter
   // can fire a post-refine regen *after* the new chapter content has been
