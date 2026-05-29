@@ -117,14 +117,16 @@ export async function assemblePublishSite(
       if (wroteAny) data.slides = ch.slidesJson.map((s) => ({ title: s.title }));
     }
 
-    // Audio — fetch the blob URL (may be dead after a reload; skip if so).
-    if (ch.audioUrl) {
+    // Audio — prefer the durable data URI (survives reload); fall back to the
+    // in-session blob URL. fetch() accepts both. Skip on failure.
+    const chapterAudio = ch.audioUrl ?? ch.audioDataUri;
+    if (chapterAudio) {
       try {
-        const audioBlob = await fetch(ch.audioUrl).then((r) => r.blob());
+        const audioBlob = await fetch(chapterAudio).then((r) => r.blob());
         zip.file(`audio/${nn}.mp3`, audioBlob);
         data.audioPath = `audio/${nn}.mp3`;
       } catch {
-        /* blob URL no longer valid (e.g. after reload) — omit audio */
+        /* audio source no longer valid — omit audio */
       }
     }
     if (ch.audioTranscript) data.transcript = ch.audioTranscript;

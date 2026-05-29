@@ -58,7 +58,7 @@ export function AudioTab({
                 onClick={() => {
                   const a = document.createElement('a');
                   a.href = audioUrl;
-                  a.download = `audio-${chapterNum}-${slugify(chapterTitle || 'chapter')}.wav`;
+                  a.download = `audio-${chapterNum}-${slugify(chapterTitle || 'chapter')}.mp3`;
                   a.click();
                 }}
               >
@@ -67,7 +67,7 @@ export function AudioTab({
                   <polyline points="7 10 12 15 17 10" />
                   <line x1="12" y1="15" x2="12" y2="3" />
                 </svg>
-                Download .wav
+                Download .mp3
               </Button>
             </div>
             <audio controls className="w-full" src={audioUrl}>

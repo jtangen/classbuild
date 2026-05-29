@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { downloadFile } from '../utils/download';
 import { normalizeActivityDetail } from '../utils/activityDetail';
+import { persistableAudioDataUri } from '../utils/audio';
 import { KeyMissingBanner } from '../components/build/artifactHelpers';
 import { QuizTab } from '../components/build/tabs/QuizTab';
 import { WeeklyChallengeTab } from '../components/build/tabs/WeeklyChallengeTab';
@@ -1328,7 +1329,8 @@ Teacher feedback: "${feedback}"`;
                 const batchVoice = getVoiceOption(setup.voiceId);
                 const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: batchVoice.id });
                 const url = URL.createObjectURL(blob);
-                updateChapter(ch.number, { audioUrl: url });
+                const audioDataUri = await persistableAudioDataUri(blob);
+                updateChapter(ch.number, { audioUrl: url, audioDataUri });
               } catch {
                 // TTS failed, transcript is still saved
               }

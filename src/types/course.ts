@@ -211,7 +211,8 @@ export interface GeneratedChapter {
   activityData?: Array<{ title: string; duration: string; description: string; materials: string; learningGoal: string; scalingNotes: string }>;
   activityDetails?: Record<number, ActivityDetail>;
   audioTranscript?: string;
-  audioUrl?: string; // blob URL from ElevenLabs (MP3)
+  audioUrl?: string; // in-session blob URL from ElevenLabs (MP3); dies on reload + stripped from persistence
+  audioDataUri?: string; // base64 data: URI of the MP3 — durable across reload (size-capped); not stripped
   slidesJson?: SlideData[];
   pptxUrl?: string; // blob URL
   infographicDataUri?: string; // data:image/jpeg;base64,...

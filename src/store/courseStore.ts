@@ -228,12 +228,23 @@ export const useCourseStore = create<CourseState>()(
         syllabusConversation: state.syllabusConversation,
         researchDossiers: state.researchDossiers,
         curriculumMap: state.curriculumMap,
-        // Persist chapters but strip blob URLs and large data URIs
+        // Persist chapters but strip the heaviest binaries so the IndexedDB
+        // snapshot stays small and writes don't stall (which silently lost
+        // later-generated content). The big offender is the rendered 4K slide
+        // images (~13/chapter, written one-at-a-time so they also triggered a
+        // write storm); strip their data URIs but KEEP imagePrompt/title so the
+        // deck re-renders next session. Chapter reading figures stay inlined —
+        // they're smaller, written once, and not cleanly re-renderable, so the
+        // reading survives a reload intact. Everything else here is small JSON
+        // (syllabus, quiz + challenge data, transcripts, capped audioDataUri)
+        // and now saves reliably. The idbStorage write timeout surfaces any
+        // residual oversize as a visible error rather than a silent hang.
         chapters: state.chapters.map((c) => ({
           ...c,
           audioUrl: undefined,
           pptxUrl: undefined,
           infographicDataUri: undefined,
+          slidesJson: c.slidesJson?.map((s) => ({ ...s, imageDataUri: undefined })),
         })),
       }),
     }

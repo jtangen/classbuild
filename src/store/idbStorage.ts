@@ -80,7 +80,16 @@ const idbStateStorage: StateStorage = {
   async setItem(name: string, value: string): Promise<void> {
     try {
       const db = await getDb();
-      await idbSet(db, name, value);
+      // Guard against a never-settling put (an oversized payload can hang the
+      // IndexedDB write without resolving OR rejecting — which previously left
+      // a deceptively green "Saved" badge while content was silently not saved).
+      // A timeout converts that hang into a visible persistError.
+      await Promise.race([
+        idbSet(db, name, value),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('IndexedDB write timed out — the course may be too large to save.')), 15000),
+        ),
+      ]);
       // Stamp the timestamp so the Header can show "Saved · Xs ago".
       // Dynamic import keeps this circular ref a true cycle break.
       const { useUiStore } = await import('./uiStore');

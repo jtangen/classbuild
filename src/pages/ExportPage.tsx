@@ -71,7 +71,7 @@ function buildClassReadme(
   if (chapter.slidesJson) {
     lines.push('slides.pptx               12–14-slide lecture deck (or slides.json if no OpenAI key).');
   }
-  if (chapter.audioUrl) {
+  if (chapter.audioUrl || chapter.audioDataUri) {
     lines.push('audiobook.mp3             Class audiobook narrated through ElevenLabs.');
   }
   if (chapter.audioTranscript) {
@@ -229,9 +229,11 @@ export function ExportPage() {
 
   const handleDownloadAudio = useCallback((chapterNum: number) => {
     const chapter = chapters.find(c => c.number === chapterNum);
-    if (!chapter?.audioUrl) return;
+    if (!chapter) return;
+    const audioSrc = chapter.audioUrl ?? chapter.audioDataUri;
+    if (!audioSrc) return;
     const a = document.createElement('a');
-    a.href = chapter.audioUrl;
+    a.href = audioSrc;
     a.download = `audio-${chapterNum}-${sanitizeFilename(chapter.title)}.mp3`;
     a.click();
   }, [chapters]);
@@ -706,9 +708,10 @@ export function ExportPage() {
 
     // 6. Audio — fetch the blob URL while the page is still open (it dies on
     //    reload, so this is the only chance to capture it into the ZIP).
-    if (chapter.audioUrl) {
+    const chapterAudio = chapter.audioUrl ?? chapter.audioDataUri;
+    if (chapterAudio) {
       try {
-        const audioBlob = await fetch(chapter.audioUrl).then((r) => r.blob());
+        const audioBlob = await fetch(chapterAudio).then((r) => r.blob());
         root.file(`audiobook.mp3`, audioBlob);
       } catch {
         /* blob fetch failed — skip */
@@ -967,7 +970,7 @@ export function ExportPage() {
     if (c.inClassQuizData && c.inClassQuizData.length > 0) n++;
     if (c.weeklyChallengeData) n++;
     if (c.slidesJson) n++;
-    if (c.audioUrl) n++;
+    if (c.audioUrl || c.audioDataUri) n++;
     if ((c.discussionData && c.discussionData.length > 0) || (c.activityData && c.activityData.length > 0)) n++;
     return n;
   }
@@ -1205,7 +1208,7 @@ export function ExportPage() {
                 onClick: () => handleDownloadSlides(ch.number),
               });
             }
-            if (generated.audioUrl) {
+            if (generated.audioUrl || generated.audioDataUri) {
               artifacts.push({
                 label: 'audiobook · mp3',
                 onClick: () => handleDownloadAudio(ch.number),

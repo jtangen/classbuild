@@ -19,6 +19,7 @@ import { buildSlidesPrompt, buildSlidesUserPrompt } from '../../prompts/slides';
 import { friendlyError } from '../../utils/errors';
 import { parseJson } from '../../utils/format';
 import { normalizeActivityDetail } from '../../utils/activityDetail';
+import { persistableAudioDataUri } from '../../utils/audio';
 import { getVoiceOption } from '../../themes';
 import type {
   Syllabus,
@@ -250,7 +251,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     if (ch.activityData && ch.activityData.length > 0) setActivities(ch.activityData);
     if (ch.activityDetails) setExpandedActivities(ch.activityDetails);
     if (ch.audioTranscript) setAudioTranscript(ch.audioTranscript);
-    if (ch.audioUrl) setAudioUrl(ch.audioUrl);
+    const audioSrc = ch.audioUrl ?? ch.audioDataUri;
+    if (audioSrc) setAudioUrl(audioSrc);
     if (ch.slidesJson && ch.slidesJson.length > 0) setSlidesData(ch.slidesJson);
     if (ch.practiceQuizData && syllabus) {
       const syllCh = syllabus.chapters.find((sc) => sc.number === selectedChapterNum);
@@ -737,7 +739,10 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             });
             const url = URL.createObjectURL(blob);
             if (selectedChapterRef.current === chapterNum) setAudioUrl(url);
-            updateChapter(chapterNum, { audioUrl: url });
+            // Persist a (size-capped) data URI too — the blob URL above is
+            // stripped on save and dies on reload; the data URI survives.
+            const audioDataUri = await persistableAudioDataUri(blob);
+            updateChapter(chapterNum, { audioUrl: url, audioDataUri });
           } catch (err) {
             const msg = ttsErrorMessage(err);
             console.error('ElevenLabs TTS failed:', err);
@@ -778,7 +783,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       });
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
-      updateChapter(selectedChapterNum, { audioUrl: url });
+      const audioDataUri = await persistableAudioDataUri(blob);
+      updateChapter(selectedChapterNum, { audioUrl: url, audioDataUri });
     } catch (err) {
       const msg = ttsErrorMessage(err);
       console.error('ElevenLabs TTS retry failed:', err);
