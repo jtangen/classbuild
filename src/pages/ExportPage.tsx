@@ -920,16 +920,16 @@ export function ExportPage() {
     if (!syllabus || chapters.length === 0) return;
     setIsPublishing(true);
     try {
-      const { assemblePublishHtml } = await import('../services/export/publishExporter');
-      const html = await assemblePublishHtml(syllabus, chapters, setup.themeId, curriculumMap);
+      const { assemblePublishSite } = await import('../services/export/publishExporter');
+      const blob = await assemblePublishSite(syllabus, chapters, setup.themeId);
       const courseName = sanitizeFilename(syllabus.courseTitle) || 'course';
-      downloadFile(html, `${courseName}-published.html`);
+      downloadFile(blob, `${courseName}-site.zip`, 'application/zip');
     } catch (err) {
       setError(friendlyError(err, 'Publish failed.'));
     } finally {
       setIsPublishing(false);
     }
-  }, [syllabus, chapters, setup.themeId, curriculumMap, setError]);
+  }, [syllabus, chapters, setup.themeId, setError]);
 
   // --- Derived data ---
 
@@ -1036,7 +1036,7 @@ export function ExportPage() {
               onClick={handlePublish}
               disabled={chapters.length === 0 || isPublishing}
             >
-              {isPublishing ? 'Publishing…' : 'Publish · standalone HTML →'}
+              {isPublishing ? 'Publishing…' : 'Publish · course site (.zip) →'}
             </Button>
             <Button
               variant="ghost"
