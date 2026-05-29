@@ -21,7 +21,7 @@ export function buildAudioTranscriptPrompt(): string {
 - Expand symbols: "%" becomes "percent", "&" becomes "and", "+" becomes "plus".
 
 ### Add Natural Pacing Cues
-- Insert [short pause] at section transitions and between major ideas to give the listener a moment to absorb.
+- Pace the narration with sentence length, paragraph breaks, and punctuation (full stops, commas, em-dashes). Do NOT write bracketed or parenthetical stage directions such as "[short pause]", "(pause)", or "[beat]" — a text-to-speech engine reads them aloud word-for-word. Let the writing itself carry the rhythm.
 - Use CAPS for emphasis on KEY TERMS and important vocabulary when they are first introduced or especially significant.
 - Do not overuse emphasis — limit CAPS to the most important terms, roughly two to four per section.
 

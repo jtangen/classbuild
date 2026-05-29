@@ -45,6 +45,20 @@ export interface TtsOptions {
   onProgress?: (current: number, total: number) => void;
 }
 
+/**
+ * Remove stage directions that transcripts embed as text — "[short pause]",
+ * "(pause)", "[beat]", etc. ElevenLabs reads these aloud verbatim instead of
+ * interpreting them, so strip any bracketed/parenthetical group containing
+ * "pause" or "beat" and tidy the surrounding whitespace. Applied to every
+ * transcript (incl. ones generated before the prompt stopped emitting them).
+ */
+function stripStageDirections(text: string): string {
+  return text
+    .replace(/[[(][^\][()]*\b(?:pause|beat)\b[^\][()]*[\])]/gi, ' ')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/ +([.,;:!?])/g, '$1');
+}
+
 function chunkText(text: string): string[] {
   const paragraphs = text.split(/\n\n+/);
   const chunks: string[] = [];
@@ -197,7 +211,7 @@ export async function generateAudiobook(
     use_speaker_boost: options?.useSpeakerBoost ?? true,
   };
 
-  const chunks = chunkText(text);
+  const chunks = chunkText(stripStageDirections(text));
   const audioChunks: Uint8Array[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
