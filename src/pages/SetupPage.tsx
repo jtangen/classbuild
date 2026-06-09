@@ -479,7 +479,9 @@ export function SetupPage() {
                 color: claudeKeyValid === false && hasApiKey && hasTopic
                   ? 'var(--cb-status-warning)'
                   : 'var(--cb-text-muted)',
-                flex: '1 1 auto',
+                // Narrow basis lets the helper share one row with both
+                // buttons; the row only wraps on genuinely tight widths.
+                flex: '1 1 200px',
                 lineHeight: 1.5,
               }}
             >
