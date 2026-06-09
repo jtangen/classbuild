@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { MotionConfig } from 'framer-motion';
 import { AppShell } from './components/layout/AppShell';
 import { LandingPage } from './pages/LandingPage';
 import { SetupPage } from './pages/SetupPage';
@@ -56,18 +57,23 @@ function App() {
   }
 
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<AppShell />}>
-          <Route path="/" element={<LandingPage />} />
-          <Route path="/setup" element={<SetupPage />} />
-          <Route path="/syllabus" element={<SyllabusPage />} />
-          <Route path="/research" element={<ResearchPage />} />
-          <Route path="/build" element={<BuildPage />} />
-          <Route path="/export" element={<ExportPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    // reducedMotion="user" disables framer-motion transforms for users with
+    // the OS "reduce motion" preference; the CSS side is handled by the
+    // prefers-reduced-motion block in index.css.
+    <MotionConfig reducedMotion="user">
+      <BrowserRouter>
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="/" element={<LandingPage />} />
+            <Route path="/setup" element={<SetupPage />} />
+            <Route path="/syllabus" element={<SyllabusPage />} />
+            <Route path="/research" element={<ResearchPage />} />
+            <Route path="/build" element={<BuildPage />} />
+            <Route path="/export" element={<ExportPage />} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </MotionConfig>
   );
 }
 

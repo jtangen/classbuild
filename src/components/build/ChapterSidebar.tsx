@@ -229,21 +229,17 @@ export function ChapterSidebar({
                   </span>
                 ) : counts.ready > 0 ? (
                   <span
-                    className="cb-mono"
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--cb-accent-emphasis)',
-                      letterSpacing: '0.04em',
-                    }}
+                    className="cb-italic"
+                    style={{ fontSize: 12.5, color: 'var(--cb-accent-emphasis)' }}
                   >
-                    {counts.ready} of {counts.total} built
+                    — {counts.ready} of {counts.total} drafted
                   </span>
                 ) : (
                   <span
                     className="cb-italic"
                     style={{ fontSize: 12.5, color: 'var(--cb-text-muted)' }}
                   >
-                    awaiting
+                    — awaiting
                   </span>
                 )}
                 {dossier && dossier.sources.length > 0 && counts.ready === 0 && (

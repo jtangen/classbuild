@@ -13,7 +13,7 @@ const ROMAN_LOWER = [
 ];
 
 const MATERIAL_LABELS: Record<MaterialKind, { label: string; tab: string }> = {
-  quiz: { label: 'quiz', tab: 'quiz' },
+  quiz: { label: 'practice quiz', tab: 'quiz' },
   inclassquiz: { label: 'in-class', tab: 'inclassquiz' },
   weeklychallenge: { label: 'challenge', tab: 'weeklychallenge' },
   discussion: { label: 'discussion', tab: 'discussion' },
@@ -215,9 +215,16 @@ export function Header() {
             )}
 
             {!isLanding && persistError && (
-              <span
-                className="cb-mono"
-                title={persistError}
+              <button
+                type="button"
+                className="cb-mono cb-focus"
+                title={`${persistError} — click to retry the save.`}
+                onClick={() => {
+                  // A no-op set re-runs the persist middleware, which
+                  // re-serializes the FULL current state; success clears
+                  // this banner via idbStorage.
+                  useCourseStore.setState({});
+                }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -225,6 +232,11 @@ export function Header() {
                   fontSize: 11.5,
                   color: 'var(--cb-status-danger, #a03535)',
                   letterSpacing: '0.04em',
+                  background: 'transparent',
+                  border: '0.5px solid var(--cb-status-danger, #a03535)',
+                  borderRadius: 2,
+                  padding: '3px 9px 4px',
+                  cursor: 'pointer',
                 }}
               >
                 <span
@@ -237,8 +249,8 @@ export function Header() {
                     background: 'var(--cb-status-danger, #a03535)',
                   }}
                 />
-                Save failed
-              </span>
+                Save failed — retry
+              </button>
             )}
 
             {!isLanding && !isGenerating && (
@@ -337,7 +349,8 @@ function ResetConfirmDialog({
           }}
         >
           This will clear your current syllabus, research, and any generated classes.
-          Local-only — nothing is sent anywhere.
+          Local-only — nothing is sent anywhere. To keep a copy first, download a
+          project file from the Export page.
         </p>
         <div
           style={{

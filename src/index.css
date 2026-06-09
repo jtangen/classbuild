@@ -110,7 +110,9 @@
   --cb-neutral-7: #25221d;
   --cb-text-default: #1a1814;
   --cb-text-muted:   #5d574a;
-  --cb-text-subtle:  #7c7464;
+  /* Darkened from #7c7464 (3.9:1 on parchment) to clear WCAG AA 4.5:1
+     for the small text that uses it. */
+  --cb-text-subtle:  #6e6757;
   --cb-text-inverse: #f8f3e6;
   --cb-border-subtle:  rgba(26,24,20,0.08);
   --cb-border-default: rgba(26,24,20,0.14);
@@ -162,7 +164,8 @@
   --cb-neutral-7: #d6cbb5;
   --cb-text-default: #ebe1cb;
   --cb-text-muted:   #9a9080;
-  --cb-text-subtle:  #756d5e;
+  /* Lightened from #756d5e (3.4:1 on the vespers ground) to clear AA. */
+  --cb-text-subtle:  #8c8373;
   --cb-text-inverse: #1a1814;
   --cb-border-subtle:  rgba(235,225,203,0.08);
   --cb-border-default: rgba(235,225,203,0.14);
@@ -271,6 +274,21 @@
 @keyframes cb-pulse {
   0%, 100% { opacity: 0.55; transform: scale(0.9); }
   50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* Honour the OS motion preference: collapse every CSS animation/transition
+   (cb-pen sweeps, cb-pulse dots, hover transitions) to a near-instant frame.
+   Framer-motion animations are handled separately by <MotionConfig
+   reducedMotion="user"> at the app root. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ── Mobile reflow ─────────────────────────────────────────────────────

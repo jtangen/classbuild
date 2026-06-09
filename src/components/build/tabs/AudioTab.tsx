@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { slugify } from '../../../utils/format';
@@ -219,13 +219,11 @@ function TranscriptPanel({
   onSave: (text: string) => void;
 }) {
   const [editing, setEditing] = useState(false);
+  // Seeded from the live transcript when the Edit button is pressed; while
+  // not editing the view renders `transcript` directly, so no sync effect
+  // is needed (and an in-progress edit is never clobbered by external
+  // transcript changes).
   const [draft, setDraft] = useState(transcript);
-
-  // Track external transcript changes (regenerate, chapter switch) while not
-  // editing, so opening the editor always starts from the live text.
-  useEffect(() => {
-    if (!editing) setDraft(transcript);
-  }, [transcript, editing]);
 
   const words = transcript.trim() ? transcript.trim().split(/\s+/).length : 0;
   // ~155 wpm is a comfortable narration pace.

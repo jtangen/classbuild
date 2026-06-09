@@ -18,7 +18,7 @@ import {
 } from '../prompts/syllabus';
 import type { ChapterSyllabus, WidgetSpec } from '../types/course';
 import { friendlyError } from '../utils/errors';
-import { CodexButton, CodexInput, CodexTextarea } from '../components/codex';
+import { CodexButton, CodexInput, CodexTextarea, CodexModal } from '../components/codex';
 
 const ROMAN_UPPER = [
   'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
@@ -38,6 +38,9 @@ export function SyllabusPage() {
     addSyllabusMessage,
     setStage,
     completeStage,
+    chapters,
+    researchDossiers,
+    resetDownstream,
   } = useCourseStore();
   const { claudeApiKey } = useApiStore();
   const { isGenerating, setIsGenerating, error, setError } = useUiStore();
@@ -49,6 +52,7 @@ export function SyllabusPage() {
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [thinkingText, setThinkingText] = useState('');
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [showRegenConfirm, setShowRegenConfirm] = useState(false);
   const fullTextRef = useRef('');
   const generationStarted = useRef(false);
 
@@ -202,9 +206,59 @@ export function SyllabusPage() {
           drafted={draftedCount}
           total={totalChapters}
           onEditBrief={() => navigate('/setup')}
-          onRegenerate={() => void generateSyllabus()}
+          onRegenerate={() => {
+            // Regenerating restructures the course — built chapters and
+            // dossiers keyed to the old chapter numbers would be orphaned.
+            // Clear them with consent instead of stranding them silently.
+            if (chapters.length > 0 || researchDossiers.length > 0) {
+              setShowRegenConfirm(true);
+            } else {
+              void generateSyllabus();
+            }
+          }}
           onProceed={handleProceed}
         />
+
+        <CodexModal
+          open={showRegenConfirm}
+          onClose={() => setShowRegenConfirm(false)}
+          kicker="regenerate syllabus"
+          title={
+            <>
+              Start the syllabus <span className="cb-italic">over</span>?
+            </>
+          }
+          sub={`A fresh syllabus reorders and renames chapters, so the materials built against this one can't carry over. Regenerating clears ${
+            chapters.length > 0
+              ? `${chapters.length} drafted ${chapters.length === 1 ? 'chapter' : 'chapters'}`
+              : ''
+          }${chapters.length > 0 && researchDossiers.length > 0 ? ' and ' : ''}${
+            researchDossiers.length > 0
+              ? `${researchDossiers.length} research ${researchDossiers.length === 1 ? 'dossier' : 'dossiers'}`
+              : ''
+          } — and any manual edits to chapter titles or narratives. Download a project file from Export first if you want a backup.`}
+          width={500}
+          actions={
+            <>
+              <span style={{ flex: 1 }} />
+              <CodexButton variant="ghost" onClick={() => setShowRegenConfirm(false)}>
+                Cancel
+              </CodexButton>
+              <CodexButton
+                variant="destructive"
+                onClick={() => {
+                  setShowRegenConfirm(false);
+                  resetDownstream();
+                  void generateSyllabus();
+                }}
+              >
+                Clear & regenerate →
+              </CodexButton>
+            </>
+          }
+        >
+          <></>
+        </CodexModal>
 
         {phase === 'thinking' && (
           <ThinkingTrace thinkingText={thinkingText} elapsedSec={elapsedSec} />
@@ -829,9 +883,9 @@ function DraftedSlot({
 
   // If a regenerate kicks off mid-edit, drop back to the read view — an open
   // editor would otherwise hold stale drafts over the incoming chapter.
-  useEffect(() => {
-    if (!editable) setEditing(false);
-  }, [editable]);
+  // Adjusted during render (React's sanctioned pattern) rather than in an
+  // effect, so there's no extra committed frame with a stale editor.
+  if (!editable && editing) setEditing(false);
 
   const beginEdit = () => {
     setDraftTitle(title);

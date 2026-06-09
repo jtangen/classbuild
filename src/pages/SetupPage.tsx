@@ -106,14 +106,15 @@ const STARTER_BRIEFS: StarterBrief[] = [
 
 export function SetupPage() {
   const navigate = useNavigate();
-  const { setup, updateSetup, setStage, completeStage, resetDownstream } = useCourseStore();
-  const { claudeApiKey } = useApiStore();
+  const { setup, updateSetup, setStage, completeStage, resetDownstream, syllabus, chapters } = useCourseStore();
+  const { claudeApiKey, claudeKeyValid } = useApiStore();
   const {
     openKeysOnNextSetupVisit,
     setOpenKeysOnNextSetupVisit,
   } = useUiStore();
   const [refineOpen, setRefineOpen] = useState(false);
   const [keysOpen, setKeysOpen] = useState(false);
+  const [showBeginConfirm, setShowBeginConfirm] = useState(false);
 
   // Honour cross-page request to open the keys modal — e.g. user clicked an
   // "Add OpenAI key →" CTA on the Build page.
@@ -159,12 +160,20 @@ export function SetupPage() {
   const hasTopic = setup.topic.trim().length > 10;
   const hasApiKey = claudeApiKey.trim().length > 0;
   const canProceed = hasTopic && hasApiKey;
+  // Anything downstream that "Begin" would wipe.
+  const hasDownstream = !!syllabus || chapters.length > 0;
 
-  const handleGenerate = () => {
+  const doGenerate = () => {
     resetDownstream();
     completeStage('setup');
     setStage('syllabus');
     navigate('/syllabus');
+  };
+
+  const handleGenerate = () => {
+    // Beginning again replaces the course in progress — confirm first.
+    if (hasDownstream) setShowBeginConfirm(true);
+    else doGenerate();
   };
 
   const applyStarter = (s: StarterBrief) => {
@@ -181,6 +190,8 @@ export function SetupPage() {
     ? 'Add a course topic to continue.'
     : !hasApiKey
     ? 'Add your Anthropic key to continue.'
+    : claudeKeyValid === false
+    ? 'Your Anthropic key failed verification — check it before you begin.'
     : 'Drafting the syllabus takes a few minutes.';
 
   return (
@@ -437,6 +448,17 @@ export function SetupPage() {
                 updateSetup({ numChapters: Number(e.target.value) })
               }
             />
+            <p
+              className="cb-italic"
+              style={{
+                fontSize: 13,
+                lineHeight: 1.5,
+                color: 'var(--cb-text-muted)',
+                margin: '8px 0 0',
+              }}
+            >
+              ≈ one chapter per week of teaching.
+            </p>
           </div>
 
           {/* Primary action row */}
@@ -454,13 +476,24 @@ export function SetupPage() {
               className="cb-italic"
               style={{
                 fontSize: 13,
-                color: 'var(--cb-text-muted)',
+                color: claudeKeyValid === false && hasApiKey && hasTopic
+                  ? 'var(--cb-status-warning)'
+                  : 'var(--cb-text-muted)',
                 flex: '1 1 auto',
                 lineHeight: 1.5,
               }}
             >
               {helperLine}
             </span>
+            {(!hasApiKey || claudeKeyValid === false) && (
+              <CodexButton
+                variant="secondary"
+                size="lg"
+                onClick={() => setKeysOpen(true)}
+              >
+                {hasApiKey ? 'Check key →' : 'Add Anthropic key →'}
+              </CodexButton>
+            )}
             <CodexButton
               variant="primary"
               size="lg"
@@ -470,6 +503,43 @@ export function SetupPage() {
               Begin · Syllabus →
             </CodexButton>
           </div>
+
+          {/* Beginning again replaces the in-progress course — confirm. */}
+          <CodexModal
+            open={showBeginConfirm}
+            onClose={() => setShowBeginConfirm(false)}
+            kicker="begin again"
+            title={
+              <>
+                Replace the course in <span className="cb-italic">progress</span>?
+              </>
+            }
+            sub={`Beginning from this brief clears the current syllabus${
+              chapters.length > 0
+                ? `, ${chapters.length} drafted ${chapters.length === 1 ? 'chapter' : 'chapters'},`
+                : ''
+            } and all research dossiers. Download a project file from Export first if you want to keep it.`}
+            width={480}
+            actions={
+              <>
+                <span style={{ flex: 1 }} />
+                <CodexButton variant="ghost" onClick={() => setShowBeginConfirm(false)}>
+                  Cancel
+                </CodexButton>
+                <CodexButton
+                  variant="destructive"
+                  onClick={() => {
+                    setShowBeginConfirm(false);
+                    doGenerate();
+                  }}
+                >
+                  Replace & begin →
+                </CodexButton>
+              </>
+            }
+          >
+            <></>
+          </CodexModal>
 
           <div style={{ marginTop: 24 }}>
             <RefineDisclosure
@@ -1081,9 +1151,9 @@ function ApiKeysModal({ open, onClose }: { open: boolean; onClose: () => void })
         apiKey: claudeApiKey.trim(),
         dangerouslyAllowBrowser: true,
       });
-      await client.messages.create({
+      // countTokens is free — it authenticates without spending tokens.
+      await client.messages.countTokens({
         model: MODELS.haiku,
-        max_tokens: 10,
         messages: [{ role: 'user', content: 'Hi' }],
       });
       setClaudeKeyValid(true);
