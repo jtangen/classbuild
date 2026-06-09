@@ -1,4 +1,4 @@
-import type { ChangeEvent, CSSProperties } from 'react';
+import { useId, type ChangeEvent, type CSSProperties } from 'react';
 
 interface CodexSliderProps {
   label?: string;
@@ -21,6 +21,7 @@ export function CodexSlider({
   showTicks = true,
   suffix,
 }: CodexSliderProps) {
+  const sliderId = useId();
   const pct = ((value - min) / (max - min)) * 100;
   const ticks = max - min + 1;
 
@@ -39,7 +40,8 @@ export function CodexSlider({
             marginBottom: 10,
           }}
         >
-          <span
+          <label
+            htmlFor={sliderId}
             className="cb-sc"
             style={{
               fontSize: 13,
@@ -48,7 +50,7 @@ export function CodexSlider({
             }}
           >
             {label}
-          </span>
+          </label>
           <span
             className="cb-mono"
             style={{ fontSize: 15, color: 'var(--cb-text-default)', fontWeight: 500 }}
@@ -87,12 +89,14 @@ export function CodexSlider({
           </div>
         )}
         <input
+          id={sliderId}
           type="range"
           min={min}
           max={max}
           step={step}
           value={value}
           onChange={onChange}
+          aria-valuetext={suffix ? `${value} ${suffix}` : undefined}
           className="cb-slider cb-focus"
           style={{
             ...sliderStyle,

@@ -20,8 +20,20 @@ export function CodexCheckbox({ checked, onChange, label, sub, disabled }: Codex
         position: 'relative',
       }}
     >
+      {/* Hidden native input first so the focus ring can reach the drawn box
+          via an adjacent-sibling selector. It is absolutely positioned
+          (inset: 0), so it takes no part in the flex layout. */}
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="cb-focus cb-checkbox-native"
+        style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', inset: 0 }}
+      />
       <span
         aria-hidden
+        className="cb-checkbox-box"
         style={{
           flex: '0 0 auto',
           width: 18,
@@ -49,14 +61,6 @@ export function CodexCheckbox({ checked, onChange, label, sub, disabled }: Codex
           />
         )}
       </span>
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={onChange}
-        disabled={disabled}
-        className="cb-focus"
-        style={{ position: 'absolute', opacity: 0, pointerEvents: 'none', inset: 0 }}
-      />
       <div>
         <div style={{ fontSize: 15, color: 'var(--cb-text-default)', lineHeight: 1.45 }}>{label}</div>
         {sub && (
@@ -65,6 +69,14 @@ export function CodexCheckbox({ checked, onChange, label, sub, disabled }: Codex
           </div>
         )}
       </div>
+      {/* The native input is opacity: 0, which also hides its own focus
+          outline — mirror the keyboard focus ring onto the drawn box. */}
+      <style>{`
+        .cb-checkbox-native:focus-visible + .cb-checkbox-box {
+          outline: 2px solid var(--cb-focus-ring);
+          outline-offset: 2px;
+        }
+      `}</style>
     </label>
   );
 }

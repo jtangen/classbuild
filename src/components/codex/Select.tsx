@@ -18,10 +18,14 @@ export function CodexSelect({
   options,
   id,
   style,
+  'aria-describedby': ariaDescribedBy,
   ...props
 }: CodexSelectProps) {
   const reactId = useId();
   const selectId = id ?? reactId;
+  const hintId = `${reactId}-hint`;
+  const describedBy =
+    [ariaDescribedBy, hint ? hintId : null].filter(Boolean).join(' ') || undefined;
 
   return (
     <label htmlFor={selectId} style={{ display: 'block', ...style }}>
@@ -50,6 +54,7 @@ export function CodexSelect({
         <select
           id={selectId}
           {...props}
+          aria-describedby={describedBy}
           style={{
             appearance: 'none',
             WebkitAppearance: 'none',
@@ -92,6 +97,7 @@ export function CodexSelect({
       </div>
       {hint && (
         <div
+          id={hintId}
           className="cb-italic"
           style={{
             fontSize: 13.5,

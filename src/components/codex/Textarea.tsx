@@ -17,10 +17,19 @@ export function CodexTextarea({
   rows = 4,
   size = 'md',
   style,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
   ...props
 }: CodexTextareaProps) {
   const reactId = useId();
   const textareaId = id ?? reactId;
+  const hintId = `${reactId}-hint`;
+  const errorId = `${reactId}-error`;
+  const isError = Boolean(error);
+  const describedBy =
+    [ariaDescribedBy, !isError && hint ? hintId : null, isError ? errorId : null]
+      .filter(Boolean)
+      .join(' ') || undefined;
 
   return (
     <label htmlFor={textareaId} style={{ display: 'block', ...style }}>
@@ -41,6 +50,8 @@ export function CodexTextarea({
         id={textareaId}
         rows={rows}
         {...props}
+        aria-describedby={describedBy}
+        aria-invalid={isError ? true : ariaInvalid}
         style={{
           width: '100%',
           padding: '10px 12px',
@@ -63,19 +74,36 @@ export function CodexTextarea({
           if (!error) e.currentTarget.style.borderColor = 'var(--cb-border-default)';
         }}
       />
-      {(hint || error) && (
+      {isError ? (
         <div
+          key="error"
+          id={errorId}
+          role="alert"
           className="cb-italic"
           style={{
             fontSize: 13.5,
             marginTop: 8,
-            color: error ? 'var(--cb-status-danger)' : 'var(--cb-text-muted)',
+            color: 'var(--cb-status-danger)',
             lineHeight: 1.45,
           }}
         >
-          {error ?? hint}
+          {error}
         </div>
-      )}
+      ) : hint ? (
+        <div
+          key="hint"
+          id={hintId}
+          className="cb-italic"
+          style={{
+            fontSize: 13.5,
+            marginTop: 8,
+            color: 'var(--cb-text-muted)',
+            lineHeight: 1.45,
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
     </label>
   );
 }

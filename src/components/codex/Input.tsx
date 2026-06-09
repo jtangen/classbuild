@@ -29,10 +29,19 @@ export function CodexInput({
   required,
   disabled,
   style,
+  'aria-describedby': ariaDescribedBy,
+  'aria-invalid': ariaInvalid,
   ...props
 }: CodexInputProps) {
   const reactId = useId();
   const inputId = id ?? reactId;
+  const hintId = `${reactId}-hint`;
+  const errorId = `${reactId}-error`;
+  const isError = Boolean(error);
+  const describedBy =
+    [ariaDescribedBy, !isError && hint ? hintId : null, isError ? errorId : null]
+      .filter(Boolean)
+      .join(' ') || undefined;
   const sz = SIZE[size];
 
   return (
@@ -89,6 +98,8 @@ export function CodexInput({
           disabled={disabled}
           required={required}
           {...props}
+          aria-describedby={describedBy}
+          aria-invalid={isError ? true : ariaInvalid}
           style={{
             border: 0,
             outline: 'none',
@@ -118,19 +129,36 @@ export function CodexInput({
           </span>
         )}
       </div>
-      {(hint || error) && (
+      {isError ? (
         <div
+          key="error"
+          id={errorId}
+          role="alert"
           className="cb-italic"
           style={{
             fontSize: 13.5,
             marginTop: 8,
             lineHeight: 1.45,
-            color: error ? 'var(--cb-status-danger)' : 'var(--cb-text-muted)',
+            color: 'var(--cb-status-danger)',
           }}
         >
-          {error ?? hint}
+          {error}
         </div>
-      )}
+      ) : hint ? (
+        <div
+          key="hint"
+          id={hintId}
+          className="cb-italic"
+          style={{
+            fontSize: 13.5,
+            marginTop: 8,
+            lineHeight: 1.45,
+            color: 'var(--cb-text-muted)',
+          }}
+        >
+          {hint}
+        </div>
+      ) : null}
     </label>
   );
 }
