@@ -13,6 +13,8 @@ export interface QuizTabProps {
   isGenerating: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
 }
 
 export function QuizTab({
@@ -22,6 +24,7 @@ export function QuizTab({
   isGenerating,
   canGenerate,
   onGenerate,
+  onStop,
 }: QuizTabProps) {
   if (quizHtml) {
     return (
@@ -46,7 +49,7 @@ export function QuizTab({
   }
   if (isGenerating) {
     return (
-      <ArtifactStatusLine>
+      <ArtifactStatusLine onStop={onStop}>
         Drafting practice quiz — multiple choice and short response, twelve questions.
       </ArtifactStatusLine>
     );

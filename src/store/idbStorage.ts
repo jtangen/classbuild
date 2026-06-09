@@ -93,7 +93,12 @@ const idbStateStorage: StateStorage = {
       // Stamp the timestamp so the Header can show "Saved · Xs ago".
       // Dynamic import keeps this circular ref a true cycle break.
       const { useUiStore } = await import('./uiStore');
-      useUiStore.getState().setLastSavedAt(Date.now());
+      const ui = useUiStore.getState();
+      ui.setLastSavedAt(Date.now());
+      // Every write serializes the FULL partialized state, so one success
+      // means everything current is on disk — a lingering failure banner
+      // from an earlier attempt is now stale. Clear it.
+      if (ui.persistError) ui.setPersistError(null);
     } catch (err) {
       const { useUiStore } = await import('./uiStore');
       useUiStore.getState().setPersistError(

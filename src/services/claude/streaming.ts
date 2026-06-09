@@ -27,6 +27,9 @@ export interface StreamOptions {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   tools?: any[];
   maxTokens?: number;
+  /** Optional cancellation. Aborting rejects the call with the SDK's abort
+   *  error — call sites should treat that as a silent cancel, not a failure. */
+  signal?: AbortSignal;
 }
 
 export async function streamMessage(
@@ -41,6 +44,7 @@ export async function streamMessage(
     thinkingBudget,
     tools,
     maxTokens = 16000,
+    signal,
   } = options;
 
   const client = getClient(apiKey);
@@ -89,7 +93,7 @@ export async function streamMessage(
       params.tools = tools;
     }
 
-    const stream = await client.messages.stream(params);
+    const stream = await client.messages.stream(params, signal ? { signal } : undefined);
 
     // Track server tool use blocks to capture search queries from deltas
     const serverToolInputs = new Map<number, string>();
@@ -184,6 +188,8 @@ export async function streamWithRetry(
     try {
       return await streamMessage(options, callbacks);
     } catch (err) {
+      // Never retry a user-initiated cancel.
+      if (options.signal?.aborted) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       const isRateLimit = msg.includes('429') || msg.toLowerCase().includes('rate');
       if (isRateLimit && attempt < maxRetries) {
@@ -208,6 +214,7 @@ export async function sendMessage(
     thinkingBudget,
     tools,
     maxTokens = 16000,
+    signal,
   } = options;
 
   const client = getClient(apiKey);
@@ -253,5 +260,5 @@ export async function sendMessage(
     params.tools = tools;
   }
 
-  return client.messages.create(params);
+  return client.messages.create(params, signal ? { signal } : undefined);
 }

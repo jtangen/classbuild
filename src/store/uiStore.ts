@@ -25,6 +25,24 @@ export type MaterialKind =
   | 'audio'
   | 'slides';
 
+/** One failed step from a batch run, kept so the user can see and retry it. */
+export interface BatchFailure {
+  chapter: number;
+  /** Human label, e.g. "Practice quiz" or "Reading". */
+  material: string;
+  message: string;
+}
+
+/** End-of-batch report shown on the Build page until dismissed. */
+export interface BatchSummary {
+  /** Which batch flavour ran — "Retry failed" re-runs the same one. */
+  mode: 'everything' | 'classes';
+  /** Chapters fully processed (not skipped by a Stop) this run. */
+  chaptersCompleted: number;
+  failures: BatchFailure[];
+  cancelled: boolean;
+}
+
 interface UiState {
   showScienceOverlay: boolean;
   isGenerating: boolean;
@@ -37,6 +55,14 @@ interface UiState {
   batchCurrentChapter: number | null;
   batchPhase: 'thinking' | 'writing' | null;
   batchMaterial: string | null;
+  /** 1-based position in the current batch queue ("Class 3 of 12"). */
+  batchIndex: number | null;
+  /** Number of chapters in the current batch queue. */
+  batchTotal: number | null;
+  /** Wall-clock ms of each completed chapter this run — drives the ETA. */
+  batchChapterMs: number[];
+  /** Report from the last finished batch; null once dismissed. */
+  batchSummary: BatchSummary | null;
   persistError: string | null;
   /**
    * Single-mutex slide-deck render. Survives tab switches so the in-flight
@@ -72,6 +98,10 @@ interface UiState {
   setBatchCurrentChapter: (v: number | null) => void;
   setBatchPhase: (v: 'thinking' | 'writing' | null) => void;
   setBatchMaterial: (v: string | null) => void;
+  setBatchProgress: (index: number | null, total: number | null) => void;
+  pushBatchChapterMs: (ms: number) => void;
+  resetBatchChapterMs: () => void;
+  setBatchSummary: (s: BatchSummary | null) => void;
   setPersistError: (msg: string | null) => void;
   setSlidesRender: (v: SlidesRenderState | null) => void;
   setInFlight: (kind: MaterialKind, chapterNum: number | null) => void;
@@ -115,6 +145,10 @@ export const useUiStore = create<UiState>((set) => ({
   batchCurrentChapter: null,
   batchPhase: null,
   batchMaterial: null,
+  batchIndex: null,
+  batchTotal: null,
+  batchChapterMs: [],
+  batchSummary: null,
   persistError: null,
   slidesRender: null,
   inFlight: {},
@@ -141,6 +175,11 @@ export const useUiStore = create<UiState>((set) => ({
   setBatchCurrentChapter: (v) => set({ batchCurrentChapter: v }),
   setBatchPhase: (v) => set({ batchPhase: v }),
   setBatchMaterial: (v) => set({ batchMaterial: v }),
+  setBatchProgress: (index, total) => set({ batchIndex: index, batchTotal: total }),
+  pushBatchChapterMs: (ms) =>
+    set((state) => ({ batchChapterMs: [...state.batchChapterMs, ms] })),
+  resetBatchChapterMs: () => set({ batchChapterMs: [] }),
+  setBatchSummary: (s) => set({ batchSummary: s }),
   setPersistError: (msg) => set({ persistError: msg }),
   setSlidesRender: (v) => set({ slidesRender: v }),
   setInFlight: (kind, chapterNum) =>

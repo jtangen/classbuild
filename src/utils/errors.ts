@@ -54,8 +54,8 @@ export function friendlyError(err: unknown, fallback = 'Something went wrong. Tr
     return 'ClassBuild was updated while this tab was open. Refresh the page (Cmd/Ctrl+Shift+R) and retry.';
   }
 
-  // Network
-  if (/failed to fetch|network|ecconnreset|timeout|timed out|econnref/i.test(message)) {
+  // Network — includes the Anthropic SDK's APIConnectionError ("Connection error.")
+  if (/failed to fetch|network|connection error|ecconnreset|timeout|timed out|econnref/i.test(message)) {
     return 'Network error. Check your connection and retry.';
   }
 
@@ -69,6 +69,20 @@ export function friendlyError(err: unknown, fallback = 'Something went wrong. Tr
   }
 
   return fallback;
+}
+
+/**
+ * True when an error is the result of a user-initiated cancel (AbortController
+ * fired). Call sites treat these as a silent no-op — never an error banner.
+ * Covers DOM AbortError, the Anthropic SDK's APIUserAbortError, and the
+ * generic "Request was aborted." message shape.
+ */
+export function isAbortError(err: unknown): boolean {
+  if (err == null) return false;
+  const name = (err as { name?: string }).name;
+  if (name === 'AbortError' || name === 'APIUserAbortError') return true;
+  const message = err instanceof Error ? err.message : String(err);
+  return /\baborted\b/i.test(message);
 }
 
 function getStatus(err: unknown): number | undefined {

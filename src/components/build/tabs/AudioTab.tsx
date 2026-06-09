@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { slugify } from '../../../utils/format';
@@ -11,6 +12,8 @@ export interface AudioTabProps {
   audioTranscript: string;
   audioUrl: string;
   audioError: string;
+  /** Non-error notice: audio plays now but exceeded the persistable size cap. */
+  audioPersistNote: string;
   audioPhase: 'transcript' | 'synthesizing' | null;
   audioChunkProgress: { current: number; total: number } | null;
   chapterNum: number;
@@ -21,12 +24,17 @@ export interface AudioTabProps {
   onGenerate: () => void;
   onRetry: () => void;
   onAddKey: () => void;
+  /** Cancels the in-flight transcript draft / synthesis. */
+  onStop: () => void;
+  /** Persist an edited transcript back to the chapter. */
+  onSaveTranscript: (text: string) => void;
 }
 
 export function AudioTab({
   audioTranscript,
   audioUrl,
   audioError,
+  audioPersistNote,
   audioPhase,
   audioChunkProgress,
   chapterNum,
@@ -37,6 +45,8 @@ export function AudioTab({
   onGenerate,
   onRetry,
   onAddKey,
+  onStop,
+  onSaveTranscript,
 }: AudioTabProps) {
   if (audioTranscript) {
     return (
@@ -73,6 +83,11 @@ export function AudioTab({
             <audio controls className="w-full" src={audioUrl}>
               Your browser does not support the audio element.
             </audio>
+            {audioPersistNote && (
+              <p className="mt-3 mb-0 text-xs italic text-cb-text-muted leading-relaxed">
+                {audioPersistNote}
+              </p>
+            )}
           </div>
         )}
         {!audioUrl && hasElevenLabsKey && audioError && (
@@ -114,6 +129,9 @@ export function AudioTab({
                     </div>
                   </div>
                 )}
+                <Button size="sm" variant="ghost" onClick={onStop}>
+                  Stop
+                </Button>
               </div>
             ) : (
               <>
@@ -138,13 +156,21 @@ export function AudioTab({
             onCta={onAddKey}
           />
         )}
+        <TranscriptPanel
+          transcript={audioTranscript}
+          chapterNum={chapterNum}
+          chapterTitle={chapterTitle}
+          hasAudio={!!audioUrl}
+          editable={!isGenerating}
+          onSave={onSaveTranscript}
+        />
       </div>
     );
   }
 
   if (isGenerating) {
     return (
-      <ArtifactStatusLine>
+      <ArtifactStatusLine onStop={onStop}>
         {audioPhase === 'transcript'
           ? 'Adapting chapter for spoken delivery…'
           : audioChunkProgress
@@ -169,5 +195,120 @@ export function AudioTab({
       secondaryCta={!hasElevenLabsKey ? 'Add ElevenLabs key →' : undefined}
       onSecondaryCta={!hasElevenLabsKey ? onAddKey : undefined}
     />
+  );
+}
+
+// ─── TranscriptPanel ──────────────────────────────────────────────────
+//
+// The narration script itself — readable (and editable) before any
+// ElevenLabs credits are spent, and kept alongside the player afterwards.
+
+function TranscriptPanel({
+  transcript,
+  chapterNum,
+  chapterTitle,
+  hasAudio,
+  editable,
+  onSave,
+}: {
+  transcript: string;
+  chapterNum: number;
+  chapterTitle: string;
+  hasAudio: boolean;
+  editable: boolean;
+  onSave: (text: string) => void;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(transcript);
+
+  // Track external transcript changes (regenerate, chapter switch) while not
+  // editing, so opening the editor always starts from the live text.
+  useEffect(() => {
+    if (!editing) setDraft(transcript);
+  }, [transcript, editing]);
+
+  const words = transcript.trim() ? transcript.trim().split(/\s+/).length : 0;
+  // ~155 wpm is a comfortable narration pace.
+  const minutes = Math.max(1, Math.round(words / 155));
+  const changed = draft.trim() !== transcript.trim();
+
+  return (
+    <div className="bg-cb-ground-page border border-cb-border-default rounded-xl overflow-hidden">
+      <div className="flex items-baseline justify-between gap-3 px-5 py-3 bg-cb-surface-sunken border-b border-cb-border-default">
+        <span className="font-mono text-xs text-cb-text-muted tracking-wide">
+          transcript · {words.toLocaleString()} words · ≈ {minutes} min narrated
+        </span>
+        <div className="flex gap-2 shrink-0">
+          {!editing && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={!editable}
+              onClick={() => {
+                setDraft(transcript);
+                setEditing(true);
+              }}
+            >
+              Edit
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              const a = document.createElement('a');
+              a.href = URL.createObjectURL(new Blob([transcript], { type: 'text/plain' }));
+              a.download = `transcript-${chapterNum}-${slugify(chapterTitle || 'chapter')}.txt`;
+              a.click();
+            }}
+          >
+            Download .txt
+          </Button>
+        </div>
+      </div>
+      {editing ? (
+        <div className="p-5">
+          <textarea
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            rows={14}
+            className="w-full text-sm leading-relaxed text-cb-text-default bg-cb-ground-canvas border border-cb-border-default rounded p-3 resize-y outline-none"
+          />
+          <div className="flex items-baseline gap-2 mt-3 flex-wrap">
+            <Button
+              size="sm"
+              disabled={!draft.trim() || !changed}
+              onClick={() => {
+                onSave(draft.trim());
+                setEditing(false);
+              }}
+            >
+              Save transcript
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => {
+                setEditing(false);
+                setDraft(transcript);
+              }}
+            >
+              Cancel
+            </Button>
+            {hasAudio && changed && (
+              <span className="text-xs italic text-cb-text-muted">
+                Saving won’t change the existing audio — re-narrate to update it.
+              </span>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="px-5 py-4 max-h-96 overflow-y-auto">
+          <p className="m-0 text-sm leading-relaxed text-cb-text-default whitespace-pre-wrap">
+            {transcript}
+          </p>
+        </div>
+      )}
+    </div>
   );
 }

@@ -20,6 +20,8 @@ export interface SlidesTabProps {
   showImageHint: boolean;
   onDismissImageHint: () => void;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
   onDownloadDeck: () => void;
   onAddKey: () => void;
 
@@ -44,6 +46,7 @@ export function SlidesTab(props: SlidesTabProps) {
     showImageHint,
     onDismissImageHint,
     onGenerate,
+    onStop,
     onDownloadDeck,
     onAddKey,
     slidesRender,
@@ -60,7 +63,7 @@ export function SlidesTab(props: SlidesTabProps) {
   if (slides.length === 0) {
     if (isGenerating) {
       return (
-        <ArtifactStatusLine>
+        <ArtifactStatusLine onStop={onStop}>
           Drafting lecture slides with speaker notes…
         </ArtifactStatusLine>
       );
@@ -170,6 +173,14 @@ export function SlidesTab(props: SlidesTabProps) {
         </Button>
       </div>
 
+      {hasOpenAiKey && !slidesRender && renderedCount < slides.length && (
+        <p className="m-0 text-[12.5px] italic text-cb-text-muted leading-relaxed">
+          {renderedCount === 0
+            ? `No slide images in this session — rendered images aren't kept across reloads (titles, notes, and image prompts are). Downloading the deck renders all ${slides.length} images on your OpenAI key, ≈ 30–60s each.`
+            : `${renderedCount} of ${slides.length} slide images are rendered in this session — downloading the deck renders the rest on your OpenAI key.`}
+        </p>
+      )}
+
       {isMyRender && slidesRender!.phase === 'rendering' && (
         <div
           style={{
@@ -232,10 +243,17 @@ export function SlidesTab(props: SlidesTabProps) {
                   }`}
                 >
                   <span className="text-xs text-cb-text-muted font-mono w-5 shrink-0 text-right">{i + 1}</span>
+                  <span
+                    aria-hidden
+                    className="w-11 h-[25px] shrink-0 rounded-[2px] border border-cb-border-default overflow-hidden bg-cb-surface-sunken flex items-center justify-center"
+                  >
+                    {slide.imageDataUri ? (
+                      <img src={slide.imageDataUri} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="block w-5 h-px bg-cb-border-default" />
+                    )}
+                  </span>
                   <span className="text-sm text-cb-text-default truncate flex-1">{slide.title}</span>
-                  {slide.imageDataUri && (
-                    <span className="text-[10px] text-cb-status-success uppercase tracking-wider shrink-0">rendered</span>
-                  )}
                   {hasNotes && (
                     <svg
                       className={`w-3.5 h-3.5 text-cb-text-muted shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}

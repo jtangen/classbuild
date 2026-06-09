@@ -43,6 +43,8 @@ export interface TtsOptions {
   useSpeakerBoost?: boolean;
   /** Called after each chunk with (completed, total) for UI progress. */
   onProgress?: (current: number, total: number) => void;
+  /** Optional cancellation — aborting rejects with an AbortError. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -107,6 +109,7 @@ async function synthesizeChunk(
   voiceId: string,
   modelId: string,
   voiceSettings: Record<string, number | boolean>,
+  signal?: AbortSignal,
 ): Promise<Uint8Array> {
   const url = `${API_BASE}/text-to-speech/${encodeURIComponent(voiceId)}`;
 
@@ -115,6 +118,7 @@ async function synthesizeChunk(
     try {
       res = await fetch(url, {
         method: 'POST',
+        signal,
         headers: {
           'xi-api-key': apiKey,
           'Content-Type': 'application/json',
@@ -127,6 +131,9 @@ async function synthesizeChunk(
         }),
       });
     } catch (err) {
+      // A user-initiated Stop must surface as a plain AbortError, not get
+      // wrapped in the local-block diagnostic below.
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       // A REJECTED fetch (vs an HTTP error response, handled below) means the
       // request never reached ElevenLabs. ElevenLabs allows direct browser
       // calls — its TTS endpoint returns permissive CORS — so this is almost
@@ -215,6 +222,9 @@ export async function generateAudiobook(
   const audioChunks: Uint8Array[] = [];
 
   for (let i = 0; i < chunks.length; i++) {
+    if (options?.signal?.aborted) {
+      throw new DOMException('Audio synthesis aborted.', 'AbortError');
+    }
     options?.onProgress?.(i + 1, chunks.length);
     const audio = await synthesizeChunk(
       chunks[i],
@@ -222,6 +232,7 @@ export async function generateAudiobook(
       voiceId,
       modelId,
       voiceSettings,
+      options?.signal,
     );
     audioChunks.push(audio);
   }

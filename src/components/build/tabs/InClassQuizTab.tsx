@@ -10,6 +10,8 @@ export interface InClassQuizTabProps {
   isGenerating: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
   onError: (message: string) => void;
 }
 
@@ -20,12 +22,13 @@ export function InClassQuizTab({
   isGenerating,
   canGenerate,
   onGenerate,
+  onStop,
   onError,
 }: InClassQuizTabProps) {
   if (questions.length === 0) {
     if (isGenerating) {
       return (
-        <ArtifactStatusLine>
+        <ArtifactStatusLine onStop={onStop}>
           Drafting in-class quiz — ten questions, five shuffled versions, answer key.
         </ArtifactStatusLine>
       );

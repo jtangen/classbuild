@@ -16,7 +16,8 @@ import {
   buildAudioTranscriptUserPrompt,
 } from '../../prompts/audioTranscript';
 import { buildSlidesPrompt, buildSlidesUserPrompt } from '../../prompts/slides';
-import { friendlyError } from '../../utils/errors';
+import { friendlyError, isAbortError } from '../../utils/errors';
+import { beginAbortable, endAbortable, materialAbortKey } from '../../services/abortRegistry';
 import { parseJson } from '../../utils/format';
 import { normalizeActivityDetail } from '../../utils/activityDetail';
 import { persistableAudioDataUri } from '../../utils/audio';
@@ -98,6 +99,8 @@ export interface UseChapterMaterialsResult {
   audioTranscript: string;
   audioUrl: string;
   audioError: string;
+  /** Non-error notice: synthesized audio exceeded the persistable size cap. */
+  audioPersistNote: string;
   audioPhase: 'transcript' | 'synthesizing' | null;
   audioChunkProgress: { current: number; total: number } | null;
   slidesData: SlideData[];
@@ -146,18 +149,33 @@ async function runGenerationLifecycle({
   setTabError: (kind: string, msg: string) => void;
   clearTabError: (kind: string) => void;
   errorPrefix: string;
-  run: () => Promise<void>;
+  run: (signal: AbortSignal) => Promise<void>;
 }): Promise<void> {
+  // Register an AbortController so a Stop button anywhere in the app can
+  // cancel this generation (abortInFlight(materialAbortKey(kind, chapter))).
+  const abortKey = materialAbortKey(kind, chapterNum);
+  const controller = beginAbortable(abortKey);
   setGenerating(chapterNum);
   clearTabError(kind);
   try {
-    await run();
+    await run(controller.signal);
   } catch (err) {
-    setTabError(kind, friendlyError(err, errorPrefix));
+    // A user-initiated Stop is a silent cancel, never an error banner.
+    if (!isAbortError(err) && !controller.signal.aborted) {
+      setTabError(kind, friendlyError(err, errorPrefix));
+    }
   } finally {
+    endAbortable(abortKey, controller);
     setGenerating(null);
   }
 }
+
+/** Shown when a synthesized narration exceeds the persistable size cap — it
+ *  plays fine now, but won't survive a reload, and silence about that read as
+ *  data loss. */
+const AUDIO_OVER_CAP_NOTE =
+  'This narration is too large to keep across sessions — it plays now, but after a ' +
+  'reload you’ll need to re-narrate it from the transcript (which is kept).';
 
 // An ElevenLabsTtsError with no HTTP status = the request never reached the API
 // (the local-block / rejected-fetch path in tts.ts); its message is already
@@ -204,6 +222,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   const [audioTranscript, setAudioTranscript] = useState('');
   const [audioUrl, setAudioUrl] = useState('');
   const [audioError, setAudioError] = useState('');
+  const [audioPersistNote, setAudioPersistNote] = useState('');
   const [audioPhase, setAudioPhase] = useState<'transcript' | 'synthesizing' | null>(null);
   const [audioChunkProgress, setAudioChunkProgress] = useState<{ current: number; total: number } | null>(null);
   const [slidesData, setSlidesData] = useState<SlideData[]>([]);
@@ -242,6 +261,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setExpandingActivity(null);
     setAudioChunkProgress(null);
     setAudioError('');
+    setAudioPersistNote('');
     setTabErrors({});
 
     if (!currentChapter) return;
@@ -303,12 +323,13 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Quiz generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const fullText = await streamWithRetry(
           {
             apiKey: claudeApiKey,
             model: MODELS.opus,
             system: buildPracticeQuizPrompt(),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -375,12 +396,13 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'In-class quiz generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const fullText = await streamWithRetry(
           {
             apiKey: claudeApiKey,
             model: MODELS.opus,
             system: buildInClassQuizPrompt(),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -432,7 +454,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Weekly challenge generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const priorChapters = (syllabusChapter.spacingConnections || [])
           .map((n) => syllabus.chapters.find((c) => c.number === n))
           .filter((c): c is NonNullable<typeof c> => !!c)
@@ -447,6 +469,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             apiKey: claudeApiKey,
             model: MODELS.opus,
             system: buildWeeklyChallengePrompt(),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -520,11 +543,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Discussion generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const fullText = await streamWithRetry(
           {
             apiKey: claudeApiKey,
             system: buildDiscussionPrompt(),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -575,11 +599,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Activities generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const fullText = await streamWithRetry(
           {
             apiKey: claudeApiKey,
             system: buildActivitiesPrompt(),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -701,56 +726,64 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Audio transcript generation failed.',
-      run: async () => {
+      run: async (signal) => {
         setAudioPhase('transcript');
         setAudioError('');
+        try {
+          const transcript = await streamWithRetry(
+            {
+              apiKey: claudeApiKey,
+              system: buildAudioTranscriptPrompt(),
+              signal,
+              messages: [
+                {
+                  role: 'user',
+                  content: buildAudioTranscriptUserPrompt(
+                    currentChapter.title,
+                    currentChapter.htmlContent,
+                  ),
+                },
+              ],
+              thinkingBudget: 'medium',
+              maxTokens: 8000,
+            },
+            {},
+          );
 
-        const transcript = await streamWithRetry(
-          {
-            apiKey: claudeApiKey,
-            system: buildAudioTranscriptPrompt(),
-            messages: [
-              {
-                role: 'user',
-                content: buildAudioTranscriptUserPrompt(
-                  currentChapter.title,
-                  currentChapter.htmlContent,
-                ),
-              },
-            ],
-            thinkingBudget: 'medium',
-            maxTokens: 8000,
-          },
-          {},
-        );
+          if (selectedChapterRef.current === chapterNum) setAudioTranscript(transcript);
+          updateChapter(chapterNum, { audioTranscript: transcript });
 
-        if (selectedChapterRef.current === chapterNum) setAudioTranscript(transcript);
-        updateChapter(chapterNum, { audioTranscript: transcript });
-
-        if (elevenLabsApiKey) {
-          setAudioPhase('synthesizing');
-          setAudioChunkProgress(null);
-          try {
-            const { generateAudiobook } = await import('../../services/elevenLabs/tts');
-            const voice = getVoiceOption(setup.voiceId);
-            const blob = await generateAudiobook(transcript, elevenLabsApiKey, {
-              voiceId: voice.id,
-              onProgress: (current, total) => setAudioChunkProgress({ current, total }),
-            });
-            const url = URL.createObjectURL(blob);
-            if (selectedChapterRef.current === chapterNum) setAudioUrl(url);
-            // Persist a (size-capped) data URI too — the blob URL above is
-            // stripped on save and dies on reload; the data URI survives.
-            const audioDataUri = await persistableAudioDataUri(blob);
-            updateChapter(chapterNum, { audioUrl: url, audioDataUri });
-          } catch (err) {
-            const msg = ttsErrorMessage(err);
-            console.error('ElevenLabs TTS failed:', err);
-            if (selectedChapterRef.current === chapterNum) setAudioError(msg);
+          if (elevenLabsApiKey) {
+            setAudioPhase('synthesizing');
+            setAudioChunkProgress(null);
+            try {
+              const { generateAudiobook } = await import('../../services/elevenLabs/tts');
+              const voice = getVoiceOption(setup.voiceId);
+              const blob = await generateAudiobook(transcript, elevenLabsApiKey, {
+                voiceId: voice.id,
+                signal,
+                onProgress: (current, total) => setAudioChunkProgress({ current, total }),
+              });
+              const url = URL.createObjectURL(blob);
+              if (selectedChapterRef.current === chapterNum) setAudioUrl(url);
+              // Persist a (size-capped) data URI too — the blob URL above is
+              // stripped on save and dies on reload; the data URI survives.
+              const audioDataUri = await persistableAudioDataUri(blob);
+              if (selectedChapterRef.current === chapterNum) {
+                setAudioPersistNote(audioDataUri ? '' : AUDIO_OVER_CAP_NOTE);
+              }
+              updateChapter(chapterNum, { audioUrl: url, audioDataUri });
+            } catch (err) {
+              if (isAbortError(err)) throw err;
+              const msg = ttsErrorMessage(err);
+              console.error('ElevenLabs TTS failed:', err);
+              if (selectedChapterRef.current === chapterNum) setAudioError(msg);
+            }
           }
+        } finally {
+          setAudioPhase(null);
+          setAudioChunkProgress(null);
         }
-        setAudioPhase(null);
-        setAudioChunkProgress(null);
       },
     });
   }, [
@@ -769,6 +802,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
 
   const retryAudio = useCallback(async () => {
     if (!audioTranscript || !elevenLabsApiKey) return;
+    const abortKey = materialAbortKey('audio', selectedChapterNum);
+    const controller = beginAbortable(abortKey);
     setGeneratingAudio(selectedChapterNum);
     setAudioPhase('synthesizing');
     setAudioError('');
@@ -779,17 +814,22 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       const voice = getVoiceOption(setup.voiceId);
       const blob = await generateAudiobook(audioTranscript, elevenLabsApiKey, {
         voiceId: voice.id,
+        signal: controller.signal,
         onProgress: (current, total) => setAudioChunkProgress({ current, total }),
       });
       const url = URL.createObjectURL(blob);
       setAudioUrl(url);
       const audioDataUri = await persistableAudioDataUri(blob);
+      setAudioPersistNote(audioDataUri ? '' : AUDIO_OVER_CAP_NOTE);
       updateChapter(selectedChapterNum, { audioUrl: url, audioDataUri });
     } catch (err) {
-      const msg = ttsErrorMessage(err);
-      console.error('ElevenLabs TTS retry failed:', err);
-      setAudioError(msg);
+      if (!isAbortError(err)) {
+        const msg = ttsErrorMessage(err);
+        console.error('ElevenLabs TTS retry failed:', err);
+        setAudioError(msg);
+      }
     } finally {
+      endAbortable(abortKey, controller);
       setGeneratingAudio(null);
       setAudioPhase(null);
       setAudioChunkProgress(null);
@@ -813,11 +853,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       setTabError,
       clearTabError,
       errorPrefix: 'Slides generation failed.',
-      run: async () => {
+      run: async (signal) => {
         const fullText = await streamWithRetry(
           {
             apiKey: claudeApiKey,
             system: buildSlidesPrompt(setup.themeId),
+            signal,
             messages: [
               {
                 role: 'user',
@@ -866,6 +907,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     audioTranscript,
     audioUrl,
     audioError,
+    audioPersistNote,
     audioPhase,
     audioChunkProgress,
     slidesData,

@@ -27,6 +27,8 @@ export interface ReadingTabProps {
   streamingText: string;
   thinkingText: string;
   elapsedSec: number;
+  /** Cancels the in-flight chapter draft/refine. */
+  onStop: () => void;
 
   showImageHint: boolean;
   onDismissImageHint: () => void;
@@ -52,6 +54,7 @@ export function ReadingTab(props: ReadingTabProps) {
     streamingText,
     thinkingText,
     elapsedSec,
+    onStop,
     showImageHint,
     onDismissImageHint,
     refineFeedback,
@@ -107,6 +110,26 @@ export function ReadingTab(props: ReadingTabProps) {
                 ? `${isRefining ? 'Reasoning on the revision' : 'Reasoning through the dossier'} · ${formatElapsed(elapsedSec)}`
                 : `${isRefining ? 'Preparing the revision' : 'Warming up Opus'} · ${formatElapsed(elapsedSec)}`}
             </span>
+            <button
+              type="button"
+              onClick={onStop}
+              className="cb-mono"
+              title="Stop drafting — nothing is saved from a stopped draft"
+              style={{
+                marginLeft: 'auto',
+                flexShrink: 0,
+                background: 'none',
+                border: '0.5px solid var(--cb-border-default)',
+                borderRadius: 2,
+                padding: '3px 10px',
+                fontSize: 11,
+                letterSpacing: '0.08em',
+                color: 'var(--cb-text-muted)',
+                cursor: 'pointer',
+              }}
+            >
+              stop
+            </button>
           </div>
           {!streamingText && elapsedSec >= 30 && !isRefining && (
             <p

@@ -41,7 +41,9 @@ import { ResearchPanel } from '../components/build/ResearchPanel';
 import type { SlideData, InClassQuizQuestion, WeeklyChallengeData } from '../types/course';
 import { getVoiceOption } from '../themes';
 import { slugify, extractHtml, parseJson } from '../utils/format';
-import { friendlyError } from '../utils/errors';
+import { friendlyError, isAbortError } from '../utils/errors';
+import { beginAbortable, endAbortable, abortInFlight, materialAbortKey } from '../services/abortRegistry';
+import type { BatchFailure } from '../store/uiStore';
 
 interface DiscussionPrompt {
   prompt: string;
@@ -91,7 +93,7 @@ export function BuildPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, chapters, addChapter, updateChapter, setSlideImage, updateSlide, setup, setStage, completeStage } = useCourseStore();
   const { claudeApiKey, openaiApiKey, elevenLabsApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
+  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, batchIndex, batchTotal, batchChapterMs, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, batchSummary, setBatchSummary, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
 
   // Navigate to /setup with the keys modal auto-opening. Used by inline
   // "Add OpenAI key →" / "Add ElevenLabs key →" CTAs on the Slides and Audio
@@ -203,6 +205,7 @@ export function BuildPage() {
     audioTranscript,
     audioUrl,
     audioError,
+    audioPersistNote,
     audioPhase,
     audioChunkProgress,
     slidesData,
@@ -506,6 +509,8 @@ export function BuildPage() {
     const ch = syllabus.chapters.find(c => c.number === chapterNum);
     if (!ch) return;
 
+    const abortKey = materialAbortKey('reading', chapterNum);
+    const controller = beginAbortable(abortKey);
     setIsGenerating(true);
     setChapterDraftingFor(chapterNum);
     setStreamingText('');
@@ -542,11 +547,11 @@ export function BuildPage() {
           }],
           thinkingBudget: 'high',
           maxTokens: 16000,
+          signal: controller.signal,
         },
         {
           onThinking: (text) => setThinkingText(prev => prev + text),
           onText: (text) => appendStreamingText(text),
-          onError: (err) => setError(err.message),
         }
       );
 
@@ -562,8 +567,10 @@ export function BuildPage() {
         htmlContent: html,
       });
     } catch (err) {
-      setError(friendlyError(err, 'Chapter generation failed.'));
+      // A user Stop is a silent cancel — the partial stream is discarded.
+      if (!isAbortError(err)) setError(friendlyError(err, 'Chapter generation failed.'));
     } finally {
+      endAbortable(abortKey, controller);
       setIsGenerating(false);
       setChapterDraftingFor(null);
       setThinkingText('');
@@ -588,6 +595,8 @@ export function BuildPage() {
     setRefineFeedback('');
     setShowRefineConfirm(false);
 
+    const abortKey = materialAbortKey('reading', selectedChapterNum);
+    const controller = beginAbortable(abortKey);
     setIsRefining(true);
     setIsGenerating(true);
     setChapterDraftingFor(selectedChapterNum);
@@ -643,11 +652,11 @@ Teacher feedback: "${feedback}"`;
           messages: [{ role: 'user', content: refinePrompt }],
           thinkingBudget: 'high',
           maxTokens: 16000,
+          signal: controller.signal,
         },
         {
           onThinking: (text) => setThinkingText(prev => prev + text),
           onText: (text) => appendStreamingText(text),
-          onError: (err) => setError(err.message),
         }
       );
 
@@ -668,16 +677,22 @@ Teacher feedback: "${feedback}"`;
         }, 250);
       }
     } catch (err) {
-      // Surface the raw API error to the console so we can diagnose what
-      // Anthropic actually rejected. The user-visible toast stays friendly.
-      console.error('Chapter refinement failed:', err);
-      if (err && typeof err === 'object') {
-        const anyErr = err as { status?: number; message?: string; error?: unknown };
-        if (anyErr.status !== undefined) console.error('  status:', anyErr.status);
-        if (anyErr.error) console.error('  error body:', anyErr.error);
+      if (isAbortError(err)) {
+        // User stopped the refine — old reading is untouched; cleared
+        // materials stay cleared (the confirm warned about that).
+      } else {
+        // Surface the raw API error to the console so we can diagnose what
+        // Anthropic actually rejected. The user-visible toast stays friendly.
+        console.error('Chapter refinement failed:', err);
+        if (err && typeof err === 'object') {
+          const anyErr = err as { status?: number; message?: string; error?: unknown };
+          if (anyErr.status !== undefined) console.error('  status:', anyErr.status);
+          if (anyErr.error) console.error('  error body:', anyErr.error);
+        }
+        setError(friendlyError(err, 'Chapter refinement failed.'));
       }
-      setError(friendlyError(err, 'Chapter refinement failed.'));
     } finally {
+      endAbortable(abortKey, controller);
       setIsGenerating(false);
       setIsRefining(false);
       setChapterDraftingFor(null);
@@ -936,444 +951,362 @@ Teacher feedback: "${feedback}"`;
     generateAllOutputsRef.current = generateAllOutputs;
   }, [generateAllOutputs]);
 
-  // ─── Batch generation (from GeneratePage) ───
-  const generateAllClasses = useCallback(async () => {
+  // ─── Batch generation ───
+  //
+  // One engine for both batch modes. Every material is guarded by "does it
+  // already exist?", so re-running after a partial failure — or pressing
+  // "Retry failed" on the end-of-run summary — fills only the holes and
+  // never regenerates work that already landed.
+  //
+  //   'classes'    → reading + practice quiz + in-class quiz + weekly challenge
+  //   'everything' → the above plus discussion, activities, audio, slides
+  const runBatch = useCallback(async (mode: 'everything' | 'classes') => {
     if (!syllabus) return;
     setBatchGenerating(true);
+    setBatchSummary(null);
+    resetBatchChapterMs();
     batchCancelRef.current = false;
+    // One controller for the whole run — Stop aborts the in-flight call
+    // immediately instead of waiting for the next loop checkpoint.
+    const controller = beginAbortable('batch');
+    const signal = controller.signal;
+    const failures: BatchFailure[] = [];
+    let chaptersCompleted = 0;
 
     try {
-    const chaptersToGenerate = syllabus.chapters.filter(
-      ch => !chapters.find(c => c.number === ch.number)
-        && researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
-    );
-
-    for (const ch of chaptersToGenerate) {
-      if (batchCancelRef.current) break;
-      setBatchCurrentChapter(ch.number);
-      setBatchPhase('thinking');
-
-      try {
-        const dossier = researchDossiers.find(d => d.chapterNumber === ch.number);
-        const researchSources = dossier?.sources.map(s => ({
-          title: s.title, authors: s.authors, year: s.year,
-          summary: s.summary, url: s.url, doi: s.doi,
-        }));
-
-        const hasImageGen = !!openaiApiKey;
-        const fullText = await streamMessage(
-          {
-            apiKey: claudeApiKey,
-            model: MODELS.opus,
-            system: buildChapterPrompt(setup.themeId, hasImageGen),
-            messages: [{
-              role: 'user',
-              content: buildChapterUserPrompt(
-                syllabus.courseTitle, ch, setup.chapterLength,
-                { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes },
-                researchSources, hasImageGen, setup.chapterLengthBrief,
-              ),
-            }],
-            thinkingBudget: 'high',
-            maxTokens: 16000,
-          },
-          {
-            onThinking: () => setBatchPhase('thinking'),
-            onText: () => setBatchPhase('writing'),
-            onError: (err) => setError(err.message),
-          }
-        );
-
-        let html = extractHtml(fullText);
-        if (hasImageGen) {
-          setBatchPhase('writing');
-          html = await replaceAiPlaceholders(html, openaiApiKey);
+      // Queue = researched chapters that still have work to do in this mode.
+      const queue = syllabus.chapters.filter((ch) => {
+        if (!researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)) return false;
+        const ex = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+        if (!ex?.htmlContent || !ex.practiceQuizData || !(ex.inClassQuizData && ex.inClassQuizData.length > 0) || !ex.weeklyChallengeData) return true;
+        if (mode === 'everything') {
+          return !(ex.discussionData && ex.discussionData.length > 0)
+            || !(ex.activityData && ex.activityData.length > 0)
+            || !ex.audioTranscript
+            || !(ex.slidesJson && ex.slidesJson.length > 0);
         }
-        addChapter({ number: ch.number, title: ch.title, htmlContent: html });
+        return false;
+      });
+      setBatchProgress(0, queue.length);
 
-        // Generate practice quiz
-        setBatchPhase('thinking');
-        try {
-          const quizText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildPracticeQuizPrompt(),
-              messages: [{
-                role: 'user',
-                content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 8000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
-          const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-          const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
-          updateChapter(ch.number, { practiceQuizData: balancedQuiz });
-        } catch {
-          // Quiz generation failed, continue
-        }
+      for (let qi = 0; qi < queue.length; qi++) {
+        const ch = queue[qi];
+        if (batchCancelRef.current || signal.aborted) break;
+        setBatchProgress(qi + 1, queue.length);
+        setBatchCurrentChapter(ch.number);
+        const chapterStart = Date.now();
 
-        // Generate in-class quiz
-        try {
-          const inClassText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildInClassQuizPrompt(),
-              messages: [{
-                role: 'user',
-                content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 8000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
+        // Fresh read — chapter may already exist from a previous partial run
+        let existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+
+        // ─── Phase 1: Sequential Opus calls ───
+        // 1a. Chapter HTML
+        if (!existing?.htmlContent) {
+          setBatchMaterial('Reading');
+          setBatchPhase('thinking');
           try {
-            const parsed = parseJson(inClassText) as InClassQuizQuestion[];
-            const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-            const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-            if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
-          } catch {
-            // Parse failed, continue
-          }
-        } catch {
-          // In-class quiz generation failed, continue
-        }
-
-        // Generate weekly challenge
-        try {
-          const priorChapters = (ch.spacingConnections || [])
-            .map(n => syllabus.chapters.find(sc => sc.number === n))
-            .filter((sc): sc is NonNullable<typeof sc> => !!sc)
-            .map(sc => ({ number: sc.number, title: sc.title, keyConcepts: sc.keyConcepts }));
-          const { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } = await import('../prompts/weeklyChallenge');
-          const challengeText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildWeeklyChallengePrompt(),
-              messages: [{
-                role: 'user',
-                content: buildWeeklyChallengeUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000), ch.number, priorChapters),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 10000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
-          try {
-            const parsed = parseJson(challengeText, '{') as WeeklyChallengeData;
-            updateChapter(ch.number, { weeklyChallengeData: parsed });
-          } catch {
-            // Parse failed, continue
-          }
-        } catch {
-          // Weekly challenge generation failed, continue
-        }
-      } catch (err) {
-        setError(`Class ${ch.number}: ${friendlyError(err, 'generation failed.')}`);
-      }
-    }
-
-    } finally {
-      setBatchCurrentChapter(null);
-      setBatchPhase(null);
-      setBatchGenerating(false);
-    }
-  }, [syllabus, chapters, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.themeId, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase]);
-
-  // ─── Full batch generation (all materials for all chapters) ───
-  const generateEverything = useCallback(async () => {
-    if (!syllabus) return;
-    setBatchGenerating(true);
-    batchCancelRef.current = false;
-
-    try {
-    const chaptersWithResearch = syllabus.chapters.filter(
-      ch => researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
-    );
-
-    for (const ch of chaptersWithResearch) {
-      if (batchCancelRef.current) break;
-      setBatchCurrentChapter(ch.number);
-
-      // Fresh read — chapter may already exist from a previous partial run
-      let existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
-
-      // ─── Phase 1: Sequential Opus calls ───
-      // 1a. Chapter HTML
-      if (!existing?.htmlContent) {
-        setBatchMaterial('Reading');
-        setBatchPhase('thinking');
-        try {
-          const dossier = researchDossiers.find(d => d.chapterNumber === ch.number);
-          const researchSources = dossier?.sources.map(s => ({
-            title: s.title, authors: s.authors, year: s.year,
-            summary: s.summary, url: s.url, doi: s.doi,
-          }));
-          const hasImageGen = !!openaiApiKey;
-          const fullText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildChapterPrompt(setup.themeId, hasImageGen),
-              messages: [{
-                role: 'user',
-                content: buildChapterUserPrompt(
-                  syllabus.courseTitle, ch, setup.chapterLength,
-                  { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes },
-                  researchSources, hasImageGen, setup.chapterLengthBrief,
-                ),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 16000,
-            },
-            {
-              onThinking: () => setBatchPhase('thinking'),
-              onText: () => setBatchPhase('writing'),
-              onError: (err) => setError(err.message),
+            const dossier = researchDossiers.find(d => d.chapterNumber === ch.number);
+            const researchSources = dossier?.sources.map(s => ({
+              title: s.title, authors: s.authors, year: s.year,
+              summary: s.summary, url: s.url, doi: s.doi,
+            }));
+            const hasImageGen = !!openaiApiKey;
+            const fullText = await streamMessage(
+              {
+                apiKey: claudeApiKey,
+                model: MODELS.opus,
+                system: buildChapterPrompt(setup.themeId, hasImageGen),
+                signal,
+                messages: [{
+                  role: 'user',
+                  content: buildChapterUserPrompt(
+                    syllabus.courseTitle, ch, setup.chapterLength,
+                    { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes },
+                    researchSources, hasImageGen, setup.chapterLengthBrief,
+                  ),
+                }],
+                thinkingBudget: 'high',
+                maxTokens: 16000,
+              },
+              {
+                onThinking: () => setBatchPhase('thinking'),
+                onText: () => setBatchPhase('writing'),
+              }
+            );
+            let html = extractHtml(fullText);
+            if (hasImageGen) {
+              setBatchPhase('writing');
+              html = await replaceAiPlaceholders(html, openaiApiKey);
             }
-          );
-          let html = extractHtml(fullText);
-          if (hasImageGen) {
-            setBatchPhase('writing');
-            html = await replaceAiPlaceholders(html, openaiApiKey);
+            addChapter({ number: ch.number, title: ch.title, htmlContent: html });
+          } catch (err) {
+            if (isAbortError(err) || signal.aborted) break;
+            failures.push({ chapter: ch.number, material: 'Reading', message: friendlyError(err, 'Drafting failed.') });
+            continue; // everything else needs the reading
           }
-          addChapter({ number: ch.number, title: ch.title, htmlContent: html });
-        } catch (err) {
-          setError(`Class ${ch.number}: ${friendlyError(err, 'generation failed.')}`);
-          continue; // Skip entire chapter if reading fails
         }
-      }
 
-      // Re-read after possible addChapter
-      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
-      if (!existing?.htmlContent) continue;
-      const html = existing.htmlContent;
+        // Re-read after possible addChapter
+        existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+        if (!existing?.htmlContent) continue;
+        const html = existing.htmlContent;
 
-      // 1b. Practice Quiz
-      if (!existing.practiceQuizData) {
-        setBatchMaterial('Practice Quiz');
-        setBatchPhase('thinking');
-        try {
-          const quizText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildPracticeQuizPrompt(),
-              messages: [{
-                role: 'user',
-                content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 8000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
-          const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-          const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
-          updateChapter(ch.number, { practiceQuizData: balancedQuiz });
-        } catch {
-          // Quiz failed, continue
-        }
-      }
-
-      // 1c. In-Class Quiz
-      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
-      if (!existing?.inClassQuizData || existing.inClassQuizData.length === 0) {
-        setBatchMaterial('In-Class Quiz');
-        setBatchPhase('thinking');
-        try {
-          const inClassText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildInClassQuizPrompt(),
-              messages: [{
-                role: 'user',
-                content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 8000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
+        // 1b. Practice Quiz
+        if (!existing.practiceQuizData) {
+          setBatchMaterial('Practice Quiz');
+          setBatchPhase('thinking');
           try {
-            const parsed = parseJson(inClassText) as InClassQuizQuestion[];
-            const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-            const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-            if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
-          } catch {
-            // Parse failed
-          }
-        } catch {
-          // In-class quiz failed, continue
-        }
-      }
-
-      // 1d. Weekly Challenge
-      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
-      if (!existing?.weeklyChallengeData) {
-        setBatchMaterial('Weekly Challenge');
-        setBatchPhase('thinking');
-        try {
-          const priorChapters = (ch.spacingConnections || [])
-            .map(n => syllabus.chapters.find(sc => sc.number === n))
-            .filter((sc): sc is NonNullable<typeof sc> => !!sc)
-            .map(sc => ({ number: sc.number, title: sc.title, keyConcepts: sc.keyConcepts }));
-
-          const { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } = await import('../prompts/weeklyChallenge');
-          const challengeText = await streamMessage(
-            {
-              apiKey: claudeApiKey,
-              model: MODELS.opus,
-              system: buildWeeklyChallengePrompt(),
-              messages: [{
-                role: 'user',
-                content: buildWeeklyChallengeUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000), ch.number, priorChapters),
-              }],
-              thinkingBudget: 'high',
-              maxTokens: 10000,
-            },
-            { onError: (err) => setError(err.message) }
-          );
-          try {
-            const parsed = parseJson(challengeText, '{') as WeeklyChallengeData;
-            updateChapter(ch.number, { weeklyChallengeData: parsed });
-          } catch {
-            // Parse failed
-          }
-        } catch {
-          // Weekly challenge generation failed, continue
-        }
-      }
-
-      // ─── Phase 2: Parallel Haiku/OpenAI calls ───
-      setBatchMaterial('Extras');
-      setBatchPhase('writing');
-      existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
-
-      const parallelTasks: Promise<void>[] = [];
-
-      // Discussion
-      if (!existing?.discussionData || existing.discussionData.length === 0) {
-        parallelTasks.push((async () => {
-          try {
-            const fullText = await streamWithRetry(
+            const quizText = await streamMessage(
               {
                 apiKey: claudeApiKey,
-                system: buildDiscussionPrompt(),
+                model: MODELS.opus,
+                system: buildPracticeQuizPrompt(),
+                signal,
                 messages: [{
                   role: 'user',
-                  content: buildDiscussionUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment),
+                  content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
                 }],
-                thinkingBudget: 'medium',
-                maxTokens: 4000,
-              },
-              {}
-            );
-            const parsed = parseJson(fullText) as DiscussionPrompt[];
-            updateChapter(ch.number, { discussionData: parsed });
-          } catch { /* continue */ }
-        })());
-      }
-
-      // Activities
-      if (!existing?.activityData || existing.activityData.length === 0) {
-        parallelTasks.push((async () => {
-          try {
-            const fullText = await streamWithRetry(
-              {
-                apiKey: claudeApiKey,
-                system: buildActivitiesPrompt(),
-                messages: [{
-                  role: 'user',
-                  content: buildActivitiesUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes),
-                }],
-                thinkingBudget: 'medium',
-                maxTokens: 4000,
-              },
-              {}
-            );
-            const parsed = parseJson(fullText) as Activity[];
-            updateChapter(ch.number, { activityData: parsed });
-          } catch { /* continue */ }
-        })());
-      }
-
-      // Audio transcript (+TTS)
-      if (!existing?.audioTranscript) {
-        parallelTasks.push((async () => {
-          try {
-            const transcript = await streamWithRetry(
-              {
-                apiKey: claudeApiKey,
-                system: buildAudioTranscriptPrompt(),
-                messages: [{
-                  role: 'user',
-                  content: buildAudioTranscriptUserPrompt(ch.title, html),
-                }],
-                thinkingBudget: 'medium',
+                thinkingBudget: 'high',
                 maxTokens: 8000,
               },
               {}
             );
-            updateChapter(ch.number, { audioTranscript: transcript });
+            const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
+            const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+            updateChapter(ch.number, { practiceQuizData: balancedQuiz });
+          } catch (err) {
+            if (isAbortError(err) || signal.aborted) break;
+            failures.push({ chapter: ch.number, material: 'Practice quiz', message: friendlyError(err, 'Generation failed.') });
+          }
+        }
 
-            if (elevenLabsApiKey) {
-              try {
-                const { generateAudiobook } = await import('../services/elevenLabs/tts');
-                const batchVoice = getVoiceOption(setup.voiceId);
-                const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: batchVoice.id });
-                const url = URL.createObjectURL(blob);
-                const audioDataUri = await persistableAudioDataUri(blob);
-                updateChapter(ch.number, { audioUrl: url, audioDataUri });
-              } catch {
-                // TTS failed, transcript is still saved
-              }
-            }
-          } catch { /* continue */ }
-        })());
-      }
-
-      // Slides
-      if (!existing?.slidesJson || existing.slidesJson.length === 0) {
-        parallelTasks.push((async () => {
+        // 1c. In-Class Quiz
+        existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+        if (!existing?.inClassQuizData || existing.inClassQuizData.length === 0) {
+          setBatchMaterial('In-Class Quiz');
+          setBatchPhase('thinking');
           try {
-            const fullText = await streamWithRetry(
+            const inClassText = await streamMessage(
               {
                 apiKey: claudeApiKey,
-                system: buildSlidesPrompt(setup.themeId),
+                model: MODELS.opus,
+                system: buildInClassQuizPrompt(),
+                signal,
                 messages: [{
                   role: 'user',
-                  content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, html),
+                  content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)),
                 }],
-                thinkingBudget: 'medium',
-                maxTokens: 4000,
+                thinkingBudget: 'high',
+                maxTokens: 8000,
               },
               {}
             );
-            const parsed = parseJson(fullText) as SlideData[];
-            updateChapter(ch.number, { slidesJson: parsed });
-          } catch { /* continue */ }
-        })());
-      }
+            try {
+              const parsed = parseJson(inClassText) as InClassQuizQuestion[];
+              const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
+              const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
+              if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
+            } catch {
+              failures.push({ chapter: ch.number, material: 'In-class quiz', message: 'The model returned unparseable quiz data — a retry usually fixes this.' });
+            }
+          } catch (err) {
+            if (isAbortError(err) || signal.aborted) break;
+            failures.push({ chapter: ch.number, material: 'In-class quiz', message: friendlyError(err, 'Generation failed.') });
+          }
+        }
 
-      if (parallelTasks.length > 0) {
-        await Promise.allSettled(parallelTasks);
-      }
-    }
+        // 1d. Weekly Challenge
+        existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+        if (!existing?.weeklyChallengeData) {
+          setBatchMaterial('Weekly Challenge');
+          setBatchPhase('thinking');
+          try {
+            const priorChapters = (ch.spacingConnections || [])
+              .map(n => syllabus.chapters.find(sc => sc.number === n))
+              .filter((sc): sc is NonNullable<typeof sc> => !!sc)
+              .map(sc => ({ number: sc.number, title: sc.title, keyConcepts: sc.keyConcepts }));
 
+            const { buildWeeklyChallengePrompt, buildWeeklyChallengeUserPrompt } = await import('../prompts/weeklyChallenge');
+            const challengeText = await streamMessage(
+              {
+                apiKey: claudeApiKey,
+                model: MODELS.opus,
+                system: buildWeeklyChallengePrompt(),
+                signal,
+                messages: [{
+                  role: 'user',
+                  content: buildWeeklyChallengeUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000), ch.number, priorChapters),
+                }],
+                thinkingBudget: 'high',
+                maxTokens: 10000,
+              },
+              {}
+            );
+            try {
+              const parsed = parseJson(challengeText, '{') as WeeklyChallengeData;
+              updateChapter(ch.number, { weeklyChallengeData: parsed });
+            } catch {
+              failures.push({ chapter: ch.number, material: 'Weekly challenge', message: 'The model returned unparseable challenge data — a retry usually fixes this.' });
+            }
+          } catch (err) {
+            if (isAbortError(err) || signal.aborted) break;
+            failures.push({ chapter: ch.number, material: 'Weekly challenge', message: friendlyError(err, 'Generation failed.') });
+          }
+        }
+
+        // ─── Phase 2: Parallel extras — 'everything' mode only ───
+        if (mode === 'everything') {
+          setBatchMaterial('Extras');
+          setBatchPhase('writing');
+          existing = useCourseStore.getState().chapters.find(c => c.number === ch.number);
+
+          const parallelTasks: Promise<void>[] = [];
+
+          // Discussion
+          if (!existing?.discussionData || existing.discussionData.length === 0) {
+            parallelTasks.push((async () => {
+              try {
+                const fullText = await streamWithRetry(
+                  {
+                    apiKey: claudeApiKey,
+                    system: buildDiscussionPrompt(),
+                    signal,
+                    messages: [{
+                      role: 'user',
+                      content: buildDiscussionUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment),
+                    }],
+                    thinkingBudget: 'medium',
+                    maxTokens: 4000,
+                  },
+                  {}
+                );
+                const parsed = parseJson(fullText) as DiscussionPrompt[];
+                updateChapter(ch.number, { discussionData: parsed });
+              } catch (err) {
+                if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Discussion', message: friendlyError(err, 'Generation failed.') });
+              }
+            })());
+          }
+
+          // Activities
+          if (!existing?.activityData || existing.activityData.length === 0) {
+            parallelTasks.push((async () => {
+              try {
+                const fullText = await streamWithRetry(
+                  {
+                    apiKey: claudeApiKey,
+                    system: buildActivitiesPrompt(),
+                    signal,
+                    messages: [{
+                      role: 'user',
+                      content: buildActivitiesUserPrompt(ch.title, ch.keyConcepts, setup.cohortSize, setup.teachingEnvironment, setup.environmentNotes),
+                    }],
+                    thinkingBudget: 'medium',
+                    maxTokens: 4000,
+                  },
+                  {}
+                );
+                const parsed = parseJson(fullText) as Activity[];
+                updateChapter(ch.number, { activityData: parsed });
+              } catch (err) {
+                if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Activities', message: friendlyError(err, 'Generation failed.') });
+              }
+            })());
+          }
+
+          // Audio transcript (+TTS)
+          if (!existing?.audioTranscript) {
+            parallelTasks.push((async () => {
+              try {
+                const transcript = await streamWithRetry(
+                  {
+                    apiKey: claudeApiKey,
+                    system: buildAudioTranscriptPrompt(),
+                    signal,
+                    messages: [{
+                      role: 'user',
+                      content: buildAudioTranscriptUserPrompt(ch.title, html),
+                    }],
+                    thinkingBudget: 'medium',
+                    maxTokens: 8000,
+                  },
+                  {}
+                );
+                updateChapter(ch.number, { audioTranscript: transcript });
+
+                if (elevenLabsApiKey) {
+                  try {
+                    const { generateAudiobook } = await import('../services/elevenLabs/tts');
+                    const batchVoice = getVoiceOption(setup.voiceId);
+                    const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: batchVoice.id, signal });
+                    const url = URL.createObjectURL(blob);
+                    const audioDataUri = await persistableAudioDataUri(blob);
+                    updateChapter(ch.number, { audioUrl: url, audioDataUri });
+                  } catch (err) {
+                    // The transcript is saved either way.
+                    if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Audio narration', message: friendlyError(err, 'Synthesis failed — the transcript is saved.') });
+                  }
+                }
+              } catch (err) {
+                if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Audio transcript', message: friendlyError(err, 'Generation failed.') });
+              }
+            })());
+          }
+
+          // Slides
+          if (!existing?.slidesJson || existing.slidesJson.length === 0) {
+            parallelTasks.push((async () => {
+              try {
+                const fullText = await streamWithRetry(
+                  {
+                    apiKey: claudeApiKey,
+                    system: buildSlidesPrompt(setup.themeId),
+                    signal,
+                    messages: [{
+                      role: 'user',
+                      content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, html),
+                    }],
+                    thinkingBudget: 'medium',
+                    maxTokens: 4000,
+                  },
+                  {}
+                );
+                const parsed = parseJson(fullText) as SlideData[];
+                updateChapter(ch.number, { slidesJson: parsed });
+              } catch (err) {
+                if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Slides', message: friendlyError(err, 'Generation failed.') });
+              }
+            })());
+          }
+
+          if (parallelTasks.length > 0) {
+            await Promise.allSettled(parallelTasks);
+          }
+        }
+
+        if (!batchCancelRef.current && !signal.aborted) {
+          pushBatchChapterMs(Date.now() - chapterStart);
+          chaptersCompleted++;
+        }
+      }
     } finally {
+      endAbortable('batch', controller);
+      setBatchSummary({
+        mode,
+        chaptersCompleted,
+        failures,
+        cancelled: batchCancelRef.current || signal.aborted,
+      });
+      setBatchProgress(null, null);
       setBatchCurrentChapter(null);
       setBatchPhase(null);
       setBatchMaterial(null);
       setBatchGenerating(false);
     }
-  }, [syllabus, claudeApiKey, openaiApiKey, elevenLabsApiKey, researchDossiers, setup, addChapter, updateChapter, setError, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial]);
+  }, [syllabus, claudeApiKey, openaiApiKey, elevenLabsApiKey, researchDossiers, setup, addChapter, updateChapter, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, setBatchSummary]);
+
+  const generateAllClasses = useCallback(() => runBatch('classes'), [runBatch]);
+  const generateEverything = useCallback(() => runBatch('everything'), [runBatch]);
 
   const handleProceed = () => {
     if (anyBusy) {
@@ -1424,6 +1357,27 @@ Teacher feedback: "${feedback}"`;
     { id: 'audio', label: 'Audio', ready: !!audioTranscript },
     { id: 'slides', label: 'Slides', ready: slidesData.length > 0 },
   ];
+
+  // Rolling ETA from completed chapters this run — only meaningful once at
+  // least one chapter has finished.
+  const batchEtaLabel = (() => {
+    if (!batchGenerating || !batchTotal || !batchIndex || batchChapterMs.length === 0) return '';
+    const avg = batchChapterMs.reduce((a, b) => a + b, 0) / batchChapterMs.length;
+    const mins = Math.max(1, Math.round((avg * (batchTotal - batchIndex + 1)) / 60000));
+    return `~${mins} min left`;
+  })();
+
+  // Per-tab retry targets for the tab-error banner. The reading tab routes
+  // errors through the global banner, so it has no entry here.
+  const tabRetryHandlers: Record<string, (() => void) | undefined> = {
+    quiz: () => void generateQuiz(),
+    inclassquiz: () => void generateInClassQuiz(),
+    weeklychallenge: () => void generateWeeklyChallengeContent(),
+    discussion: () => void generateDiscussion(),
+    activities: () => void generateActivities(),
+    audio: () => void generateAudio(),
+    slides: () => void generateSlides(),
+  };
 
   return (
     <div
@@ -1505,9 +1459,15 @@ Teacher feedback: "${feedback}"`;
             )}
             <span className="cb-italic">
               {batchGenerating
-                ? batchMaterial
-                  ? `Drafting ${batchMaterial.toLowerCase()} for chapter ${batchCurrentChapter}…`
-                  : `Drafting chapter ${batchCurrentChapter}…`
+                ? [
+                    batchIndex && batchTotal ? `Class ${batchIndex} of ${batchTotal}` : '',
+                    batchMaterial
+                      ? `drafting ${batchMaterial.toLowerCase()} for chapter ${batchCurrentChapter}…`
+                      : `drafting chapter ${batchCurrentChapter}…`,
+                    batchEtaLabel,
+                  ]
+                    .filter(Boolean)
+                    .join(' · ')
                 : generatedCount === totalChapters && totalChapters > 0
                 ? `— ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`
                 : `${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`}
@@ -1528,8 +1488,10 @@ Teacher feedback: "${feedback}"`;
               type="button"
               onClick={() => {
                 batchCancelRef.current = true;
+                abortInFlight('batch');
               }}
               className="cb-focus"
+              title="Stops now — the in-flight call is cancelled; finished materials are kept."
               style={{
                 background: 'transparent',
                 border: 0,
@@ -1544,7 +1506,7 @@ Teacher feedback: "${feedback}"`;
                 textUnderlineOffset: 3,
               }}
             >
-              Stop after current
+              Stop
             </button>
           ) : (
             generatedCount < totalChapters && (
@@ -1571,12 +1533,19 @@ Teacher feedback: "${feedback}"`;
       {/* Batch generation confirmation dialog */}
       <AnimatePresence>
         {showBatchConfirm && (() => {
-          const remaining = totalChapters - generatedCount;
-          const researched = syllabus.chapters.filter(
+          // Chapters with research that still need core materials — matches
+          // runBatch's own fill-the-holes queue, so the count is honest.
+          const researched = syllabus.chapters.filter((ch) => {
+            if (!researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)) return false;
+            const ex = chapters.find(c => c.number === ch.number);
+            return !ex?.htmlContent || !ex.practiceQuizData
+              || !(ex.inClassQuizData && ex.inClassQuizData.length > 0)
+              || !ex.weeklyChallengeData;
+          }).length;
+          const unresearched = syllabus.chapters.filter(
             ch => !chapters.find(c => c.number === ch.number)
-              && researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
+              && !researchDossiers.some(d => d.chapterNumber === ch.number && d.sources.length > 0)
           ).length;
-          const unresearched = remaining - researched;
           return (
             <motion.div
               initial={{ opacity: 0, height: 0 }}
@@ -1633,6 +1602,87 @@ Teacher feedback: "${feedback}"`;
           );
         })()}
       </AnimatePresence>
+
+      {/* End-of-batch report — what landed, what failed, one-click retry. */}
+      {batchSummary && !batchGenerating && (
+        <div
+          role="status"
+          style={{
+            marginBottom: 20,
+            padding: '14px 16px',
+            background: batchSummary.failures.length
+              ? 'var(--cb-status-warning-bg)'
+              : 'var(--cb-surface-sunken)',
+            borderLeft: `2px solid ${
+              batchSummary.failures.length
+                ? 'var(--cb-status-warning)'
+                : 'var(--cb-status-success)'
+            }`,
+            fontSize: 14,
+            lineHeight: 1.55,
+            color: 'var(--cb-text-default)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'baseline',
+              gap: 16,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              <strong>{batchSummary.cancelled ? 'Batch stopped.' : 'Batch finished.'}</strong>{' '}
+              {batchSummary.chaptersCompleted}{' '}
+              {batchSummary.chaptersCompleted === 1 ? 'chapter' : 'chapters'} processed
+              {batchSummary.failures.length > 0
+                ? ` · ${batchSummary.failures.length} ${
+                    batchSummary.failures.length === 1 ? 'material' : 'materials'
+                  } failed:`
+                : ' — every material drafted.'}
+            </span>
+            <span style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              {batchSummary.failures.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => {
+                    const mode = batchSummary.mode;
+                    setBatchSummary(null);
+                    void runBatch(mode);
+                  }}
+                >
+                  Retry failed ({batchSummary.failures.length})
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setBatchSummary(null)}>
+                Dismiss
+              </Button>
+            </span>
+          </div>
+          {batchSummary.failures.length > 0 && (
+            <ul
+              style={{
+                margin: '10px 0 0',
+                paddingLeft: 18,
+                fontSize: 13,
+                lineHeight: 1.7,
+                color: 'var(--cb-text-muted)',
+              }}
+            >
+              {batchSummary.failures.slice(0, 8).map((f, i) => (
+                <li key={i}>
+                  Chapter {f.chapter} · {f.material} — {f.message}
+                </li>
+              ))}
+              {batchSummary.failures.length > 8 && (
+                <li>…and {batchSummary.failures.length - 8} more</li>
+              )}
+            </ul>
+          )}
+        </div>
+      )}
 
       {error && (
         <div
@@ -1767,25 +1817,47 @@ Teacher feedback: "${feedback}"`;
           )}
 
           {/* Generate all outputs for current class */}
-          {!batchGenerating && currentChapter && !isGenerating && (
-            <div className="flex items-center gap-3 mb-4">
-              <button
-                onClick={generateAllOutputs}
-                disabled={anyLocalGenerating}
-                className="flex items-center gap-1.5 text-xs text-cb-text-muted hover:text-cb-accent-emphasis transition-colors cursor-pointer disabled:opacity-40 disabled:cursor-default"
-              >
-                <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="5 3 19 12 5 21 5 3" />
-                </svg>
-                Generate all materials for this chapter
-              </button>
-              {anyLocalGenerating && (
-                <span className="text-xs text-cb-text-muted">
-                  Generating... rate limits may cause automatic retries
-                </span>
-              )}
-            </div>
-          )}
+          {!batchGenerating && currentChapter && !isGenerating && (() => {
+            const missing = [
+              !quizHtml,
+              inClassQuizData.length === 0,
+              discussions.length === 0,
+              activities.length === 0,
+              slidesData.length === 0,
+              !audioTranscript,
+              !currentChapter.weeklyChallengeData,
+            ].filter(Boolean).length;
+            return (
+              <div className="flex items-baseline gap-3 mb-4 flex-wrap">
+                {missing > 0 ? (
+                  <>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() => void generateAllOutputs()}
+                      disabled={anyLocalGenerating}
+                      title={
+                        anyLocalGenerating
+                          ? 'Generation is already running for this chapter.'
+                          : undefined
+                      }
+                    >
+                      ▸ Generate all materials for this chapter
+                    </Button>
+                    <span className="text-xs italic text-cb-text-muted">
+                      {anyLocalGenerating
+                        ? 'Generating… rate limits may cause automatic retries'
+                        : `${missing} of 7 remaining · a few minutes, on your keys`}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-xs italic text-cb-text-muted">
+                    All seven materials are drafted for this chapter.
+                  </span>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Generate chapter button when chapter not yet generated */}
           {!batchGenerating && !currentChapter && !isGenerating && (() => {
@@ -1925,6 +1997,18 @@ Teacher feedback: "${feedback}"`;
           {!batchGenerating && (currentChapter || isGenerating) && (
             <>
               <div
+                role="tablist"
+                aria-label="Chapter materials"
+                onKeyDown={(e) => {
+                  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+                  e.preventDefault();
+                  const idx = tabs.findIndex((t) => t.id === activeTab);
+                  const next =
+                    e.key === 'ArrowRight'
+                      ? (idx + 1) % tabs.length
+                      : (idx - 1 + tabs.length) % tabs.length;
+                  setActiveTab(tabs[next].id);
+                }}
                 style={{
                   display: 'flex',
                   gap: 0,
@@ -1939,6 +2023,8 @@ Teacher feedback: "${feedback}"`;
                     <button
                       key={tab.id}
                       type="button"
+                      role="tab"
+                      aria-selected={isActive}
                       onClick={() => setActiveTab(tab.id)}
                       className="cb-focus"
                       style={{
@@ -2030,26 +2116,54 @@ Teacher feedback: "${feedback}"`;
                   }}
                 >
                   <span>{tabErrors[activeTab]}</span>
-                  <button
-                    onClick={() => clearTabError(activeTab)}
-                    className="cb-focus"
-                    style={{
-                      background: 'transparent',
-                      border: 0,
-                      padding: 0,
-                      cursor: 'pointer',
-                      fontSize: 13,
-                      fontStyle: 'italic',
-                      color: 'var(--cb-accent-link)',
-                      textDecoration: 'underline',
-                      textDecorationThickness: '0.5px',
-                      textUnderlineOffset: 3,
-                      whiteSpace: 'nowrap',
-                      fontFamily: 'inherit',
-                    }}
-                  >
-                    dismiss
-                  </button>
+                  <span style={{ display: 'flex', gap: 14, flexShrink: 0 }}>
+                    {tabRetryHandlers[activeTab] && (
+                      <button
+                        onClick={() => {
+                          const retry = tabRetryHandlers[activeTab];
+                          clearTabError(activeTab);
+                          retry?.();
+                        }}
+                        className="cb-focus"
+                        style={{
+                          background: 'transparent',
+                          border: 0,
+                          padding: 0,
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          fontStyle: 'italic',
+                          color: 'var(--cb-accent-emphasis)',
+                          textDecoration: 'underline',
+                          textDecorationThickness: '0.5px',
+                          textUnderlineOffset: 3,
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'inherit',
+                        }}
+                      >
+                        retry
+                      </button>
+                    )}
+                    <button
+                      onClick={() => clearTabError(activeTab)}
+                      className="cb-focus"
+                      style={{
+                        background: 'transparent',
+                        border: 0,
+                        padding: 0,
+                        cursor: 'pointer',
+                        fontSize: 13,
+                        fontStyle: 'italic',
+                        color: 'var(--cb-accent-link)',
+                        textDecoration: 'underline',
+                        textDecorationThickness: '0.5px',
+                        textUnderlineOffset: 3,
+                        whiteSpace: 'nowrap',
+                        fontFamily: 'inherit',
+                      }}
+                    >
+                      dismiss
+                    </button>
+                  </span>
                 </div>
               )}
 
@@ -2066,6 +2180,7 @@ Teacher feedback: "${feedback}"`;
                     streamingText={streamingText}
                     thinkingText={thinkingText}
                     elapsedSec={elapsedSec}
+                    onStop={() => abortInFlight(materialAbortKey('reading', selectedChapterNum))}
                     showImageHint={showChapterImageHint}
                     onDismissImageHint={dismissChapterImageHint}
                     refineFeedback={refineFeedback}
@@ -2098,6 +2213,7 @@ Teacher feedback: "${feedback}"`;
                       isGenerating={generatingQuiz === selectedChapterNum}
                       canGenerate={!!currentChapter && !generatingQuiz}
                       onGenerate={generateQuiz}
+                      onStop={() => abortInFlight(materialAbortKey('quiz', selectedChapterNum))}
                     />
                   </div>
                 )}
@@ -2116,6 +2232,7 @@ Teacher feedback: "${feedback}"`;
                       isGenerating={generatingInClassQuiz === selectedChapterNum}
                       canGenerate={!!currentChapter && !generatingInClassQuiz}
                       onGenerate={generateInClassQuiz}
+                      onStop={() => abortInFlight(materialAbortKey('inclassquiz', selectedChapterNum))}
                       onError={(msg) => setError(friendlyError(msg, 'Quiz export failed.'))}
                     />
                   </motion.div>
@@ -2135,6 +2252,7 @@ Teacher feedback: "${feedback}"`;
                       isGenerating={generatingWeeklyChallenge === selectedChapterNum}
                       canGenerate={!!currentChapter && !generatingWeeklyChallenge}
                       onGenerate={generateWeeklyChallengeContent}
+                      onStop={() => abortInFlight(materialAbortKey('weeklychallenge', selectedChapterNum))}
                     />
                   </motion.div>
                 )}
@@ -2151,6 +2269,7 @@ Teacher feedback: "${feedback}"`;
                       isGenerating={generatingDiscussion === selectedChapterNum}
                       canGenerate={!!currentChapter && !generatingDiscussion}
                       onGenerate={generateDiscussion}
+                      onStop={() => abortInFlight(materialAbortKey('discussion', selectedChapterNum))}
                       onCopy={copyToClipboard}
                       copiedLabel={copiedLabel}
                       formatDiscussionsText={formatDiscussionsText}
@@ -2173,6 +2292,7 @@ Teacher feedback: "${feedback}"`;
                       isGenerating={generatingActivities === selectedChapterNum}
                       canGenerate={!!currentChapter && !generatingActivities}
                       onGenerate={generateActivities}
+                      onStop={() => abortInFlight(materialAbortKey('activities', selectedChapterNum))}
                       onCopy={copyToClipboard}
                       onFleshOut={fleshOutActivity}
                       onCollapse={(i) =>
@@ -2198,6 +2318,7 @@ Teacher feedback: "${feedback}"`;
                       audioTranscript={audioTranscript}
                       audioUrl={audioUrl}
                       audioError={audioError}
+                      audioPersistNote={audioPersistNote}
                       audioPhase={audioPhase}
                       audioChunkProgress={audioChunkProgress}
                       chapterNum={selectedChapterNum}
@@ -2208,6 +2329,10 @@ Teacher feedback: "${feedback}"`;
                       onGenerate={generateAudio}
                       onRetry={retryAudio}
                       onAddKey={openKeysModal}
+                      onStop={() => abortInFlight(materialAbortKey('audio', selectedChapterNum))}
+                      onSaveTranscript={(text) =>
+                        updateChapter(selectedChapterNum, { audioTranscript: text })
+                      }
                     />
                   </motion.div>
                 )}
@@ -2228,6 +2353,7 @@ Teacher feedback: "${feedback}"`;
                       showImageHint={showSlideImageHint}
                       onDismissImageHint={dismissSlideImageHint}
                       onGenerate={generateSlides}
+                      onStop={() => abortInFlight(materialAbortKey('slides', selectedChapterNum))}
                       onDownloadDeck={downloadSlideDeck}
                       onAddKey={openKeysModal}
                       slidesRender={slidesRender}

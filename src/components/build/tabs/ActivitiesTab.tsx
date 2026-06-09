@@ -20,6 +20,8 @@ export interface ActivitiesTabProps {
   isGenerating: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
   onCopy: (text: string, label: string) => void;
   onFleshOut: (i: number) => void;
   onCollapse: (i: number) => void;
@@ -34,6 +36,7 @@ export function ActivitiesTab({
   isGenerating,
   canGenerate,
   onGenerate,
+  onStop,
   onCopy,
   onFleshOut,
   onCollapse,
@@ -42,7 +45,7 @@ export function ActivitiesTab({
   if (activities.length === 0) {
     if (isGenerating) {
       return (
-        <ArtifactStatusLine>
+        <ArtifactStatusLine onStop={onStop}>
           Drafting in-class activities — four to six with timing and scaling notes
           for different cohort sizes.
         </ArtifactStatusLine>

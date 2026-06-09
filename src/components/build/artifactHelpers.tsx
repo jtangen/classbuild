@@ -73,9 +73,19 @@ export function ArtifactPreviewFrame({
   );
 }
 
-export function ArtifactStatusLine({ children }: { children: ReactNode }) {
+export function ArtifactStatusLine({
+  children,
+  onStop,
+}: {
+  children: ReactNode;
+  /** When provided, renders a quiet "stop" control that cancels the
+   *  generation this line reports on. */
+  onStop?: () => void;
+}) {
   return (
     <div
+      role="status"
+      aria-live="polite"
       style={{
         display: 'flex',
         gap: 14,
@@ -113,10 +123,33 @@ export function ArtifactStatusLine({ children }: { children: ReactNode }) {
           fontSize: 14.5,
           color: 'var(--cb-text-muted)',
           lineHeight: 1.55,
+          flex: 1,
+          minWidth: 0,
         }}
       >
         {children}
       </span>
+      {onStop && (
+        <button
+          type="button"
+          onClick={onStop}
+          className="cb-mono"
+          title="Stop generating — nothing is saved from a stopped draft"
+          style={{
+            flexShrink: 0,
+            background: 'none',
+            border: '0.5px solid var(--cb-border-default)',
+            borderRadius: 2,
+            padding: '3px 10px',
+            fontSize: 11,
+            letterSpacing: '0.08em',
+            color: 'var(--cb-text-muted)',
+            cursor: 'pointer',
+          }}
+        >
+          stop
+        </button>
+      )}
     </div>
   );
 }

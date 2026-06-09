@@ -12,6 +12,8 @@ export interface DiscussionTabProps {
   isGenerating: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
   onCopy: (text: string, label: string) => void;
   copiedLabel: string;
   formatDiscussionsText: () => string;
@@ -22,6 +24,7 @@ export function DiscussionTab({
   isGenerating,
   canGenerate,
   onGenerate,
+  onStop,
   onCopy,
   copiedLabel,
   formatDiscussionsText,
@@ -29,7 +32,7 @@ export function DiscussionTab({
   if (discussions.length === 0) {
     if (isGenerating) {
       return (
-        <ArtifactStatusLine>
+        <ArtifactStatusLine onStop={onStop}>
           Drafting conversation starters — five or six prompts students can read off
           a slide as they walk in.
         </ArtifactStatusLine>

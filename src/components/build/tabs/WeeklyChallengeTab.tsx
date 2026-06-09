@@ -13,6 +13,8 @@ export interface WeeklyChallengeTabProps {
   isGenerating: boolean;
   canGenerate: boolean;
   onGenerate: () => void;
+  /** Cancels the in-flight generation this tab reports on. */
+  onStop: () => void;
 }
 
 export function WeeklyChallengeTab({
@@ -22,6 +24,7 @@ export function WeeklyChallengeTab({
   isGenerating,
   canGenerate,
   onGenerate,
+  onStop,
 }: WeeklyChallengeTabProps) {
   if (challengeHtml) {
     return (
@@ -46,7 +49,7 @@ export function WeeklyChallengeTab({
   }
   if (isGenerating) {
     return (
-      <ArtifactStatusLine>
+      <ArtifactStatusLine onStop={onStop}>
         Drafting the mastery challenge — ten to twelve questions in mixed formats.
       </ArtifactStatusLine>
     );
