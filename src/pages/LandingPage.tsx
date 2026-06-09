@@ -1,9 +1,15 @@
-import { useState, type ReactNode } from 'react';
+import { useRef, useState, type ChangeEvent, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
+import { STAGES } from '../types/course';
 import type { StageId } from '../types/course';
 import { CodexButton, CodexBadge, CodexModal, Colophon } from '../components/codex';
+import {
+  applyProjectFile,
+  parseProjectFile,
+  type ProjectFileState,
+} from '../utils/projectFile';
 
 // ─── Example courses ─────────────────────────────────────────────────────
 
@@ -224,12 +230,34 @@ const STAGE_ROUTES: Record<StageId, string> = {
   export: '/export',
 };
 
+/** Route for a restored project's stage — 'landing' has no STAGES entry, so
+ *  a freshly-restored project lands on Setup rather than back here. */
+function stagePathFor(stage: StageId): string {
+  return STAGES.find((s) => s.id === stage)?.path ?? '/setup';
+}
+
+/** "12 May 2026" from a project file's ISO savedAt, or null if unparseable. */
+function formatSavedAt(iso: string | null): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
 // ─── Page ────────────────────────────────────────────────────────────────
 
 export function LandingPage() {
   const navigate = useNavigate();
-  const { currentStage, reset, setup } = useCourseStore();
+  const { currentStage, reset, setup, syllabus, chapters } = useCourseStore();
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // ── Restore-a-project-file flow ──
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<{
+    state: ProjectFileState;
+    savedAt: string | null;
+  } | null>(null);
 
   const hasExistingCourse =
     currentStage !== 'landing' && currentStage !== 'setup';
@@ -252,6 +280,40 @@ export function LandingPage() {
     setShowConfirm(false);
     navigate(STAGE_ROUTES[currentStage]);
   };
+
+  const applyRestore = (state: ProjectFileState) => {
+    applyProjectFile(state);
+    setPendingRestore(null);
+    navigate(stagePathFor(state.currentStage));
+  };
+
+  const handleRestoreFile = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // allow re-selecting the same file after an error
+    if (!file) return;
+    setRestoreError(null);
+    let text: string;
+    try {
+      text = await file.text();
+    } catch {
+      setRestoreError('Could not read that file — try selecting it again.');
+      return;
+    }
+    const result = parseProjectFile(text);
+    if (!result.ok) {
+      setRestoreError(result.error);
+      return;
+    }
+    // A course already underway? Confirm before replacing it.
+    if (syllabus || chapters.length > 0) {
+      setPendingRestore({ state: result.state, savedAt: result.savedAt });
+    } else {
+      applyRestore(result.state);
+    }
+  };
+
+  const pendingTopic = pendingRestore?.state.setup.topic ?? '';
+  const pendingSavedAt = formatSavedAt(pendingRestore?.savedAt ?? null);
 
   return (
     <div
@@ -340,7 +402,51 @@ export function LandingPage() {
               >
                 See example courses ↓
               </a>
+              <button
+                type="button"
+                onClick={() => {
+                  setRestoreError(null);
+                  fileInputRef.current?.click();
+                }}
+                className="cb-focus"
+                title="Re-open a saved .classbuild.json project. Keys are not included."
+                style={{
+                  background: 'transparent',
+                  border: 0,
+                  padding: 0,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  color: 'var(--cb-accent-link)',
+                  textDecoration: 'underline',
+                  textDecorationThickness: '0.5px',
+                  textUnderlineOffset: 4,
+                  fontSize: 17,
+                }}
+              >
+                Restore a project file ↑
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json,.classbuild"
+                onChange={(e) => void handleRestoreFile(e)}
+                style={{ display: 'none' }}
+              />
             </div>
+            {restoreError && (
+              <p
+                className="cb-italic"
+                role="alert"
+                style={{
+                  margin: '14px 0 0',
+                  fontSize: 14.5,
+                  lineHeight: 1.5,
+                  color: 'var(--cb-status-danger)',
+                }}
+              >
+                {restoreError}
+              </p>
+            )}
             <div
               className="cb-mono"
               style={{
@@ -774,6 +880,52 @@ export function LandingPage() {
             {STAGE_LABELS[currentStage] ?? 'where you were'}
           </span>
           . Starting fresh clears the current syllabus, research, and chapters.
+        </p>
+      </CodexModal>
+
+      {/* ── Restore-project confirm modal ────────────────────── */}
+      <CodexModal
+        open={pendingRestore !== null}
+        onClose={() => setPendingRestore(null)}
+        kicker="restore a project"
+        title={
+          <>
+            Replace the course in <span className="cb-italic">progress</span>?
+          </>
+        }
+        sub={
+          pendingTopic
+            ? `The file contains "${
+                pendingTopic.length > 80 ? pendingTopic.slice(0, 80) + '…' : pendingTopic
+              }"${pendingSavedAt ? `, saved ${pendingSavedAt}` : ''}.`
+            : 'Restore the saved project and continue where it left off.'
+        }
+        actions={
+          <>
+            <CodexButton variant="ghost" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </CodexButton>
+            <CodexButton
+              variant="destructive"
+              onClick={() => {
+                if (pendingRestore) applyRestore(pendingRestore.state);
+              }}
+            >
+              Replace & restore
+            </CodexButton>
+          </>
+        }
+      >
+        <p
+          style={{
+            margin: 0,
+            fontSize: 15,
+            lineHeight: 1.55,
+            color: 'var(--cb-text-default)',
+          }}
+        >
+          Restoring replaces your current syllabus, research, and chapters with
+          the saved project. API keys are never part of a project file.
         </p>
       </CodexModal>
     </div>

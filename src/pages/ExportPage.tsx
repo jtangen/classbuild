@@ -22,6 +22,7 @@ import {
 import { CodexButton as Button } from '../components/codex';
 import type { InClassQuizQuestion } from '../types/course';
 import { friendlyError } from '../utils/errors';
+import { buildProjectFile } from '../utils/projectFile';
 import { ThemePicker } from '../components/export/ThemePicker';
 import type { ChapterThemeId } from '../themes';
 import { DEFAULT_CHAPTER_THEME_ID, renderChapterHtml } from '../themes';
@@ -934,6 +935,16 @@ export function ExportPage() {
     }
   }, [syllabus, chapters, setup.themeId, setError]);
 
+  // --- Project file (backup/restore) ---
+  //
+  // A portable snapshot of the whole course — re-opened from the landing
+  // page's "Restore a project file" affordance. API keys are never included.
+
+  const handleDownloadProjectFile = useCallback(() => {
+    const name = sanitizeFilename(syllabus?.courseTitle ?? '') || 'course';
+    downloadFile(buildProjectFile(), `${name}.classbuild.json`, 'application/json');
+  }, [syllabus]);
+
   // --- Derived data ---
 
   if (!syllabus) {
@@ -1050,6 +1061,14 @@ export function ExportPage() {
               {allReady
                 ? 'Download all · ZIP ↓'
                 : `Download ${readyCount} of ${totalChapters} · ZIP ↓`}
+            </Button>
+            <Button
+              variant="ghost"
+              size="lg"
+              onClick={handleDownloadProjectFile}
+              title="Re-open this course on any machine. Keys are not included."
+            >
+              Project file ↓
             </Button>
           </div>
         </header>
