@@ -4,6 +4,7 @@ import { idbStorage } from './idbStorage';
 import type {
   CourseSetup,
   Syllabus,
+  ChapterSyllabus,
   ResearchDossier,
   GeneratedChapter,
   StageId,
@@ -36,6 +37,10 @@ interface CourseState {
   completeStage: (stage: StageId) => void;
   updateSetup: (updates: Partial<CourseSetup>) => void;
   setSyllabus: (syllabus: Syllabus) => void;
+  /** Edit a single syllabus chapter in place (title, narrative, …) without
+   *  discarding the curriculum map — its syllabusHash staleness check handles
+   *  prompting for a regenerate. */
+  updateSyllabusChapter: (number: number, updates: Partial<ChapterSyllabus>) => void;
   setCurriculumMap: (map: CurriculumMap) => void;
   clearCurriculumMap: () => void;
   addSyllabusMessage: (role: 'user' | 'assistant', content: string) => void;
@@ -100,6 +105,18 @@ export const useCourseStore = create<CourseState>()(
         set((state) => ({ setup: { ...state.setup, ...updates } })),
 
       setSyllabus: (syllabus) => set({ syllabus, curriculumMap: null }),
+
+      updateSyllabusChapter: (number, updates) =>
+        set((state) => ({
+          syllabus: state.syllabus
+            ? {
+                ...state.syllabus,
+                chapters: state.syllabus.chapters.map((c) =>
+                  c.number === number ? { ...c, ...updates } : c
+                ),
+              }
+            : state.syllabus,
+        })),
 
       setCurriculumMap: (map) => set({ curriculumMap: map }),
 

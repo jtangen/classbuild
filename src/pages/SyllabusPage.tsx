@@ -16,9 +16,9 @@ import {
   parseSyllabusResponse,
   parsePartialChapters,
 } from '../prompts/syllabus';
-import type { ChapterSyllabus } from '../types/course';
+import type { ChapterSyllabus, WidgetSpec } from '../types/course';
 import { friendlyError } from '../utils/errors';
-import { CodexButton } from '../components/codex';
+import { CodexButton, CodexInput, CodexTextarea } from '../components/codex';
 
 const ROMAN_UPPER = [
   'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
@@ -33,6 +33,7 @@ export function SyllabusPage() {
     setup,
     syllabus,
     setSyllabus,
+    updateSyllabusChapter,
     syllabusConversation,
     addSyllabusMessage,
     setStage,
@@ -180,6 +181,12 @@ export function SyllabusPage() {
   const draftedCount = syllabus ? totalChapters : partialChapters.length;
   const activeDraftIndex = syllabus ? -1 : Math.max(0, partialChapters.length - 1);
 
+  // Inline edits are only offered once a syllabus has settled and nothing is
+  // streaming. During a regenerate the previous syllabus stays on screen
+  // (phase reads 'settled'), so gate on isGenerating too — otherwise an open
+  // editor would hold stale drafts over the incoming chapters.
+  const editable = Boolean(syllabus) && !isGenerating;
+
   return (
     <div
       style={{
@@ -237,6 +244,8 @@ export function SyllabusPage() {
             draftedCount={draftedCount}
             activeDraftIndex={activeDraftIndex}
             phase={phase}
+            editable={editable}
+            onSaveChapter={updateSyllabusChapter}
           />
           {displayChapters.length >= 2 && (
             <SyllabusAside chapters={displayChapters} />
@@ -593,12 +602,19 @@ function ChapterTimeline({
   draftedCount,
   activeDraftIndex,
   phase,
+  editable,
+  onSaveChapter,
 }: {
   totalChapters: number;
   chapters: ChapterSyllabus[];
   draftedCount: number;
   activeDraftIndex: number;
   phase: Phase;
+  editable: boolean;
+  onSaveChapter: (
+    number: number,
+    updates: { title: string; narrative: string },
+  ) => void;
 }) {
   return (
     <section>
@@ -642,6 +658,8 @@ function ChapterTimeline({
               index={i}
               state={slotState}
               chapter={chapter}
+              editable={editable}
+              onSaveChapter={onSaveChapter}
             />
           );
         })}
@@ -655,12 +673,22 @@ function ChapterSlot({
   index,
   state,
   chapter,
+  editable,
+  onSaveChapter,
 }: {
   index: number;
   state: 'drafted' | 'drafting' | 'queued';
   chapter?: ChapterSyllabus;
+  editable: boolean;
+  onSaveChapter: (
+    number: number,
+    updates: { title: string; narrative: string },
+  ) => void;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Row hover reveals the edit affordance (it stays keyboard-focusable
+  // regardless — focus also reveals it, inside DraftedSlot).
+  const [hovered, setHovered] = useState(false);
   const roman = ROMAN_UPPER[index] ?? String(index + 1);
   const week = index + 1;
 
@@ -683,9 +711,12 @@ function ChapterSlot({
   const title = chapter?.title?.trim() ?? '';
   const narrative = chapter?.narrative?.trim() ?? '';
   const keyConcepts = chapter?.keyConcepts ?? [];
+  const widgets = chapter?.widgets ?? [];
 
   return (
     <div
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: 'relative',
         padding: '14px 0 16px 24px',
@@ -750,8 +781,14 @@ function ChapterSlot({
               title={title}
               narrative={narrative}
               keyConcepts={keyConcepts}
+              widgets={widgets}
               expanded={expanded}
               onToggle={() => setExpanded((v) => !v)}
+              editable={editable && !!chapter}
+              rowHovered={hovered}
+              onSave={(updates) => {
+                if (chapter) onSaveChapter(chapter.number, updates);
+              }}
             />
           )}
           {state === 'drafting' && (
@@ -768,47 +805,169 @@ function DraftedSlot({
   title,
   narrative,
   keyConcepts,
+  widgets,
   expanded,
   onToggle,
+  editable,
+  rowHovered,
+  onSave,
 }: {
   title: string;
   narrative: string;
   keyConcepts: string[];
+  widgets: WidgetSpec[];
   expanded: boolean;
   onToggle: () => void;
+  editable: boolean;
+  rowHovered: boolean;
+  onSave: (updates: { title: string; narrative: string }) => void;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [draftTitle, setDraftTitle] = useState('');
+  const [draftNarrative, setDraftNarrative] = useState('');
+  const [editFocused, setEditFocused] = useState(false);
+
+  // If a regenerate kicks off mid-edit, drop back to the read view — an open
+  // editor would otherwise hold stale drafts over the incoming chapter.
+  useEffect(() => {
+    if (!editable) setEditing(false);
+  }, [editable]);
+
+  const beginEdit = () => {
+    setDraftTitle(title);
+    setDraftNarrative(narrative);
+    setEditing(true);
+  };
+
+  const cancelEdit = () => setEditing(false);
+
+  const saveEdit = () => {
+    const trimmedTitle = draftTitle.trim();
+    if (!trimmedTitle) return; // an empty title is never saved
+    onSave({ title: trimmedTitle, narrative: draftNarrative.trim() });
+    setEditing(false);
+  };
+
   // Two concepts max — kicker is for scanning, not for cataloguing.
   // The week marker lives in the rail under the Roman numeral.
   const kicker =
     keyConcepts.length > 0 ? keyConcepts.slice(0, 2).join(' · ') : '';
   const isLong = narrative.length > 220;
+
+  const kickerEl = kicker ? (
+    <div
+      className="cb-italic"
+      style={{
+        fontSize: 14.5,
+        color: 'var(--cb-text-muted)',
+        lineHeight: 1.4,
+        marginBottom: 4,
+      }}
+    >
+      {kicker}
+    </div>
+  ) : null;
+
+  if (editing && editable) {
+    return (
+      <div>
+        {kickerEl}
+        <div style={{ display: 'grid', gap: 12 }}>
+          <CodexInput
+            label="Chapter title"
+            size="lg"
+            value={draftTitle}
+            autoFocus
+            onChange={(e) => setDraftTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                saveEdit();
+              }
+              if (e.key === 'Escape') cancelEdit();
+            }}
+          />
+          <CodexTextarea
+            label="Narrative"
+            rows={5}
+            value={draftNarrative}
+            onChange={(e) => setDraftNarrative(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') cancelEdit();
+              if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) saveEdit();
+            }}
+          />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <CodexButton
+              variant="primary"
+              size="sm"
+              onClick={saveEdit}
+              disabled={!draftTitle.trim()}
+            >
+              Save
+            </CodexButton>
+            <CodexButton variant="ghost" size="sm" onClick={cancelEdit}>
+              Cancel
+            </CodexButton>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div>
-      {kicker && (
-        <div
-          className="cb-italic"
-          style={{
-            fontSize: 14.5,
-            color: 'var(--cb-text-muted)',
-            lineHeight: 1.4,
-            marginBottom: 4,
-          }}
-        >
-          {kicker}
-        </div>
-      )}
+      {kickerEl}
       <div
         style={{
-          fontSize: 22,
-          fontWeight: 500,
-          fontVariationSettings: '"opsz" 18',
-          color: 'var(--cb-text-default)',
-          lineHeight: 1.25,
-          letterSpacing: '-0.005em',
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 10,
           marginBottom: 8,
         }}
       >
-        {title}
+        <span
+          style={{
+            fontSize: 22,
+            fontWeight: 500,
+            fontVariationSettings: '"opsz" 18',
+            color: 'var(--cb-text-default)',
+            lineHeight: 1.25,
+            letterSpacing: '-0.005em',
+            minWidth: 0,
+          }}
+        >
+          {title}
+        </span>
+        {editable && (
+          <button
+            type="button"
+            onClick={beginEdit}
+            onFocus={() => setEditFocused(true)}
+            onBlur={() => setEditFocused(false)}
+            className="cb-focus"
+            aria-label={`Edit “${title}”`}
+            style={{
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              color: 'var(--cb-accent-link)',
+              textDecoration: 'underline',
+              textDecorationThickness: '0.5px',
+              textUnderlineOffset: 3,
+              fontFamily: 'inherit',
+              fontSize: 13.5,
+              fontStyle: 'italic',
+              whiteSpace: 'nowrap',
+              flexShrink: 0,
+              opacity: rowHovered || editFocused ? 1 : 0,
+              transition: 'opacity 150ms ease',
+            }}
+          >
+            ✎ edit
+          </button>
+        )}
       </div>
       {narrative && (
         <div
@@ -852,6 +1011,63 @@ function DraftedSlot({
           {expanded ? '↑ collapse' : '↓ read the full description'}
         </button>
       )}
+      <WidgetPlan widgets={widgets} />
+    </div>
+  );
+}
+
+// ─── WidgetPlan (planned interactives) ────────────────────────────────────
+//
+// Quiet, secondary metadata: the chapter's planned interactive widgets from
+// the syllabus. Hover a chip for the widget's description and rationale.
+function WidgetPlan({ widgets }: { widgets: WidgetSpec[] }) {
+  if (widgets.length === 0) return null;
+  return (
+    <div
+      style={{
+        marginTop: 10,
+        display: 'flex',
+        alignItems: 'baseline',
+        flexWrap: 'wrap',
+        gap: '6px 8px',
+      }}
+    >
+      <span
+        className="cb-sc"
+        style={{
+          fontSize: 12,
+          color: 'var(--cb-text-muted)',
+          letterSpacing: '0.14em',
+        }}
+      >
+        interactives
+      </span>
+      {widgets.map((w, i) => {
+        const detail = [w.description, w.rationale ? `Why: ${w.rationale}` : '']
+          .filter(Boolean)
+          .join(' — ');
+        return (
+          <span
+            key={`${w.title}-${i}`}
+            title={detail || undefined}
+            style={{
+              fontSize: 13,
+              lineHeight: 1.5,
+              color: 'var(--cb-text-muted)',
+              border: '0.5px solid var(--cb-border-default)',
+              borderRadius: 1.5,
+              padding: '1px 8px',
+              cursor: detail ? 'help' : 'default',
+              maxWidth: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {w.title}
+          </span>
+        );
+      })}
     </div>
   );
 }
