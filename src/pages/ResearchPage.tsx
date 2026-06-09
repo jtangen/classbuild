@@ -1050,6 +1050,7 @@ function CitedSourcesSection({
   if (sources.length === 0) return null;
   const showEvaluated = evaluated > sources.length;
   const unverifiedCount = enrichment?.unverified ?? 0;
+  const hasUnverified = sources.some((s) => s.isVerified === false);
 
   return (
     <div style={{ marginTop: 24 }}>
@@ -1089,6 +1090,21 @@ function CitedSourcesSection({
           <Citation key={i} source={s} index={i} />
         ))}
       </ol>
+      {hasUnverified && (
+        <p
+          className="cb-italic"
+          style={{
+            margin: '12px 0 0',
+            fontSize: 13.5,
+            lineHeight: 1.55,
+            color: 'var(--cb-text-muted)',
+            maxWidth: '72ch',
+          }}
+        >
+          Unverified references are drafted from the model's knowledge. Check
+          them before teaching.
+        </p>
+      )}
     </div>
   );
 }
@@ -1138,6 +1154,14 @@ function Citation({ source, index }: { source: ResearchSource; index: number }) 
             >
               {' '}— {source.authors}
               {source.year ? `, ${source.year}` : ''}
+            </span>
+          )}
+          {source.isVerified === false && (
+            <span
+              title="AI-cited — verify this reference before teaching from it."
+              style={{ marginLeft: 8 }}
+            >
+              <CodexBadge tone="warning">unverified</CodexBadge>
             </span>
           )}
         </div>

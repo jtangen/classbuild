@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useCourseStore } from '../../store/courseStore';
+import { CodexBadge } from '../codex';
 
 interface ResearchPanelProps {
   chapterNum: number;
@@ -16,6 +17,10 @@ export function ResearchPanel({ chapterNum }: ResearchPanelProps) {
 
   if (!dossier || dossier.sources.length === 0) return null;
 
+  const unverifiedCount = dossier.sources.filter(
+    (s) => s.isVerified === false,
+  ).length;
+
   return (
     <div
       style={{
@@ -30,18 +35,35 @@ export function ResearchPanel({ chapterNum }: ResearchPanelProps) {
       }}
     >
       <span
-        className="cb-italic"
         style={{
-          fontSize: 13,
-          color: 'var(--cb-text-muted)',
-          lineHeight: 1.5,
+          display: 'inline-flex',
+          alignItems: 'baseline',
+          gap: 10,
+          flexWrap: 'wrap',
+          minWidth: 0,
         }}
       >
-        Drafted from{' '}
-        <span style={{ color: 'var(--cb-text-default)', fontStyle: 'normal' }}>
-          {dossier.sources.length}
-        </span>{' '}
-        {dossier.sources.length === 1 ? 'cited source' : 'cited sources'}.
+        <span
+          className="cb-italic"
+          style={{
+            fontSize: 13,
+            color: 'var(--cb-text-muted)',
+            lineHeight: 1.5,
+          }}
+        >
+          Drafted from{' '}
+          <span style={{ color: 'var(--cb-text-default)', fontStyle: 'normal' }}>
+            {dossier.sources.length}
+          </span>{' '}
+          {dossier.sources.length === 1 ? 'cited source' : 'cited sources'}.
+        </span>
+        {unverifiedCount > 0 && (
+          <span title="AI-cited — verify this reference before teaching from it.">
+            <CodexBadge tone="warning">
+              {unverifiedCount} unverified
+            </CodexBadge>
+          </span>
+        )}
       </span>
       <button
         type="button"
