@@ -198,6 +198,8 @@ export function buildCodexViewerHtml(course: CodexCourseMeta, chapters: CodexCha
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#f1ebdd">
+<meta name="description" content="${esc((course.courseOverview || course.courseTitle).slice(0, 155))}">
 <title>${esc(course.courseTitle)} — ClassBuild</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -238,7 +240,9 @@ export function buildCodexViewerHtml(course: CodexCourseMeta, chapters: CodexCha
   .side-foot a{color:var(--maroon);text-decoration:none;font-weight:500}
 
   /* Main */
-  .main{flex:1;margin-left:312px;min-height:100vh}
+  /* min-width:0 defuses the flex min-content trap — without it the nowrap
+     tab bar widens .main past the viewport on phones. */
+  .main{flex:1;margin-left:312px;min-height:100vh;min-width:0}
   .panel-head{padding:2.6rem 3rem 1.7rem;border-bottom:1px solid var(--rule);max-width:1180px}
   .eyebrow{display:inline-block;font-family:var(--mono);font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.18em;color:var(--maroon);margin-bottom:.7rem}
   .panel-head h2{font-family:var(--serif);font-size:2.5rem;font-weight:600;line-height:1.12;letter-spacing:-.015em}
@@ -290,27 +294,50 @@ export function buildCodexViewerHtml(course: CodexCourseMeta, chapters: CodexCha
   .transcript-body p{margin-bottom:.8rem;line-height:1.65;font-size:.98rem}
 
   /* Welcome */
-  .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:2rem}
+  .welcome{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;min-height:100svh;text-align:center;padding:2rem 1.5rem}
   .welcome .eyebrow{margin-bottom:1.4rem}
-  .welcome h2{font-family:var(--serif);font-size:2.7rem;font-weight:600;max-width:20ch;line-height:1.14;letter-spacing:-.015em;margin-bottom:1rem}
+  .welcome h2{font-family:var(--serif);font-size:clamp(1.85rem,1rem + 3.4vw,2.7rem);font-weight:600;max-width:22ch;line-height:1.14;letter-spacing:-.015em;margin-bottom:1rem;overflow-wrap:break-word}
   .welcome p{font-size:1.05rem;color:var(--muted);max-width:48ch;line-height:1.6;font-style:italic}
   .welcome .rule{width:52px;height:2px;background:var(--gilt);margin-top:1.8rem}
+  .welcome-actions{display:flex;flex-wrap:wrap;gap:.8rem;justify-content:center;margin-top:2rem}
+  .btn-begin{display:inline-flex;align-items:center;gap:.5rem;font-family:var(--mono);font-size:.78rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--canvas);background:var(--maroon);border:1px solid var(--maroon);border-radius:8px;padding:.85rem 1.4rem;cursor:pointer;transition:background .16s}
+  .btn-begin:hover{background:var(--maroon-hv)}
+  .btn-browse{display:none;align-items:center;gap:.5rem;font-family:var(--mono);font-size:.78rem;font-weight:500;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);background:none;border:1px solid var(--n2);border-radius:8px;padding:.85rem 1.4rem;cursor:pointer;transition:color .16s,border-color .16s}
+  .btn-browse:hover{color:var(--ink);border-color:var(--n3)}
 
-  .menu-toggle{display:none;position:fixed;top:1rem;left:1rem;z-index:20;background:var(--canvas);border:1px solid var(--n2);border-radius:7px;padding:.5rem .75rem;color:var(--ink);font-size:1.1rem;cursor:pointer}
+  .menu-toggle{display:none;position:fixed;top:1rem;left:1rem;z-index:30;background:var(--canvas);border:1px solid var(--n2);border-radius:7px;padding:.5rem .75rem;color:var(--ink);font-size:1.1rem;cursor:pointer;box-shadow:var(--shadow)}
+  .scrim{display:none;position:fixed;inset:0;background:rgba(26,24,20,.35);z-index:9;opacity:0;transition:opacity .25s ease;pointer-events:none}
+
+  @media (prefers-reduced-motion: reduce){
+    *,*::before,*::after{transition-duration:.01ms !important;animation-duration:.01ms !important}
+  }
+
   @media(max-width:920px){
     .menu-toggle{display:block}
-    .sidebar{transform:translateX(-100%);transition:transform .3s ease;box-shadow:0 0 30px rgba(26,24,20,.2)}
+    .sidebar{transform:translateX(-100%);transition:transform .28s ease;box-shadow:0 0 30px rgba(26,24,20,.2);width:min(312px,86vw)}
     .sidebar.open{transform:translateX(0)}
+    /* Clear the floating menu toggle so it never overlaps the brand. */
+    .side-head{padding-top:4.3rem}
+    .scrim{display:block}
+    body.nav-open .scrim{opacity:1;pointer-events:auto}
+    body.nav-open{overflow:hidden}
     .main{margin-left:0}
-    .panel-head{padding:4rem 1.4rem 1.4rem}
-    .tab-bar{padding:.75rem 1.4rem;overflow-x:auto}
+    .panel-head{padding:4.2rem 1.4rem 1.4rem}
+    .panel-head h2{font-size:clamp(1.6rem,1.05rem + 3.4vw,2.5rem)}
+    /* One swipeable row instead of a two-deep wrap — keeps the reading high. */
+    .tab-bar{padding:.7rem 1.4rem;overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tab-bar::-webkit-scrollbar{display:none}
+    .tab{white-space:nowrap;flex-shrink:0}
     .card-list,.slide-grid,.audio-wrap{padding:1.6rem 1.4rem}
     .slide-grid{grid-template-columns:1fr}
+    .act-row{grid-template-columns:1fr;gap:.15rem}
+    .welcome-actions .btn-browse{display:inline-flex}
   }
 </style>
 </head>
 <body>
-<button class="menu-toggle" onclick="document.querySelector('.sidebar').classList.toggle('open')">&#9776;</button>
+<button class="menu-toggle" onclick="toggleNav()" aria-label="Open class list" aria-expanded="false">&#9776;</button>
+<div class="scrim" onclick="setNav(false)" aria-hidden="true"></div>
 <nav class="sidebar">
   <div class="side-head">
     <a class="brand" href="https://classbuild.ai" target="_blank" rel="noopener">ClassBuild<span class="brand-ext" aria-hidden="true">↗</span></a>
@@ -330,16 +357,29 @@ export function buildCodexViewerHtml(course: CodexCourseMeta, chapters: CodexCha
     <h2>${esc(course.courseTitle)}</h2>
     ${overview ? `<p>${esc(overview.slice(0, 220))}${overview.length > 220 ? '…' : ''}</p>` : ''}
     <div class="rule"></div>
+    ${sorted.length > 0 ? `<div class="welcome-actions">
+      <button class="btn-begin" onclick="showChapter(${sorted[0].number})">Begin Class ${pad2(sorted[0].number)} &rarr;</button>
+      <button class="btn-browse" onclick="setNav(true)">Browse all classes</button>
+    </div>` : ''}
   </div>
   ${panels}
 </main>
 <script>
+  var _sb=document.querySelector('.sidebar'),_tg=document.querySelector('.menu-toggle');
+  function setNav(open){
+    _sb.classList.toggle('open',open);
+    document.body.classList.toggle('nav-open',open);
+    _tg.innerHTML=open?'&#10005;':'&#9776;';
+    _tg.setAttribute('aria-expanded',open?'true':'false');
+    _tg.setAttribute('aria-label',open?'Close class list':'Open class list');
+  }
+  function toggleNav(){setNav(!_sb.classList.contains('open'));}
   function fit(f){try{var d=f.contentDocument||f.contentWindow.document;var h=d.documentElement.scrollHeight;if(h>200)f.style.height=h+'px';}catch(e){}}
   function showChapter(n){
     var w=document.getElementById('welcome'); if(w)w.style.display='none';
     document.querySelectorAll('.panel').forEach(function(p){p.hidden=(p.getAttribute('data-chapter')!=n);});
     document.querySelectorAll('.nav-item').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-chapter')==n);});
-    document.querySelector('.sidebar').classList.remove('open');
+    setNav(false);
     var panel=document.querySelector('.panel[data-chapter="'+n+'"]');
     if(panel){var tabs=panel.querySelectorAll('.tab');var panes=panel.querySelectorAll('.tab-pane');
       if(tabs.length){tabs.forEach(function(t,i){t.classList.toggle('active',i===0);});}
