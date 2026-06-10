@@ -288,6 +288,7 @@ export function SetupPage() {
                 Start from an example
               </div>
               <div
+                className="cb-starter-grid"
                 style={{
                   display: 'grid',
                   gridTemplateColumns: `repeat(${STARTER_BRIEFS.length}, minmax(0, 1fr))`,
@@ -380,6 +381,7 @@ export function SetupPage() {
               Audience
             </div>
             <div
+              className="cb-pill-grid"
               style={{
                 display: 'grid',
                 gridTemplateColumns: `repeat(${AUDIENCE_TILES.length}, minmax(0, 1fr))`,
@@ -587,6 +589,7 @@ export function SetupPage() {
               textUnderlineOffset: 3,
               fontFamily: 'inherit',
               fontSize: 14.5,
+              whiteSpace: 'nowrap',
             }}
           >
             {hasApiKey ? 'Manage keys ↗' : 'Set keys ↗'}
@@ -1039,6 +1042,7 @@ function WhatComesNext() {
           gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))`,
           gap: 24,
         }}
+        className="cb-pill-grid"
       >
         {stages.map((s) => (
           <div key={s.label}>

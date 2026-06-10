@@ -432,6 +432,7 @@ function SyllabusBanner({
 
   return (
     <header
+      className="cb-page-head"
       style={{
         display: 'grid',
         gridTemplateColumns: '1fr auto',
@@ -488,7 +489,10 @@ function SyllabusBanner({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'baseline' }}>
+      <div
+        className="cb-page-head-actions"
+        style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'baseline', flexWrap: 'wrap' }}
+      >
         <CodexButton
           variant="ghost"
           size="sm"

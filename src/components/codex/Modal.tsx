@@ -87,7 +87,9 @@ export function CodexModal({
               border: '1px solid var(--cb-border-default)',
               borderRadius: 3,
               padding: '28px 32px',
-              maxWidth: width,
+              // Never wider than the viewport (phones) — the configured
+              // width only applies when there's room for it.
+              maxWidth: `min(${width}px, calc(100vw - 28px))`,
               width: '100%',
               maxHeight: 'calc(100vh - 32px)',
               overflowY: 'auto',

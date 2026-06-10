@@ -1389,6 +1389,7 @@ Teacher feedback: "${feedback}"`;
     >
       {/* ─── Codex slim banner ─── */}
       <header
+        className="cb-page-head"
         style={{
           display: 'grid',
           gridTemplateColumns: '1fr auto',
@@ -1476,11 +1477,13 @@ Teacher feedback: "${feedback}"`;
         </div>
 
         <div
+          className="cb-page-head-actions"
           style={{
             display: 'flex',
             gap: 10,
             flexShrink: 0,
             alignItems: 'baseline',
+            flexWrap: 'wrap',
           }}
         >
           {batchGenerating ? (
@@ -1999,6 +2002,7 @@ Teacher feedback: "${feedback}"`;
               <div
                 role="tablist"
                 aria-label="Chapter materials"
+                className="cb-build-tabs"
                 onKeyDown={(e) => {
                   if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
                   e.preventDefault();
@@ -2408,7 +2412,7 @@ Teacher feedback: "${feedback}"`;
           onClick={() => setShortcutsHelpOpen(true)}
           aria-label="Show keyboard shortcuts"
           title="Show keyboard shortcuts (?)"
-          className="cb-mono"
+          className="cb-mono cb-shortcuts-chip"
           style={{
             position: 'fixed',
             bottom: 16,

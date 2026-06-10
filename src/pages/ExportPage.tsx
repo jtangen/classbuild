@@ -1299,6 +1299,7 @@ function ChapterRow({
 }) {
   return (
     <article
+      className="cb-artifact-row"
       style={{
         display: 'grid',
         gridTemplateColumns: '90px 1fr auto',
@@ -1392,6 +1393,7 @@ function ChapterRowEmpty({
 }) {
   return (
     <article
+      className="cb-artifact-row"
       style={{
         display: 'grid',
         gridTemplateColumns: '90px 1fr auto',

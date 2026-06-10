@@ -406,6 +406,64 @@
     padding: 0 18px !important;
     gap: 14px !important;
   }
+  /* Stage strip: five compact, centred cells — labels only, status via the
+     check mark + current-cell tint; the italic sub-line needs more room
+     than a phone has. */
+  .cb-stage-cell {
+    padding: 10px 2px !important;
+    align-items: center !important;
+  }
+  .cb-stage-label {
+    font-size: 12px !important;
+  }
+  .cb-stage-sub {
+    display: none !important;
+  }
+  /* Page banners (Syllabus/Build): title above, actions wrapping below. */
+  .cb-page-head {
+    grid-template-columns: 1fr !important;
+    align-items: start !important;
+    gap: 14px !important;
+  }
+  /* Build tab strip: one swipeable row, scrolling inside its own bar. */
+  .cb-build-tabs {
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .cb-build-tabs::-webkit-scrollbar {
+    display: none;
+  }
+  .cb-build-tabs button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  /* Pill/choice grids (audience tiles, what-comes-next): two-up beats five
+     mid-word-clipped slivers. Starter-brief cards stack outright. */
+  .cb-pill-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .cb-starter-grid {
+    grid-template-columns: 1fr !important;
+  }
+  /* Export: theme cards two-up (the preview chip clips at three-up);
+     artifact rows let the class label take natural width so titles breathe. */
+  .cb-theme-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+  .cb-artifact-row {
+    grid-template-columns: auto minmax(0, 1fr) !important;
+    gap: 6px 12px !important;
+  }
+  .cb-artifact-row > :last-child {
+    grid-column: 1 / -1;
+  }
+  /* Keyboard-shortcut affordance is meaningless on touch — and it floats
+     over content at phone sizes. */
+  .cb-shortcuts-chip {
+    display: none !important;
+  }
 }
 
 /* Folio — foot rule + centred italic page number. */

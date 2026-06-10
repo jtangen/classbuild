@@ -79,11 +79,12 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
       </div>
 
       <div
+        className="cb-theme-grid"
         style={{
           display: 'grid',
           // Six themes, two symmetric rows of three. Forced — auto-fit would
           // pack 4 onto row 1 at the page's typical width and leave the
-          // final two stranded on row 2.
+          // final two stranded on row 2. (Phones drop to 2×3 via .cb-theme-grid.)
           gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
           gap: 14,
         }}
@@ -160,6 +161,7 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
                     justifyContent: 'space-between',
                     marginBottom: 3,
                     gap: 6,
+                    flexWrap: 'wrap',
                   }}
                 >
                   <span
@@ -188,6 +190,8 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
                       letterSpacing: '0.12em',
                       textTransform: 'uppercase',
                       color: 'var(--cb-text-muted)',
+                      whiteSpace: 'nowrap',
+                      flexShrink: 0,
                     }}
                     aria-label={`Preview full chapter in ${t.name}`}
                   >

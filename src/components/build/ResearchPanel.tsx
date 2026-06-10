@@ -81,6 +81,7 @@ export function ResearchPanel({ chapterNum }: ResearchPanelProps) {
           textDecoration: 'underline',
           textDecorationThickness: '0.5px',
           textUnderlineOffset: 3,
+          whiteSpace: 'nowrap',
         }}
       >
         view dossier ↗

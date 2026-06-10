@@ -16,9 +16,12 @@ export function StageIndicator() {
 
   return (
     <div
+      className="cb-stage-strip"
       style={{
         display: 'grid',
-        gridTemplateColumns: `repeat(${STAGES.length}, 1fr)`,
+        // minmax(0,1fr) lets cells shrink below their label's min-content
+        // width — without it the five labels force ~514px on a phone.
+        gridTemplateColumns: `repeat(${STAGES.length}, minmax(0, 1fr))`,
         borderTop: '0.5px solid var(--cb-border-rule)',
         borderBottom: '0.5px solid var(--cb-border-rule)',
         background: 'var(--cb-ground-page)',
@@ -53,12 +56,13 @@ export function StageIndicator() {
             type="button"
             onClick={() => isClickable && navigate(stage.path)}
             disabled={!isClickable}
-            className="cb-focus"
+            className="cb-focus cb-stage-cell"
             style={{
               display: 'flex',
               flexDirection: 'column',
               gap: 2,
               padding: '14px 22px',
+              minWidth: 0,
               borderLeft:
                 i === 0 ? 'none' : '0.5px solid var(--cb-border-default)',
               background:
@@ -80,6 +84,7 @@ export function StageIndicator() {
             }}
           >
             <span
+              className="cb-stage-label"
               style={{
                 fontSize: 15.5,
                 fontWeight: state === 'current' ? 500 : 400,
@@ -113,7 +118,7 @@ export function StageIndicator() {
               {stage.label}
             </span>
             <span
-              className="cb-italic"
+              className="cb-italic cb-stage-sub"
               style={{
                 fontSize: 13,
                 color:

@@ -422,6 +422,7 @@ function PageHeader({
 
   return (
     <header
+      className="cb-page-head"
       style={{
         display: 'grid',
         gridTemplateColumns: '1fr auto',
@@ -478,7 +479,10 @@ function PageHeader({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'baseline' }}>
+      <div
+        className="cb-page-head-actions"
+        style={{ display: 'flex', gap: 10, flexShrink: 0, alignItems: 'baseline', flexWrap: 'wrap' }}
+      >
         {showSkip && (
           <CodexButton variant="ghost" size="sm" onClick={onSkip}>
             Skip research
