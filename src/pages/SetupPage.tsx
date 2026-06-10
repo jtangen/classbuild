@@ -4,6 +4,7 @@ import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
 import { MODELS } from '../services/claude/client';
+import { STAGES } from '../types/course';
 import type {
   CourseSetup,
   EducationLevel,
@@ -106,7 +107,7 @@ const STARTER_BRIEFS: StarterBrief[] = [
 
 export function SetupPage() {
   const navigate = useNavigate();
-  const { setup, updateSetup, setStage, completeStage, resetDownstream, syllabus, chapters } = useCourseStore();
+  const { setup, updateSetup, setStage, completeStage, resetDownstream, syllabus, chapters, currentStage } = useCourseStore();
   const { claudeApiKey, claudeKeyValid } = useApiStore();
   const {
     openKeysOnNextSetupVisit,
@@ -162,6 +163,12 @@ export function SetupPage() {
   const canProceed = hasTopic && hasApiKey;
   // Anything downstream that "Begin" would wipe.
   const hasDownstream = !!syllabus || chapters.length > 0;
+  // The stage the course is actually at — when the user steps back here
+  // mid-journey (even while a syllabus is still drafting), offer a plain
+  // "go back" that doesn't touch anything. Begin stays the reset path.
+  const journeyStage = STAGES.find((s) => s.id === currentStage);
+  const showBackToCourse =
+    currentStage !== 'landing' && currentStage !== 'setup' && !!journeyStage;
 
   const doGenerate = () => {
     resetDownstream();
@@ -172,7 +179,10 @@ export function SetupPage() {
 
   const handleGenerate = () => {
     // Beginning again replaces the course in progress — confirm first.
-    if (hasDownstream) setShowBeginConfirm(true);
+    // showBackToCourse also catches a syllabus that's still mid-draft
+    // (store stage advanced, syllabus not yet parsed): without it, Begin
+    // would silently start a second generation over the running one.
+    if (hasDownstream || showBackToCourse) setShowBeginConfirm(true);
     else doGenerate();
   };
 
@@ -489,6 +499,15 @@ export function SetupPage() {
             >
               {helperLine}
             </span>
+            {showBackToCourse && (
+              <CodexButton
+                variant="ghost"
+                size="lg"
+                onClick={() => navigate(journeyStage!.path)}
+              >
+                ← Back to {journeyStage!.label}
+              </CodexButton>
+            )}
             {(!hasApiKey || claudeKeyValid === false) && (
               <CodexButton
                 variant="secondary"
@@ -504,7 +523,7 @@ export function SetupPage() {
               disabled={!canProceed}
               onClick={handleGenerate}
             >
-              Begin · Syllabus →
+              {showBackToCourse ? 'Begin again · Syllabus →' : 'Begin · Syllabus →'}
             </CodexButton>
           </div>
 

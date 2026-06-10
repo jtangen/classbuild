@@ -13,6 +13,11 @@ export function StageIndicator() {
   const routeStage = STAGES.find((s) => s.path === location.pathname)?.id;
   const effectiveCurrent = routeStage ?? currentStage;
   const currentIndex = STAGES.findIndex((s) => s.id === effectiveCurrent);
+  // The journey's high-water mark from the store. The route decides which
+  // cell reads "— here —", but anything the flow has already reached stays
+  // clickable — otherwise stepping back to Setup while a syllabus drafts
+  // strands you with no way back except the destructive Begin button.
+  const storeIndex = STAGES.findIndex((s) => s.id === currentStage);
 
   return (
     <div
@@ -35,9 +40,13 @@ export function StageIndicator() {
         const isOnThisPage = location.pathname === stage.path;
         const isUnlockedByContent =
           hasChapters && (stage.id === 'build' || stage.id === 'export');
+        const isReached = storeIndex >= 0 && i <= storeIndex;
         const isClickable =
           !isOnThisPage &&
-          (isComplete || isPast || isCurrent || isUnlockedByContent);
+          (isComplete || isPast || isCurrent || isUnlockedByContent || isReached);
+        // The stage the flow is actually at, viewed from another page —
+        // e.g. a syllabus drafting in the background while you re-read Setup.
+        const isReturnTarget = stage.id === currentStage && !isCurrent;
 
         const state: 'done' | 'current' | 'upcoming' = isCurrent
           ? 'current'
@@ -46,7 +55,7 @@ export function StageIndicator() {
           : 'upcoming';
 
         const labelColor =
-          state === 'upcoming'
+          state === 'upcoming' && !isReached
             ? 'var(--cb-text-subtle)'
             : 'var(--cb-text-default)';
 
@@ -122,7 +131,7 @@ export function StageIndicator() {
               style={{
                 fontSize: 13,
                 color:
-                  state === 'current'
+                  state === 'current' || isReturnTarget
                     ? 'var(--cb-accent-emphasis)'
                     : 'var(--cb-text-muted)',
               }}
@@ -133,6 +142,8 @@ export function StageIndicator() {
                   : 'done'
                 : state === 'current'
                 ? '— here —'
+                : isReturnTarget
+                ? '↵ return'
                 : 'awaiting'}
             </span>
           </button>
