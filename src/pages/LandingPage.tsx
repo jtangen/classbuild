@@ -323,8 +323,9 @@ export function LandingPage() {
       }}
     >
       {/* ── Hero ─────────────────────────────────────────────── */}
-      <section style={{ padding: '88px 0 72px' }}>
+      <section className="cb-land-hero-section" style={{ padding: '88px 0 72px' }}>
         <div
+          className="cb-land-hero"
           style={{
             maxWidth: 1100,
             margin: '0 auto',
@@ -348,7 +349,8 @@ export function LandingPage() {
             <h1
               style={{
                 margin: '16px 0 0',
-                fontSize: 96,
+                // Fluid: 46px on a phone, the full 96px from ~1060px up.
+                fontSize: 'clamp(46px, 4vw + 31px, 96px)',
                 lineHeight: 1.0,
                 fontWeight: 400,
                 fontVariationSettings: '"opsz" 72',
@@ -369,7 +371,7 @@ export function LandingPage() {
               style={{
                 margin: '22px 0 0',
                 maxWidth: 620,
-                fontSize: 20,
+                fontSize: 'clamp(17px, 0.5vw + 15px, 20px)',
                 lineHeight: 1.6,
                 color: 'var(--cb-text-default)',
               }}
@@ -467,6 +469,7 @@ export function LandingPage() {
       {/* ── § How it works ───────────────────────────────────── */}
       <Section kicker="How it works" sub="brief, draft, edit.">
         <div
+          className="cb-land-grid-3steps"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, 1fr)',
@@ -525,6 +528,7 @@ export function LandingPage() {
         sub="six courses drafted by ClassBuild itself, lightly edited."
       >
         <div
+          className="cb-land-grid-courses"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(2, 1fr)',
@@ -547,6 +551,7 @@ export function LandingPage() {
           {principles.map((p, i) => (
             <li
               key={p.label}
+              className="cb-land-principle"
               style={{
                 display: 'grid',
                 gridTemplateColumns: '32px 140px 1fr',
@@ -578,6 +583,7 @@ export function LandingPage() {
                 {p.label}
               </span>
               <span
+                className="cb-land-principle-desc"
                 style={{
                   fontSize: 17,
                   lineHeight: 1.55,
@@ -597,6 +603,7 @@ export function LandingPage() {
         sub="seven artifacts per chapter — download individually or as a bundle."
       >
         <div
+          className="cb-land-grid-deliv"
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(3, 1fr)',
@@ -670,6 +677,7 @@ export function LandingPage() {
         sub="same generator, scripted."
       >
         <div
+          className="cb-land-grid-cli"
           style={{
             display: 'grid',
             gridTemplateColumns: '1fr 1fr',
@@ -739,6 +747,7 @@ export function LandingPage() {
         }}
       >
         <div
+          className="cb-land-cta-row"
           style={{
             maxWidth: 1100,
             margin: '0 auto',
@@ -761,6 +770,7 @@ export function LandingPage() {
         }}
       >
         <div
+          className="cb-land-footer"
           style={{
             maxWidth: 1100,
             margin: '0 auto',
@@ -769,7 +779,7 @@ export function LandingPage() {
             gap: 32,
           }}
         >
-          <div>
+          <div className="cb-land-footer-brand">
             <div
               className="cb-italic"
               style={{
@@ -959,9 +969,12 @@ function Section({
   return (
     <section
       id={id}
+      className="cb-land-section"
       style={{
         padding: '64px 0',
         borderTop: '0.5px solid var(--cb-border-rule)',
+        // Anchored scrolls (#examples) land below the fixed header.
+        scrollMarginTop: 76,
       }}
     >
       <div style={{ maxWidth: 1100, margin: '0 auto' }}>
@@ -980,7 +993,8 @@ function Section({
           style={{
             display: 'flex',
             alignItems: 'baseline',
-            gap: 14,
+            gap: '4px 14px',
+            flexWrap: 'wrap',
             paddingBottom: 14,
             marginBottom: 24,
             borderBottom: '0.5px solid var(--cb-border-rule)',
@@ -992,6 +1006,7 @@ function Section({
               fontSize: 14.5,
               color: 'var(--cb-accent-emphasis)',
               letterSpacing: '0.16em',
+              whiteSpace: 'nowrap',
             }}
           >
             {kicker}
@@ -1327,6 +1342,9 @@ function CourseCard({ course }: { course: ExampleCourse }) {
               textDecoration: 'underline',
               textDecorationThickness: '0.5px',
               textUnderlineOffset: 3,
+              // Generous tap target on touch screens.
+              padding: '8px 0',
+              display: 'inline-block',
             }}
           >
             Explore course ↗
@@ -1338,7 +1356,7 @@ function CourseCard({ course }: { course: ExampleCourse }) {
             style={{
               background: 'transparent',
               border: 0,
-              padding: 0,
+              padding: '8px 0',
               cursor: 'pointer',
               fontFamily: 'inherit',
               fontSize: 14.5,
@@ -1379,6 +1397,7 @@ function CourseCard({ course }: { course: ExampleCourse }) {
                 The brief
               </div>
               <dl
+                className="cb-land-brief-dl"
                 style={{
                   margin: 0,
                   display: 'grid',

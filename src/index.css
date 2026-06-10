@@ -206,6 +206,9 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
+    /* Anchored links (e.g. landing "See example courses ↓") glide; the
+       prefers-reduced-motion block below restores instant jumps. */
+    scroll-behavior: smooth;
   }
 
   body {
@@ -322,6 +325,86 @@
 @media (max-width: 640px) {
   .cb-build-content {
     padding: 14px 12px !important;
+  }
+}
+
+/* ── Landing page reflow ───────────────────────────────────────────────
+ * The landing markup is inline-styled for the 1100px reading column;
+ * these rules restack its grids on the way down. Wide → narrow:
+ * hero panel drops below the hero copy, three-up rows become two then
+ * one, the footer collapses, and section rhythm tightens. */
+@media (max-width: 1020px) {
+  .cb-land-hero {
+    grid-template-columns: 1fr !important;
+    gap: 40px !important;
+    align-items: start !important;
+  }
+  /* Stacked hero panel shouldn't stretch to the full reading column. */
+  .cb-land-hero aside {
+    max-width: 520px;
+  }
+  .cb-land-grid-deliv {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+  .cb-land-footer {
+    grid-template-columns: 1fr 1fr !important;
+    row-gap: 28px !important;
+  }
+  .cb-land-footer-brand {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 860px) {
+  .cb-land-grid-cli {
+    grid-template-columns: 1fr !important;
+    gap: 20px !important;
+  }
+  .cb-land-grid-3steps {
+    grid-template-columns: 1fr !important;
+    gap: 28px !important;
+  }
+}
+
+/* Course cards hold two-up down to small-tablet width — they're designed
+ * narrow — and go single-column only on phones. */
+@media (max-width: 640px) {
+  .cb-land-grid-courses {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 720px) {
+  .cb-land-hero-section {
+    padding: 40px 0 44px !important;
+  }
+  .cb-land-section {
+    padding: 44px 0 !important;
+  }
+  .cb-land-cta-row {
+    justify-content: center !important;
+  }
+  .cb-land-grid-deliv {
+    grid-template-columns: 1fr !important;
+  }
+  /* Principle rows: numeral + label on one line, description beneath. */
+  .cb-land-principle {
+    grid-template-columns: 28px 1fr !important;
+    gap: 4px 12px !important;
+  }
+  .cb-land-principle-desc {
+    grid-column: 2;
+  }
+  .cb-land-footer {
+    grid-template-columns: 1fr !important;
+    row-gap: 24px !important;
+  }
+  .cb-land-brief-dl {
+    grid-template-columns: 100px 1fr !important;
+  }
+  .cb-header-inner {
+    padding: 0 18px !important;
+    gap: 14px !important;
   }
 }
 
