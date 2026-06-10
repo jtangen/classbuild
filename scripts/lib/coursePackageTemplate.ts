@@ -532,6 +532,16 @@ export function buildCoursePackageHtml(
       box-shadow: var(--card-hover-shadow);
     }
 
+    .slide-thumb {
+      display: block;
+      width: 100%;
+      height: auto;
+      margin: 0.85rem 0 0.25rem;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--card);
+    }
+
     .card-num {
       display: inline-flex;
       align-items: center;
@@ -948,6 +958,7 @@ export function buildCoursePackageHtml(
           var html = '<div class="tab-content' + (tabs[0] && tabs[0].id === 'slides' ? ' active' : '') + '" data-tab-content="slides"><div class="card-list">';
           ch.slides.forEach(function(s, i) {
             html += '<div class="card"><span class="card-num">' + (i + 1) + '</span><h3>' + esc(s.title) + '</h3>';
+            html += '<img class="slide-thumb" loading="lazy" alt="" src="slides/ch' + (ch.number < 10 ? '0' : '') + ch.number + '/slide-' + ((i + 1) < 10 ? '0' : '') + (i + 1) + '.jpg" onerror="this.style.display=\\'none\\'">';
             if (s.layout) html += '<span class="badge">' + s.layout + '</span>';
             if (s.bodyText) html += '<p style="margin-top:0.5rem;font-weight:500">' + esc(s.bodyText) + '</p>';
             if (s.bullets && s.bullets.length > 0) {
