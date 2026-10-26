@@ -64,7 +64,7 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
   letter-spacing: 0.04em;
-  color: #6a7888;
+  color: #86919e;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -92,7 +92,7 @@
   background: #0d1117;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10px;
-  color: #6a7888;
+  color: #86919e;
   padding: 0 6px;
 }
 .theme-terminal .ch-dropcap {
@@ -218,7 +218,7 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
   letter-spacing: 0.08em;
-  color: #6a7888;
+  color: #86919e;
 }
 .theme-terminal .ch-widget-title {
   font-family: 'JetBrains Mono', monospace;
@@ -233,7 +233,7 @@
   font-size: 13px;
   font-family: 'JetBrains Mono', monospace;
 }
-.theme-terminal .ch-widget-sub::before { content: '// '; color: #6a7888; }
+.theme-terminal .ch-widget-sub::before { content: '// '; color: #86919e; }
 .theme-terminal .ch-widget-row {
   display: flex; gap: 14px; margin: 0 18px 16px; padding: 0;
 }
@@ -248,7 +248,7 @@
 .theme-terminal .ch-widget-fieldlabel::before { content: '--'; }
 .theme-terminal .ch-widget-select {
   background: #0d1117;
-  border: 1px solid #2a3a4a;
+  border: 1px solid #5c6875;
   padding: 7px 10px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 13px;
@@ -328,7 +328,7 @@
   position: absolute; bottom: 10px; left: 12px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
-  color: #6a7888;
+  color: #86919e;
   background: #0d1117;
   padding: 2px 8px;
   border: 1px solid #2a3a4a;
@@ -369,7 +369,7 @@
   font-family: 'JetBrains Mono', monospace;
   font-style: normal;
   font-size: 10.5px;
-  color: #6a7888;
+  color: #86919e;
 }
 .theme-terminal .ch-quote cite::before { content: '— '; }
 
@@ -450,7 +450,7 @@
 .theme-terminal .ch-refs h2 {
   font-family: 'JetBrains Mono', monospace;
   font-size: 12px;
-  color: #6a7888;
+  color: #86919e;
   margin: 0 0 10px;
   font-weight: 400;
 }
@@ -475,7 +475,7 @@
   justify-content: space-between;
   font-family: 'JetBrains Mono', monospace;
   font-size: 10.5px;
-  color: #6a7888;
+  color: #86919e;
 }
 .theme-terminal .ch-foot-mark {
   color: #6ee7b7;

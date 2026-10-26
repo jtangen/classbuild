@@ -47,7 +47,7 @@
   font-size: 14px;
   letter-spacing: 0.3em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
   margin-bottom: 14px;
   font-weight: 500;
 }
@@ -83,7 +83,7 @@
   font-size: 13px;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -144,7 +144,7 @@
   letter-spacing: 0.2em;
   text-transform: uppercase;
   margin: 22px 0 8px;
-  color: #5e7148;
+  color: #576943;
 }
 
 /* KEY TERMS */
@@ -153,7 +153,7 @@
   font-style: italic;
   font-weight: 600;
   font-size: 16px;
-  color: #5e7148;
+  color: #576943;
 }
 
 /* CALLOUT */
@@ -181,7 +181,7 @@
   font-size: 14px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
   margin-bottom: 6px;
   font-weight: 600;
 }
@@ -222,7 +222,7 @@
   font-size: 12px;
   letter-spacing: 0.24em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
   display: block;
   margin-bottom: 4px;
 }
@@ -300,11 +300,11 @@
   font-weight: 600;
   text-align: right;
   font-size: 14px;
-  color: #b8662a;
+  color: #9b5623;
 }
 .theme-almanac .ch-widget-btn {
   background: transparent;
-  color: #b8662a;
+  color: #9b5623;
   border: 1px solid #b8662a;
   font-family: 'Cormorant Garamond', serif;
   font-style: italic;
@@ -314,7 +314,7 @@
   cursor: pointer;
 }
 .theme-almanac .ch-widget-btn:hover {
-  background: #b8662a;
+  background: #9b5623;
   color: #f0e6cf;
 }
 
@@ -360,7 +360,7 @@
   font-style: italic;
   font-weight: 600;
   font-size: 13px;
-  color: #b8662a;
+  color: #9b5623;
   margin-right: 6px;
 }
 
@@ -395,7 +395,7 @@
   font-size: 12.5px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
 }
 .theme-almanac .ch-quote cite::before { content: '— '; }
 
@@ -458,7 +458,7 @@
   font-size: 13px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #5e7148;
+  color: #576943;
   margin-bottom: 8px;
   font-weight: 600;
 }
@@ -483,7 +483,7 @@
   font-size: 14px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #b8662a;
+  color: #9b5623;
   margin: 0 0 10px;
   font-weight: 600;
   text-align: center;
