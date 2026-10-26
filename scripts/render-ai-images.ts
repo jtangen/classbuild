@@ -8,13 +8,16 @@
  * course package, and the inline data URI versions blow chapter files past
  * 1 MB once we have two or three figures.
  *
- *   OPENAI_API_KEY=sk-… npx tsx scripts/render-ai-images.ts \
+ *   npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/render-ai-images.ts \
  *     output/science-and-art-of-tea/chapters-press/01_one-leaf-a-thousand-mountains.html
  *
- * Run with --dry to see what it would do without spending money.
+ * (OPENAI_API_KEY comes from .env.local.) Run with --dry to see what it would
+ * do without spending money. Already-rendered figures are left alone, so a
+ * re-run only retries the failed ones; the exit code is 1 if any failed.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { writeFileAtomic } from './lib/write-atomic';
 
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
 const MODEL = 'gpt-image-2';
@@ -34,28 +37,47 @@ interface Placeholder {
   prompt: string;
   aspect: string;
   caption: string;
-  imageIdx?: string; // when set, output filename uses this idx instead of document order
+  imageIdx?: string; // image slot: output file is ch<NN>-fig<idx+1>.jpg
 }
 
 function findPlaceholders(html: string): Placeholder[] {
-  const re = /<figure\b[^>]*\bclass="ai-image"[^>]*>([\s\S]*?)<\/figure>/gi;
+  // Walk every prompt-carrying figure (rendered ch-figure or ai-image
+  // placeholder) in document order, the same set rewrite-image-prompts.ts
+  // indexes. A placeholder without data-image-idx gets its document slot,
+  // skipping any slot another figure already owns. (Numbering it by position
+  // among the *remaining* placeholders made a re-run after a partial failure
+  // overwrite an earlier figure's image.)
+  const re = /<figure\b[^>]*\bclass="(?:ai-image|ch-figure)(?:[^"]*)?"[^>]*>([\s\S]*?)<\/figure>/gi;
   const out: Placeholder[] = [];
+  const taken = new Set<number>();
+  const unnumbered: Array<{ p: Placeholder; slot: number }> = [];
+  let slot = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const full = m[0];
-    const inner = m[1];
     const promptM = /data-prompt="([^"]+)"/i.exec(full);
-    const aspectM = /data-aspect="([^"]+)"/i.exec(full);
-    const capM = /<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i.exec(inner);
-    const idxM = /data-image-idx="([^"]+)"/i.exec(full);
     if (!promptM) continue;
-    out.push({
+    const pos = slot++;
+    const idxM = /data-image-idx="([^"]+)"/i.exec(full);
+    if (idxM) taken.add(parseInt(idxM[1], 10));
+    if (!/^<figure\b[^>]*\bclass="ai-image"/i.test(full)) continue; // already rendered
+    const aspectM = /data-aspect="([^"]+)"/i.exec(full);
+    const capM = /<figcaption[^>]*>([\s\S]*?)<\/figcaption>/i.exec(m[1]);
+    const p: Placeholder = {
       full,
       prompt: decodeAttr(promptM[1]),
       aspect: (aspectM?.[1] ?? 'landscape').toLowerCase(),
       caption: capM ? capM[1].trim() : '',
       imageIdx: idxM ? idxM[1] : undefined,
-    });
+    };
+    out.push(p);
+    if (!idxM) unnumbered.push({ p, slot: pos });
+  }
+  for (const { p, slot: start } of unnumbered) {
+    let idx = start;
+    while (taken.has(idx)) idx++;
+    taken.add(idx);
+    p.imageIdx = String(idx);
   }
   return out;
 }
@@ -120,12 +142,12 @@ async function main() {
   const dry = args.includes('--dry');
   const htmlPath = args.find((a) => !a.startsWith('-'));
   if (!htmlPath) {
-    console.error('usage: tsx render-ai-images.ts <chapter.html> [--dry]');
+    console.error('usage: npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/render-ai-images.ts <chapter.html> [--dry]');
     process.exit(2);
   }
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey && !dry) {
-    console.error('OPENAI_API_KEY not set');
+    console.error('OPENAI_API_KEY not set. Put it in .env.local and run with --env-file=.env.local');
     process.exit(2);
   }
 
@@ -144,10 +166,11 @@ async function main() {
   await fs.mkdir(imgDir, { recursive: true });
 
   let out = html;
+  let failed = 0;
   for (let i = 0; i < placeholders.length; i++) {
     const p = placeholders[i];
-    // Prefer data-image-idx for filename numbering (so partial re-renders
-    // preserve their original ch01-fig02.jpg slot). Fall back to document order.
+    // Number by the figure's image slot (data-image-idx, or the document slot
+    // findPlaceholders assigned), so re-renders keep their ch01-fig02.jpg file.
     const figNum = p.imageIdx !== undefined ? parseInt(p.imageIdx, 10) + 1 : i + 1;
     const filename = `ch${chapterStem}-fig${String(figNum).padStart(2, '0')}.jpg`;
     const filePath = path.join(imgDir, filename);
@@ -163,13 +186,14 @@ async function main() {
     const t0 = Date.now();
     try {
       const buf = await renderImage(p.prompt, p.aspect, apiKey!);
-      await fs.writeFile(filePath, buf);
+      await writeFileAtomic(filePath, buf);
       const kb = (buf.length / 1024).toFixed(0);
       const secs = ((Date.now() - t0) / 1000).toFixed(1);
       console.log(`  ✓ ${kb} KB in ${secs}s`);
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`  ✗ ${msg}`);
+      failed++;
       continue;
     }
 
@@ -182,12 +206,17 @@ async function main() {
       `</div>` +
       (cleanCaption ? `<figcaption><span class="ch-fig-num">Fig. ${figNum}</span> ${cleanCaption}</figcaption>` : '') +
       `</figure>`;
-    out = out.replace(p.full, replacement);
+    // Function replacement: "$&", "$'" etc. in prompts/captions stay literal.
+    out = out.replace(p.full, () => replacement);
   }
 
-  if (!dry) {
-    await fs.writeFile(abs, out, 'utf8');
+  if (!dry && out !== html) {
+    await writeFileAtomic(abs, out);
     console.log(`\nWrote patched HTML: ${abs}`);
+  }
+  if (failed > 0) {
+    console.error(`\n${failed} of ${placeholders.length} figure(s) failed; re-run to retry them.`);
+    process.exitCode = 1;
   }
 }
 

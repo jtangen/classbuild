@@ -3,11 +3,12 @@
  * Test script for the weekly challenge template.
  * Generates a sample HTML file from hardcoded data — no API calls.
  *
- * Usage:  npx tsx scripts/test-weekly-challenge.ts
+ * Usage:  npx tsx --import ./scripts/raw-loader.mjs scripts/test-weekly-challenge.ts
  * Then:   open output/test-challenge.html
  */
 import { writeFile, mkdir } from 'node:fs/promises';
 import { buildWeeklyChallengeHtml } from '../src/templates/weeklyChallengeTemplate';
+import { CHAPTER_THEMES } from '../src/themes';
 import type { WeeklyChallengeData } from '../src/types/course';
 
 const SAMPLE_DATA: WeeklyChallengeData = {
@@ -312,9 +313,8 @@ const SAMPLE_DATA: WeeklyChallengeData = {
 async function main() {
   await mkdir('output', { recursive: true });
 
-  // Test with each theme
-  const themes = ['midnight', 'classic', 'ocean', 'warm'];
-  for (const theme of themes) {
+  // Test with each chapter theme (press, notebook, almanac, …)
+  for (const { id: theme } of CHAPTER_THEMES) {
     const html = buildWeeklyChallengeHtml(
       `Week 4 Challenge — Memory and Forgetting`,
       SAMPLE_DATA,
@@ -336,4 +336,7 @@ async function main() {
   console.log('\nOpen in browser:  open output/test-challenge.html');
 }
 
-main().catch(console.error);
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

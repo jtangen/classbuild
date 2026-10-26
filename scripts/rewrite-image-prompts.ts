@@ -8,13 +8,15 @@
  * don't burn API credits); this script just applies them deterministically and
  * leaves a recoverable backup.
  *
- *   npx tsx --env-file=.env.local scripts/rewrite-image-prompts.ts \
+ *   npx tsx --import ./scripts/raw-loader.mjs scripts/rewrite-image-prompts.ts \
  *     output/raising-a-puppy/chapters-almanac/01_before-they-arrive.html \
  *     --rewrites tmp/rewrites/puppy-ch01.json
  *
- *   npx tsx --env-file=.env.local scripts/rewrite-image-prompts.ts \
+ *   npx tsx --import ./scripts/raw-loader.mjs scripts/rewrite-image-prompts.ts \
  *     output/raising-a-puppy/slides-almanac/01_slides.json \
  *     --rewrites tmp/rewrites/puppy-slides-01.json
+ *
+ * (No API keys needed.)
  *
  * SIDECAR FORMAT for chapter HTML — value is either a string (just the new
  * data-prompt) or an object {prompt, caption} when the figcaption text also
@@ -181,7 +183,9 @@ async function processChapter(filePath: string, rewrites: Record<string, Rewrite
       console.log(`        BEFORE caption: ${fig.caption.slice(0, 140)}${fig.caption.length > 140 ? '…' : ''}`);
       console.log(`        AFTER  caption: ${nextCaption.slice(0, 140)}${nextCaption.length > 140 ? '…' : ''}`);
     }
-    out = out.replace(fig.full, buildPlaceholder(unpacked.prompt, fig.aspect, nextCaption, fig.imageIdx ?? String(i)));
+    // Function replacement: "$&", "$'" etc. in the new prompt/caption stay literal.
+    const placeholder = buildPlaceholder(unpacked.prompt, fig.aspect, nextCaption, fig.imageIdx ?? String(i));
+    out = out.replace(fig.full, () => placeholder);
     touched += 1;
   }
 
@@ -250,7 +254,7 @@ async function processSlides(filePath: string, rewrites: Record<string, RewriteV
 async function main() {
   const { target, opts } = parseArgs(process.argv.slice(2));
   if (!target || !opts.rewritesPath) {
-    console.error('usage: tsx rewrite-image-prompts.ts <file.html|file.json> --rewrites <rewrites.json> [--dry]');
+    console.error('usage: npx tsx --import ./scripts/raw-loader.mjs scripts/rewrite-image-prompts.ts <file.html|file.json> --rewrites <rewrites.json> [--dry]');
     process.exit(2);
   }
   const abs = path.resolve(target);

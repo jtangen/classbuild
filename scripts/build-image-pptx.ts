@@ -7,14 +7,16 @@
  * image plus the AI-written speaker notes. It does NOT call OpenAI; it reuses
  * the rendered JPEGs, so it's fast and free.
  *
- *   npx tsx scripts/build-image-pptx.ts \
+ *   npx tsx --import ./scripts/raw-loader.mjs scripts/build-image-pptx.ts \
  *     output/game-theory/slides-terminal/01_slides.json
  *
  * Image dir is inferred as <slides-dir>/img/ch<NN>/slide-<MM>.jpg.
  * Output .pptx is written next to the JSON: <NN>_slides.pptx.
  */
 import fs from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import PptxGenJS from 'pptxgenjs';
 
 interface Slide {
@@ -36,7 +38,14 @@ async function fileToDataUri(p: string): Promise<string | null> {
   }
 }
 
-export async function buildImagePptx(jsonPath: string): Promise<string> {
+export interface ImageDeckResult {
+  outPath: string;
+  slides: number;
+  /** Slides with no rendered image (written as a title-only text slide). */
+  missing: number;
+}
+
+export async function buildImagePptx(jsonPath: string): Promise<ImageDeckResult> {
   const abs = path.resolve(jsonPath);
   const slidesDir = path.dirname(abs);
   const stem = path.basename(abs, '.json').match(/^(\d+)/)?.[1] ?? '01';
@@ -73,12 +82,21 @@ export async function buildImagePptx(jsonPath: string): Promise<string> {
   const blob = await pptx.write({ outputType: 'nodebuffer' }) as Buffer;
   await fs.writeFile(outPath, blob);
   console.log(`✓ ${path.basename(outPath)} — ${withImg} image slides${missing ? `, ${missing} text-fallback` : ''} (${(blob.length / 1024).toFixed(0)} KB)`);
-  return outPath;
+  return { outPath, slides: slides.length, missing };
 }
 
 // CLI entry: only run when invoked directly, not when imported.
-if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(import.meta.url.replace('file://', ''))) {
+// fileURLToPath decodes the URL (spaces etc.); realpath evens out symlinked dirs.
+function isMainModule(): boolean {
+  try {
+    return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   const jsonPath = process.argv.slice(2).find((a) => !a.startsWith('-'));
-  if (!jsonPath) { console.error('usage: tsx build-image-pptx.ts <slides.json>'); process.exit(2); }
+  if (!jsonPath) { console.error('usage: npx tsx --import ./scripts/raw-loader.mjs scripts/build-image-pptx.ts <slides.json>'); process.exit(2); }
   buildImagePptx(jsonPath).catch((err) => { console.error(err); process.exit(1); });
 }

@@ -45,7 +45,9 @@ export async function generateImageNode(
     } catch {
       detail = await res.text().catch(() => '');
     }
-    throw new Error(`OpenAI image API ${res.status}: ${detail.slice(0, 300)}`);
+    const err = new Error(`OpenAI image API ${res.status}: ${detail.slice(0, 300)}`) as Error & { status?: number };
+    err.status = res.status;
+    throw err;
   }
 
   const json = (await res.json()) as ImageResponse;
@@ -56,5 +58,24 @@ export async function generateImageNode(
   return { base64: b64, mimeType: 'image/jpeg' };
 }
 
-/** Backwards-compat alias for the previous helper name. */
-export const generateInfographicNode = generateImageNode;
+/**
+ * generateImageNode with exponential backoff on 429 / 5xx / network errors
+ * (an error with no HTTP status means the request never completed).
+ */
+export async function generateImageNodeWithRetry(
+  prompt: string,
+  apiKey: string,
+  options: NodeImageOptions = {},
+  maxRetries = 2,
+): Promise<{ base64: string; mimeType: string }> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await generateImageNode(prompt, apiKey, options);
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      const transient = status === undefined || status === 429 || status >= 500;
+      if (!transient || attempt >= maxRetries) throw err;
+      await new Promise((r) => setTimeout(r, 4000 * Math.pow(2, attempt)));
+    }
+  }
+}

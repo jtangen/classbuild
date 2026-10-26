@@ -2,14 +2,17 @@
  * Render every slide imagePrompt in a slides.json file via OpenAI gpt-image-2
  * and write the JPEGs out as slide-NN.jpg into an adjacent ./img/ directory.
  *
- *   OPENAI_API_KEY=sk-… npx tsx scripts/render-slides.ts \
+ *   npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/render-slides.ts \
  *     output/science-and-art-of-tea/slides-new/01_slides.json
  *
- * --dry prints the prompts without spending money. --concurrency=N runs N
- * renders in flight at once (default 3 — OpenAI tolerates this politely).
+ * (OPENAI_API_KEY comes from .env.local.) --dry prints the prompts without
+ * spending money. --concurrency=N runs N renders in flight at once (default 3 —
+ * OpenAI tolerates this politely). --force re-renders slides that already have
+ * an image. The exit code is 1 if any slide failed.
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { writeFileAtomic } from './lib/write-atomic';
 
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
 const MODEL = 'gpt-image-2';
@@ -88,11 +91,14 @@ async function main() {
   const concurrency = concArg ? Math.max(1, Math.min(6, parseInt(concArg.split('=')[1], 10) || 3)) : 3;
   const jsonPath = args.find((a) => !a.startsWith('-'));
   if (!jsonPath) {
-    console.error('usage: tsx render-slides.ts <slides.json> [--dry] [--concurrency=N]');
+    console.error('usage: npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/render-slides.ts <slides.json> [--dry] [--force] [--concurrency=N]');
     process.exit(2);
   }
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey && !dry) { console.error('OPENAI_API_KEY not set'); process.exit(2); }
+  if (!apiKey && !dry) {
+    console.error('OPENAI_API_KEY not set. Put it in .env.local and run with --env-file=.env.local');
+    process.exit(2);
+  }
 
   const abs = path.resolve(jsonPath);
   const slides = JSON.parse(await fs.readFile(abs, 'utf8')) as Slide[];
@@ -105,6 +111,7 @@ async function main() {
 
   const t0 = Date.now();
   let done = 0;
+  let failed = 0;
 
   const tasks = slides.map((slide, i) => async () => {
     const n = String(i + 1).padStart(2, '0');
@@ -114,8 +121,14 @@ async function main() {
       console.log(`[${i + 1}/${slides.length}] DRY · ${slide.title}`);
       return null;
     }
+    if (!slide.imagePrompt?.trim()) {
+      failed += 1;
+      console.error(`[${i + 1}/${slides.length}] ✗ ${slide.title} — no imagePrompt`);
+      return null;
+    }
     // Idempotent: if the file already exists and is non-empty, skip it
     // (unless --force was passed, e.g. to re-render after a prompt rewrite).
+    // Images are written via temp file + rename, so an existing file is complete.
     if (!force) {
       try {
         const st = await fs.stat(filePath);
@@ -129,7 +142,7 @@ async function main() {
     const slideStart = Date.now();
     try {
       const buf = await renderImage(slide.imagePrompt, apiKey!);
-      await fs.writeFile(filePath, buf);
+      await writeFileAtomic(filePath, buf);
       done += 1;
       const secs = ((Date.now() - slideStart) / 1000).toFixed(1);
       const kb = (buf.length / 1024).toFixed(0);
@@ -138,6 +151,7 @@ async function main() {
       return filename;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
+      failed += 1;
       console.error(`[${i + 1}/${slides.length}] ✗ ${slide.title} — ${msg}`);
       return null;
     }
@@ -147,6 +161,10 @@ async function main() {
 
   const totalMin = ((Date.now() - t0) / 60000).toFixed(1);
   console.log(`\nDone in ${totalMin} min · ${done}/${slides.length} successful`);
+  if (failed > 0) {
+    console.error(`${failed} slide(s) failed; re-run to retry them.`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((err) => { console.error(err); process.exit(1); });

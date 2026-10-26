@@ -4,15 +4,16 @@
  * from an existing output directory without regenerating anything.
  *
  * Usage:
- *   npx tsx scripts/publish-course.ts ./output/prejudice_v2 --theme midnight
+ *   npx tsx --import ./scripts/raw-loader.mjs scripts/publish-course.ts ./output/prejudice_v2 --theme press
  */
 
 import { parseArgs } from 'node:util';
 import { assemblePublishPackage } from './lib/publish';
+import { DEFAULT_CHAPTER_THEME_ID } from '../src/themes';
 
 const { values, positionals } = parseArgs({
   options: {
-    theme: { type: 'string', default: 'midnight' },
+    theme: { type: 'string', default: DEFAULT_CHAPTER_THEME_ID },
   },
   allowPositionals: true,
   strict: true,
@@ -21,7 +22,7 @@ const { values, positionals } = parseArgs({
 const outputDir = positionals[0];
 
 if (!outputDir) {
-  console.error('Usage: npx tsx scripts/publish-course.ts <output-dir> [--theme midnight]');
+  console.error(`Usage: npx tsx --import ./scripts/raw-loader.mjs scripts/publish-course.ts <output-dir> [--theme ${DEFAULT_CHAPTER_THEME_ID}]`);
   console.error('');
   console.error('Assembles a static publish/ website from existing CLI output.');
   process.exit(1);
@@ -32,7 +33,7 @@ async function main() {
   console.log(`Theme: ${values.theme}`);
   console.log('');
 
-  const publishDir = await assemblePublishPackage(outputDir, values.theme);
+  const { publishDir } = await assemblePublishPackage(outputDir, values.theme);
   console.log('');
   console.log(`Done! Open ${publishDir}/index.html in a browser to preview.`);
 }

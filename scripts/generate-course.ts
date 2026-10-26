@@ -7,22 +7,26 @@
  *   - Parallel material generation per chapter (quizzes + Sonnet tasks)
  *   - DOCX output for discussion, activities, transcript, research
  *   - No JSON output except course.json and syllabus.json
- *   - Gemini TTS audiobook synthesis, transcoded to MP3 via ffmpeg when available
+ *   - ElevenLabs TTS audiobook (MP3) when ELEVENLABS_API_KEY is set
  *   - --notes flag for learner notes (e.g. Australian perspective)
  *
+ * Keys are read from .env.local: ANTHROPIC_API_KEY (required), OPENAI_API_KEY
+ * (figures, infographics, slide images) and ELEVENLABS_API_KEY (audio).
+ *
  * Usage:
- *   ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
+ *   npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts \
  *     --topic "The Psychology of Prejudice" \
  *     --chapters 12 \
  *     --level advanced-undergrad \
  *     --notes "University of Queensland, Brisbane, Australia. Use international and Australian examples." \
  *     --output ./output/prejudice
+ *
+ * A failed step is logged and the run carries on, but the process exits 1.
  */
 
-import { writeFile, mkdir, readFile, unlink } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { parseArgs, promisify } from 'node:util';
-import { execFile } from 'node:child_process';
+import { parseArgs } from 'node:util';
 
 import { streamWithRetry } from '../src/services/claude/streaming';
 import { MODELS } from '../src/services/claude/client';
@@ -54,7 +58,8 @@ import { buildWeeklyChallengeHtml } from '../src/templates/weeklyChallengeTempla
 import { generateQuizDocPackage } from '../src/services/export/quizDocExporter';
 import { generatePptx } from '../src/services/export/pptxExporter';
 import { enrichDossier } from '../src/services/academic';
-import { generateInfographicNode } from './lib/node-image';
+import { generateImageNodeWithRetry } from './lib/node-image';
+import { writeFileAtomic } from './lib/write-atomic';
 import { buildDiscussionDocx, buildActivitiesDocx, buildTranscriptDocx, buildResearchDocx, buildSyllabusDocx } from './lib/docx-helpers';
 import { slugify, extractHtml, parseJson } from '../src/utils/format';
 import { renderChapterHtml } from '../src/themes';
@@ -70,8 +75,6 @@ import type {
   ChapterLength,
   WeeklyChallengeData,
 } from '../src/types/course';
-
-const execFileAsync = promisify(execFile);
 
 // ─── CLI Arg Parsing ──────────────────────────────────────────────
 
@@ -101,7 +104,7 @@ const { values } = parseArgs({
 if (!values.topic) {
   console.error('Error: --topic is required');
   console.error(
-    'Usage: ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts --topic "Your Topic" --chapters 12 --output ./output/dir'
+    'Usage: npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts --topic "Your Topic" --chapters 12 --output ./output/dir'
   );
   process.exit(1);
 }
@@ -111,7 +114,7 @@ const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 
 if (!ANTHROPIC_API_KEY) {
-  console.error('Error: ANTHROPIC_API_KEY environment variable is required');
+  console.error('Error: ANTHROPIC_API_KEY is required. Put it in .env.local and run with --env-file=.env.local');
   process.exit(1);
 }
 
@@ -150,11 +153,24 @@ async function ensureDir(dir: string) {
 
 async function save(filePath: string, content: string | Buffer) {
   await ensureDir(join(filePath, '..'));
-  await writeFile(filePath, content);
+  await writeFileAtomic(filePath, content);
 }
 
 function log(msg: string) {
   console.log(`[${new Date().toLocaleTimeString()}] ${msg}`);
+}
+
+function errMsg(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// Every failed step lands here. The run still finishes (partial output is
+// useful) but exits 1, so a wrapper script can tell it didn't fully succeed.
+const failures: string[] = [];
+
+function logFailure(msg: string) {
+  failures.push(msg.trim());
+  log(msg);
 }
 
 // ─── Concurrency helper ──────────────────────────────────────────
@@ -177,7 +193,7 @@ async function runWithConcurrency<T>(tasks: Task<T>[], limit: number): Promise<P
         results[idx] = { status: 'fulfilled', value };
       } catch (reason) {
         results[idx] = { status: 'rejected', reason };
-        log(`  [${task.label}] ERROR: ${reason instanceof Error ? reason.message : String(reason)}`);
+        logFailure(`  [${task.label}] ERROR: ${errMsg(reason)}`);
       }
     }
   }
@@ -185,25 +201,6 @@ async function runWithConcurrency<T>(tasks: Task<T>[], limit: number): Promise<P
   const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => worker());
   await Promise.all(workers);
   return results;
-}
-
-// ─── ffmpeg WAV → MP3 transcode ──────────────────────────────────
-
-/**
- * Transcode the given WAV file to MP3 and return the final file path.
- * Falls back to the source WAV if ffmpeg is not installed.
- */
-async function wavToMp3(wavPath: string): Promise<string> {
-  const mp3Path = wavPath.replace(/\.wav$/, '.mp3');
-  try {
-    await execFileAsync('ffmpeg', ['-y', '-i', wavPath, '-codec:a', 'libmp3lame', '-qscale:a', '2', mp3Path]);
-    await unlink(wavPath);
-    return mp3Path;
-  } catch {
-    log('    Warning: ffmpeg not available — keeping WAV (install ffmpeg for MP3 output)');
-    try { await unlink(mp3Path); } catch { /* ignore */ }
-    return wavPath;
-  }
 }
 
 // ─── Human-readable formatters ────────────────────────────────────
@@ -317,7 +314,12 @@ function formatSlidesMd(slides: SlideData[], chapterTitle: string): string {
       lines.push(`> ${s.bodyText}`);
       lines.push('');
     }
-    if (s.bullets.length > 0) {
+    // Image-driven decks carry an imagePrompt; bullets only exist on legacy decks.
+    if (s.imagePrompt) {
+      lines.push(`*Image prompt:* ${s.imagePrompt}`);
+      lines.push('');
+    }
+    if (s.bullets?.length) {
       s.bullets.forEach(b => lines.push(`- ${b}`));
       lines.push('');
     }
@@ -363,8 +365,8 @@ async function generatePracticeQuiz(
   try {
     const quizHtml = buildQuizHtml(ch.title, balancedQuiz, syllabus.courseTitle, setup.themeId);
     await save(join(OUTPUT_DIR, 'quizzes', `${prefix}_practice.html`), quizHtml);
-  } catch {
-    log(`    Ch ${prefix} Warning: Quiz HTML generation failed, markdown saved`);
+  } catch (err) {
+    logFailure(`    Ch ${prefix} Quiz HTML generation failed (markdown saved): ${errMsg(err)}`);
   }
   log(`    Ch ${prefix} Saved practice quiz`);
 }
@@ -405,7 +407,7 @@ async function generateInClassQuiz(
     await save(join(OUTPUT_DIR, 'quizzes', `${prefix}_inclass_versions.zip`), zipBuffer);
     log(`    Ch ${prefix} Saved in-class quiz (+ 5 DOCX versions)`);
   } catch (docxErr) {
-    log(`    Ch ${prefix} DOCX export error: ${docxErr instanceof Error ? docxErr.message : String(docxErr)}`);
+    logFailure(`    Ch ${prefix} DOCX export error: ${errMsg(docxErr)}`);
   }
 }
 
@@ -452,8 +454,8 @@ async function generateWeeklyChallenge(
     );
     await save(join(OUTPUT_DIR, 'challenges', `${prefix}_weekly_challenge.html`), challengeHtml);
     log(`    Ch ${prefix} Saved weekly challenge (JSON + HTML)`);
-  } catch {
-    log(`    Ch ${prefix} Warning: Challenge HTML build failed, JSON saved`);
+  } catch (err) {
+    logFailure(`    Ch ${prefix} Challenge HTML build failed (JSON saved): ${errMsg(err)}`);
   }
 }
 
@@ -488,7 +490,7 @@ async function generateDiscussion(
     const docxBuf = await buildDiscussionDocx(discussions, syllabus.courseTitle, ch.title);
     await save(join(OUTPUT_DIR, 'discussion', `${prefix}_discussion.docx`), docxBuf);
   } catch (err) {
-    log(`    Ch ${prefix} Discussion DOCX error: ${err instanceof Error ? err.message : String(err)}`);
+    logFailure(`    Ch ${prefix} Discussion DOCX error: ${errMsg(err)}`);
   }
   log(`    Ch ${prefix} Saved discussion`);
 }
@@ -524,7 +526,7 @@ async function generateActivities(
     const docxBuf = await buildActivitiesDocx(activities, syllabus.courseTitle, ch.title);
     await save(join(OUTPUT_DIR, 'activities', `${prefix}_activities.docx`), docxBuf);
   } catch (err) {
-    log(`    Ch ${prefix} Activities DOCX error: ${err instanceof Error ? err.message : String(err)}`);
+    logFailure(`    Ch ${prefix} Activities DOCX error: ${errMsg(err)}`);
   }
   log(`    Ch ${prefix} Saved activities`);
 }
@@ -557,7 +559,7 @@ async function generateAudio(
     const docxBuf = await buildTranscriptDocx(transcriptText, syllabus.courseTitle, ch.title);
     await save(join(OUTPUT_DIR, 'audio', `${prefix}_transcript.docx`), docxBuf);
   } catch (err) {
-    log(`    Ch ${prefix} Transcript DOCX error: ${err instanceof Error ? err.message : String(err)}`);
+    logFailure(`    Ch ${prefix} Transcript DOCX error: ${errMsg(err)}`);
   }
 
   // TTS if ElevenLabs key available
@@ -576,7 +578,7 @@ async function generateAudio(
       await save(mp3Path, Buffer.from(arrayBuffer));
       log(`    Ch ${prefix} Saved MP3 audio (ElevenLabs)`);
     } catch (err) {
-      log(`    Ch ${prefix} TTS error: ${err instanceof Error ? err.message : String(err)}`);
+      logFailure(`    Ch ${prefix} TTS error: ${errMsg(err)}`);
     }
   }
   log(`    Ch ${prefix} Saved transcript`);
@@ -630,7 +632,7 @@ async function generateSlides(
     await save(join(OUTPUT_DIR, 'slides', `${prefix}_slides.pptx`), pptxBuffer);
     log(`    Ch ${prefix} Saved slides (+ PPTX)`);
   } catch (pptxErr) {
-    log(`    Ch ${prefix} PPTX export error: ${pptxErr instanceof Error ? pptxErr.message : String(pptxErr)}`);
+    logFailure(`    Ch ${prefix} PPTX export error: ${errMsg(pptxErr)}`);
   }
 }
 
@@ -659,8 +661,8 @@ async function generateInfographic(
   );
   console.log('');
 
-  // Phase 2: generate the image
-  const { base64, mimeType } = await generateInfographicNode(promptText, OPENAI_API_KEY, {
+  // Phase 2: generate the image (retries 429 / 5xx / network errors)
+  const { base64, mimeType } = await generateImageNodeWithRetry(promptText, OPENAI_API_KEY, {
     size: '3840x2160',
     quality: 'high',
   });
@@ -767,13 +769,13 @@ async function researchChapter(ch: ChapterSyllabus, syllabus: Syllabus): Promise
       const docxBuf = await buildResearchDocx(dossier, syllabus.courseTitle, ch.title);
       await save(join(OUTPUT_DIR, 'research', `${prefix}_research.docx`), docxBuf);
     } catch (err) {
-      log(`    Ch ${prefix} Research DOCX error: ${err instanceof Error ? err.message : String(err)}`);
+      logFailure(`    Ch ${prefix} Research DOCX error: ${errMsg(err)}`);
     }
 
     log(`    ${dossier.sources.length} sources found`);
     return dossier;
   } catch (err) {
-    log(`    ERROR: ${err instanceof Error ? err.message : String(err)}`);
+    logFailure(`    Ch ${pad(ch.number)} Research ERROR: ${errMsg(err)}`);
     const fallback: ResearchDossier = {
       chapterNumber: ch.number,
       sources: [],
@@ -815,7 +817,7 @@ async function main() {
 
     const syllabusText = await streamWithRetry(
       {
-        apiKey: ANTHROPIC_API_KEY,
+        apiKey: ANTHROPIC_API_KEY!,
         model: MODELS.opus,
         system: syllabusSystem,
         messages: [{ role: 'user', content: syllabusUser }],
@@ -844,7 +846,7 @@ async function main() {
       const syllabusDocx = await buildSyllabusDocx(syllabus);
       await save(join(OUTPUT_DIR, 'syllabus.docx'), syllabusDocx);
     } catch (err) {
-      log(`  Syllabus DOCX error: ${err instanceof Error ? err.message : String(err)}`);
+      logFailure(`  Syllabus DOCX error: ${errMsg(err)}`);
     }
   }
 
@@ -863,7 +865,7 @@ async function main() {
   try {
     const loText = await streamWithRetry(
       {
-        apiKey: ANTHROPIC_API_KEY,
+        apiKey: ANTHROPIC_API_KEY!,
         model: MODELS.haiku,
         system: buildLearningObjectivesPrompt(),
         messages: [
@@ -890,10 +892,10 @@ async function main() {
       );
       log(`  ${curriculumMap.objectives.length} objectives mapped to ${syllabus.chapters.length} chapters`);
     } else {
-      log('  Warning: Could not parse learning-outcomes response.');
+      logFailure('  Could not parse learning-outcomes response.');
     }
   } catch (err) {
-    log(`  Learning-outcomes generation failed: ${err instanceof Error ? err.message : String(err)}`);
+    logFailure(`  Learning-outcomes generation failed: ${errMsg(err)}`);
   }
 
   // ── Stage 2: Research (3 chapters concurrently) ────────────────
@@ -951,7 +953,7 @@ async function main() {
     try {
       const chapterText = await streamWithRetry(
         {
-          apiKey: ANTHROPIC_API_KEY,
+          apiKey: ANTHROPIC_API_KEY!,
           model: MODELS.opus,
           system: buildChapterPrompt(setup.themeId, hasImageGen),
           messages: [{
@@ -973,10 +975,12 @@ async function main() {
       console.log('');
       chapterHtml = extractHtml(chapterText);
 
-      // Replace Gemini image placeholders with actual generated images
+      // Replace ai-image placeholders with gpt-image-2 renders
       if (OPENAI_API_KEY) {
         log(`    Ch ${prefix} Replacing image placeholders...`);
-        chapterHtml = await replaceAiImagePlaceholdersNode(chapterHtml, OPENAI_API_KEY);
+        chapterHtml = await replaceAiImagePlaceholdersNode(chapterHtml, OPENAI_API_KEY, (msg) =>
+          logFailure(`    Ch ${prefix} ${msg}`),
+        );
       }
 
       await save(
@@ -985,7 +989,7 @@ async function main() {
       );
       log(`    Ch ${prefix} Saved chapter HTML`);
     } catch (err) {
-      log(`    Ch ${prefix} ERROR: ${err instanceof Error ? err.message : String(err)}`);
+      logFailure(`    Ch ${prefix} Chapter ERROR (materials skipped): ${errMsg(err)}`);
       continue; // Skip remaining materials if chapter fails
     }
 
@@ -1008,16 +1012,24 @@ async function main() {
     log('');
     log('═══ Stage 4: Publish Package ═══');
     const { assemblePublishPackage } = await import('./lib/publish');
-    const publishDir = await assemblePublishPackage(OUTPUT_DIR, setup.themeId);
+    const { publishDir } = await assemblePublishPackage(OUTPUT_DIR, setup.themeId);
     log(`Publish package: ${publishDir}`);
   }
 
   log('');
-  log('═══ Complete ═══');
-  log(`All files saved to ${OUTPUT_DIR}`);
+  log(failures.length === 0 ? '═══ Complete ═══' : '═══ Finished with failures (see below) ═══');
+  log(`Output saved to ${OUTPUT_DIR}`);
 }
 
-main().catch((err) => {
-  console.error('Fatal error:', err);
-  process.exit(1);
-});
+main()
+  .then(() => {
+    if (failures.length === 0) return;
+    log('');
+    log(`${failures.length} step(s) failed; the output is incomplete:`);
+    for (const f of failures) log(`  - ${f}`);
+    process.exitCode = 1;
+  })
+  .catch((err) => {
+    console.error('Fatal error:', err);
+    process.exit(1);
+  });

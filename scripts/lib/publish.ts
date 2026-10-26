@@ -104,11 +104,17 @@ export interface AssembleOptions {
   codex?: boolean;
 }
 
+export interface AssembleResult {
+  publishDir: string;
+  /** Materials found for each syllabus chapter ('reading', 'slides', 'quiz', …). */
+  chapters: Array<{ number: number; title: string; available: string[] }>;
+}
+
 export async function assemblePublishPackage(
   outputDir: string,
   themeId?: string,
   opts: AssembleOptions = {},
-): Promise<string> {
+): Promise<AssembleResult> {
   const publishDir = join(outputDir, 'publish');
 
   const chaptersDir = opts.chaptersDir ?? join(outputDir, 'chapters');
@@ -129,6 +135,13 @@ export async function assemblePublishPackage(
   // loaded in the viewer's iframe (base = chapters/NN.html) they resolve to chapters/img/.
   if (await exists(chapterImgDir)) {
     await cp(chapterImgDir, join(publishDir, 'chapters', 'img'), { recursive: true });
+  }
+
+  // Copy the chapters' shared stylesheets (e.g. widgets-almanac.css). Themed
+  // chapters link them by relative href, so they must sit next to chapters/NN.html.
+  const chapterDirFiles = await readdir(chaptersDir).catch(() => [] as string[]);
+  for (const f of chapterDirFiles.filter((name) => name.endsWith('.css'))) {
+    await copyFile(join(chaptersDir, f), join(publishDir, 'chapters', f));
   }
 
   // ── Load syllabus ──────────────────────────────────────────────
@@ -158,6 +171,7 @@ export async function assemblePublishPackage(
 
   // ── Per-chapter data collection ────────────────────────────────
   const chaptersData: ChapterPackageData[] = [];
+  const summaries: AssembleResult['chapters'] = [];
 
   for (const ch of syllabus.chapters) {
     const prefix = pad(ch.number);
@@ -182,7 +196,11 @@ export async function assemblePublishPackage(
     }
 
     // -- Weekly Challenge HTML --
-    const challengeSrc = await findFile(challengeDir, `${prefix}_challenge`, '.html');
+    // Example courses keep it at weekly-challenge/NN_challenge.html;
+    // generate-course.ts writes challenges/NN_weekly_challenge.html.
+    const challengeSrc =
+      (await findFile(challengeDir, `${prefix}_challenge`, '.html')) ??
+      (await findFile(join(outputDir, 'challenges'), `${prefix}_weekly_challenge`, '.html'));
     if (challengeSrc) {
       await copyFile(challengeSrc, join(publishDir, 'challenges', `${prefix}.html`));
       challengePaths[ch.number] = `challenges/${prefix}.html`;
@@ -292,10 +310,16 @@ export async function assemblePublishPackage(
       downloadLinks.push({ label: 'Transcript (DOCX)', path: `downloads/${destName}` });
     }
 
+    // Weekly challenge: the legacy viewer has no challenge tab, so offer it as a download.
+    if (!opts.codex && challengePaths[ch.number]) {
+      downloadLinks.push({ label: 'Weekly Challenge (HTML)', path: challengePaths[ch.number] });
+    }
+
     // Count available materials
     const available: string[] = [];
     if (chapterHtmlPath) available.push('reading');
     if (quizHtmlPath) available.push('quiz');
+    if (challengePaths[ch.number]) available.push('challenge');
     if (discussion) available.push('discussion');
     if (activities) available.push('activities');
     if (slides) available.push('slides');
@@ -305,6 +329,7 @@ export async function assemblePublishPackage(
     if (inClassQuiz) available.push('inclass-quiz');
 
     console.log(`  Ch ${prefix}: ${available.join(', ') || 'no materials found'}`);
+    summaries.push({ number: ch.number, title: ch.title, available });
 
     chaptersData.push({
       number: ch.number,
@@ -365,5 +390,5 @@ export async function assemblePublishPackage(
   console.log(`  index.html: ${sizeKb} KB`);
   console.log(`  ${chaptersData.length} chapters`);
 
-  return publishDir;
+  return { publishDir, chapters: summaries };
 }
