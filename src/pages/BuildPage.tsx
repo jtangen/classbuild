@@ -43,6 +43,7 @@ import { buildSlidesPrompt, buildSlidesUserPrompt } from '../prompts/slides';
 import { CodexButton as Button } from '../components/codex';
 import { ChapterSidebar } from '../components/build/ChapterSidebar';
 import { ResearchPanel } from '../components/build/ResearchPanel';
+import { ArtifactShell } from '../components/build/ArtifactShell';
 import type { SlideData, InClassQuizQuestion, WeeklyChallengeData } from '../types/course';
 import { getVoiceOption } from '../themes';
 import { slugify, extractHtml, parseJson } from '../utils/format';
@@ -75,6 +76,11 @@ async function replaceAiPlaceholders(html: string, apiKey: string, signal?: Abor
 }
 
 // Chapter image helpers moved to src/components/build/chapterImageHelpers.ts
+
+const ROMAN_NUMERALS = [
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+  'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+];
 
 /** One-time-hint state, persisted to localStorage so it stays dismissed
  *  across sessions per-browser. */
@@ -181,6 +187,39 @@ export function BuildPage() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+    };
+  }, []);
+
+  // On desktop the page is a column exactly as tall as the viewport below the
+  // app chrome, and the two-panel work area takes what the banners leave
+  // (flex: 1; min-height: 0). It used to be calc(100vh - 220px) starting
+  // ~280px down, so the page scrolled on top of the panel's own scroll. Under
+  // 901px the stacked layout keeps natural page scroll (see index.css).
+  const [fitHeight, setFitHeight] = useState<number | null>(null);
+  const fitPageRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const wide = window.matchMedia('(min-width: 901px)');
+    const measure = () => {
+      if (!wide.matches) {
+        setFitHeight(null);
+        return;
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // 48px: AppShell's content wrapper pads the page bottom (pb-12). The
+      // floor keeps the panel usable on very short windows (page scrolls).
+      setFitHeight(Math.max(480, Math.round(window.innerHeight - top - 48)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    wide.addEventListener('change', measure);
+    // The chrome above can change height (e.g. the multi-tab notice).
+    const ro = new ResizeObserver(measure);
+    const main = el.closest('main');
+    if (main) ro.observe(main);
+    return () => {
+      window.removeEventListener('resize', measure);
+      wide.removeEventListener('change', measure);
+      ro.disconnect();
     };
   }, []);
 
@@ -342,12 +381,16 @@ export function BuildPage() {
         setTransientToast('No need to save — every change is auto-saved to this browser.');
         return;
       }
-      // ? → toggle the help overlay.
+      // ? → toggle the help overlay (not over the image drawer).
       if (e.key === '?') {
+        if (chapterImageRefine) return;
         e.preventDefault();
         setShortcutsHelpOpen((v) => !v);
         return;
       }
+      // While the help or the image drawer is open, the page behind it
+      // doesn't take J/K/G/1–8 (J used to switch chapter under the help).
+      if (shortcutsHelpOpen || chapterImageRefine) return;
 
       // No other modifier-required shortcuts.
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -385,6 +428,8 @@ export function BuildPage() {
         if (e.repeat) return;
         const ui = useUiStore.getState();
         if (ui.isGenerating || Object.values(ui.inFlight).some((n) => n != null)) return;
+        // No key, no call (the "Add Anthropic key" banner explains).
+        if (!useApiStore.getState().claudeApiKey.trim()) return;
         void generateAllOutputsRef.current();
         return;
       }
@@ -392,7 +437,7 @@ export function BuildPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchGenerating, syllabus, selectedChapterNum, setActiveTab, setSelectedChapterNum]);
+  }, [batchGenerating, syllabus, selectedChapterNum, setActiveTab, setSelectedChapterNum, shortcutsHelpOpen, chapterImageRefine]);
 
   // Tick elapsed seconds while a reading draft/refine is running so the
   // "Thinking..." phase (~30-90s on Opus) shows observable progress. Counted
@@ -427,6 +472,9 @@ export function BuildPage() {
   const syllabusChapter = syllabus?.chapters.find(c => c.number === selectedChapterNum);
   const anyLocalGenerating = !!(generatingQuiz || generatingInClassQuiz || generatingDiscussion || generatingActivities || generatingAudio || generatingSlides || generatingWeeklyChallenge);
   const anyBusy = isGenerating || anyLocalGenerating || batchGenerating;
+  /** No Anthropic key (e.g. a project restored in a new browser): nothing
+   *  that calls Claude may fire. The banner offers "Add Anthropic key →". */
+  const hasClaudeKey = !!claudeApiKey.trim();
   /** The in-progress reading UI belongs to this chapter only. */
   const draftingThisChapter = readingDraft?.chapterNum === selectedChapterNum;
   /** Why this chapter's reading can't be drafted or refined right now: one
@@ -552,7 +600,8 @@ export function BuildPage() {
     // A running batch drafts chapter 1 itself without setting isGenerating; a
     // second draft racing it would later replace the chapter (addChapter) and
     // wipe the materials the batch built on top of its own draft.
-    if (!ch1 && syllabus && !isGenerating && !batchGenerating && !autoGenStarted.current && hasResearch) {
+    // Nor without a key: it would only come back as an error.
+    if (!ch1 && syllabus && claudeApiKey.trim() && !isGenerating && !batchGenerating && !autoGenStarted.current && hasResearch) {
       autoGenStarted.current = true;
       generateChapter(1);
     }
@@ -567,6 +616,8 @@ export function BuildPage() {
     // crash while the draft itself keeps running.
     const ui = useUiStore.getState();
     if (ui.isGenerating || ui.readingDraft) return;
+    // No key, no call: it could only fail ("Add Anthropic key" banner shows).
+    if (!claudeApiKey.trim()) return;
 
     const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
@@ -641,9 +692,10 @@ export function BuildPage() {
 
   const refineChapter = useCallback(async (feedback: string) => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
-    // One reading at a time; checked before the destructive clear below.
+    // One reading at a time, and a key to run it; both checked before the
+    // destructive clear below.
     const ui = useUiStore.getState();
-    if (ui.isGenerating || ui.readingDraft) return;
+    if (ui.isGenerating || ui.readingDraft || !claudeApiKey.trim()) return;
     // Captured: a refine runs for minutes and the UI invites clicking away.
     const chapterNum = selectedChapterNum;
     // Only rebuild what this refine clears ("only the reading will change"
@@ -1072,6 +1124,7 @@ Teacher feedback: "${feedback}"`;
   // ops visibility.
   const generateAllOutputs = useCallback(async () => {
     if (!currentChapter || !syllabusChapter || !syllabus) return;
+    if (!claudeApiKey.trim()) return;
     const logFailure = (kind: string) => (err: unknown) =>
       console.error(`[generateAllOutputs] ${kind} failed:`, err);
     const tasks: Promise<void>[] = [];
@@ -1083,7 +1136,7 @@ Teacher feedback: "${feedback}"`;
     if (!audioTranscript) tasks.push(generateAudio().catch(logFailure('audio')));
     if (!currentChapter.weeklyChallengeData) tasks.push(generateWeeklyChallengeContent().catch(logFailure('weekly-challenge')));
     await Promise.allSettled(tasks);
-  }, [currentChapter, syllabusChapter, syllabus, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio, generateWeeklyChallengeContent]);
+  }, [currentChapter, syllabusChapter, syllabus, claudeApiKey, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio, generateWeeklyChallengeContent]);
 
   // Keep the ref pointing at the latest generateAllOutputs so refineChapter
   // can fire a post-refine regen *after* the new chapter content has been
@@ -1124,7 +1177,7 @@ Teacher feedback: "${feedback}"`;
   //   'classes'    → reading + practice quiz + in-class quiz + weekly challenge
   //   'everything' → the above plus discussion, activities, audio, slides
   const runBatch = useCallback(async (mode: 'everything' | 'classes') => {
-    if (!syllabus) return;
+    if (!syllabus || !claudeApiKey.trim()) return;
     setBatchGenerating(true);
     setBatchSummary(null);
     resetBatchChapterMs();
@@ -1562,10 +1615,14 @@ Teacher feedback: "${feedback}"`;
 
   return (
     <div
+      ref={fitPageRef}
       style={{
         fontFamily: 'var(--font-cb-serif)',
         color: 'var(--cb-text-default)',
-        padding: '24px 0 32px',
+        padding: '20px 0 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        height: fitHeight ?? undefined,
       }}
     >
       {/* ─── Codex slim banner ─── */}
@@ -1576,8 +1633,8 @@ Teacher feedback: "${feedback}"`;
           gridTemplateColumns: '1fr auto',
           gap: 24,
           alignItems: 'flex-end',
-          paddingBottom: 14,
-          marginBottom: 18,
+          paddingBottom: 12,
+          marginBottom: 14,
           borderBottom: '0.5px solid var(--cb-border-rule)',
         }}
       >
@@ -1688,7 +1745,7 @@ Teacher feedback: "${feedback}"`;
                 fontFamily: 'inherit',
                 fontSize: 13,
                 fontStyle: 'italic',
-                color: 'var(--cb-status-warning)',
+                color: 'var(--cb-status-warning-text)',
                 textDecoration: 'underline',
                 textDecorationThickness: '0.5px',
                 textUnderlineOffset: 3,
@@ -1702,7 +1759,7 @@ Teacher feedback: "${feedback}"`;
                 size="sm"
                 variant="secondary"
                 onClick={() => setShowBatchConfirm(true)}
-                disabled={anyBusy}
+                disabled={anyBusy || !hasClaudeKey}
               >
                 {generatedCount > 0 ? 'Draft remaining chapters' : 'Draft all chapters'}
               </Button>
@@ -1739,52 +1796,104 @@ Teacher feedback: "${feedback}"`;
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mb-4 overflow-hidden"
+              style={{ overflow: 'hidden', marginBottom: 16, flexShrink: 0 }}
               role="dialog"
               aria-modal="true"
               aria-labelledby="batch-confirm-title"
             >
-              <div className="p-5 rounded-xl bg-cb-status-warning-bg border border-cb-status-warning">
-                <h3 id="batch-confirm-title" className="text-sm font-semibold text-cb-status-warning mb-2">
+              <div
+                style={{
+                  padding: '16px 18px',
+                  background: 'var(--cb-status-warning-bg)',
+                  borderLeft: '2px solid var(--cb-status-warning)',
+                  borderRadius: 2,
+                }}
+              >
+                <h3
+                  id="batch-confirm-title"
+                  style={{
+                    margin: '0 0 6px',
+                    fontSize: 16,
+                    fontWeight: 500,
+                    color: 'var(--cb-status-warning-text)',
+                  }}
+                >
                   Generate {researched} class{researched !== 1 ? 'es' : ''} at once?
                 </h3>
-                <p className="text-sm text-cb-text-default mb-3 leading-relaxed">
+                <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.55 }}>
                   This will use a meaningful amount of your API key balance.
                 </p>
                 {unresearched > 0 && (
-                  <p className="text-xs text-cb-status-warning mb-3 leading-relaxed">
+                  <p
+                    className="cb-italic"
+                    style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.55, color: 'var(--cb-status-warning-text)' }}
+                  >
                     {unresearched} class{unresearched !== 1 ? 'es' : ''} without research will be skipped. Go to Research to add them.
                   </p>
                 )}
-                <div className="grid gap-2 sm:grid-cols-2 mb-3">
-                  <button
-                    onClick={() => { setShowBatchConfirm(false); generateEverything(); }}
-                    disabled={researched === 0}
-                    className="p-3 rounded-lg border border-cb-border-strong bg-cb-accent-emphasis-quiet hover:bg-cb-accent-emphasis-quiet transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
-                  >
-                    <div className="text-sm font-semibold text-cb-accent-emphasis mb-1">Build Everything</div>
-                    <p className="text-xs text-cb-text-muted leading-relaxed">
-                      All materials — reading, quizzes, weekly challenge, discussion, activities, audiobook, slides.
-                      {researched >= 6 ? ' Possibly 1-2 hours.' : researched >= 3 ? ' Possibly 30-60 min.' : ' Takes a while.'}
-                    </p>
-                  </button>
-                  <button
-                    onClick={() => { setShowBatchConfirm(false); generateAllClasses(); }}
-                    disabled={researched === 0}
-                    className="p-3 rounded-lg border border-cb-border-default bg-cb-surface-sunken hover:bg-cb-ground-page transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
-                  >
-                    <div className="text-sm font-semibold text-cb-text-default mb-1">Classes + Quizzes Only</div>
-                    <p className="text-xs text-cb-text-muted leading-relaxed">
-                      Reading, Practice Quiz, and In-Class Quiz for each class.
-                      {researched >= 6 ? ' Possibly 30+ min.' : researched >= 3 ? ' Possibly 10-15 min.' : ''}
-                    </p>
-                  </button>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 10,
+                    marginBottom: 12,
+                  }}
+                >
+                  {[
+                    {
+                      label: 'Build everything',
+                      body: `All materials: reading, quizzes, weekly challenge, discussion, activities, audiobook, slides.${
+                        researched >= 6 ? ' Possibly 1–2 hours.' : researched >= 3 ? ' Possibly 30–60 min.' : ' Takes a while.'
+                      }`,
+                      onPick: generateEverything,
+                      emphasis: true,
+                    },
+                    {
+                      label: 'Classes and quizzes only',
+                      body: `Reading, practice quiz, in-class quiz and weekly challenge for each class.${
+                        researched >= 6 ? ' Possibly 30+ min.' : researched >= 3 ? ' Possibly 10–15 min.' : ''
+                      }`,
+                      onPick: generateAllClasses,
+                      emphasis: false,
+                    },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => { setShowBatchConfirm(false); void opt.onPick(); }}
+                      disabled={researched === 0}
+                      className="cb-focus"
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 14px',
+                        background: opt.emphasis ? 'var(--cb-accent-emphasis-quiet)' : 'var(--cb-ground-page)',
+                        border: `0.5px solid ${opt.emphasis ? 'var(--cb-border-strong)' : 'var(--cb-border-default)'}`,
+                        borderRadius: 2,
+                        fontFamily: 'inherit',
+                        color: 'var(--cb-text-default)',
+                        cursor: researched === 0 ? 'default' : 'pointer',
+                        opacity: researched === 0 ? 0.45 : 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 500,
+                          marginBottom: 4,
+                          color: opt.emphasis ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-default)',
+                        }}
+                      >
+                        {opt.label}
+                      </div>
+                      <p className="cb-italic" style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--cb-text-muted)' }}>
+                        {opt.body}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setShowBatchConfirm(false)}>
-                    Cancel
-                  </Button>
-                </div>
+                <Button size="sm" variant="ghost" onClick={() => setShowBatchConfirm(false)}>
+                  Cancel
+                </Button>
               </div>
             </motion.div>
           );
@@ -1796,7 +1905,8 @@ Teacher feedback: "${feedback}"`;
         <div
           role="status"
           style={{
-            marginBottom: 20,
+            flexShrink: 0,
+            marginBottom: 16,
             padding: '14px 16px',
             background: batchSummary.failures.length
               ? 'var(--cb-status-warning-bg)'
@@ -1837,7 +1947,7 @@ Teacher feedback: "${feedback}"`;
                   variant="secondary"
                   // Same gate as "Draft remaining chapters": a batch must not
                   // start under a running draft or material job.
-                  disabled={anyBusy}
+                  disabled={anyBusy || !hasClaudeKey}
                   title={anyBusy ? 'Wait for the current generation to finish.' : undefined}
                   onClick={() => {
                     const mode = batchSummary.mode;
@@ -1880,7 +1990,8 @@ Teacher feedback: "${feedback}"`;
         <div
           role="alert"
           style={{
-            marginBottom: 20,
+            flexShrink: 0,
+            marginBottom: 16,
             padding: '12px 14px',
             background: 'var(--cb-status-danger-bg)',
             borderLeft: '2px solid var(--cb-status-danger)',
@@ -1898,7 +2009,7 @@ Teacher feedback: "${feedback}"`;
           <button
             type="button"
             onClick={() => setError(null)}
-            className="cb-focus"
+            className="cb-focus pointer-coarse:min-h-11"
             style={{
               background: 'transparent',
               border: 0,
@@ -1926,7 +2037,9 @@ Teacher feedback: "${feedback}"`;
         style={{
           display: 'flex',
           gap: 0,
-          height: 'calc(100vh - 220px)',
+          // Fills what the page column leaves (see fitPageRef).
+          flex: '1 1 auto',
+          minHeight: 0,
           border: '1px solid var(--cb-border-default)',
           borderRadius: 2,
           overflow: 'hidden',
@@ -1951,19 +2064,18 @@ Teacher feedback: "${feedback}"`;
             background: 'var(--cb-ground-page)',
           }}
         >
-          {/* Batch progress panel — shown during batch mode */}
+          {/* Batch progress panel — shown during batch mode. Same vocabulary
+              as the chapter sidebar: numeral, title, one italic status line,
+              pen stroke on the chapter in progress. */}
           {batchGenerating && (
-            <div className="mb-4 bg-cb-ground-page border border-cb-border-default rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-cb-accent-emphasis">Batch Generation</h3>
-                <span className="text-xs text-cb-text-muted">
-                  {generatedCount} of {totalChapters} complete
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute left-5 top-0 bottom-0 w-px bg-cb-border-default" />
-                <div className="space-y-1">
-                  {syllabus.chapters.map((ch) => {
+            <div style={{ marginBottom: 16 }}>
+              <ArtifactShell
+                kicker="Batch generation"
+                title={`${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} drafted`}
+                bodyless
+              >
+                <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                  {syllabus.chapters.map((ch, idx) => {
                     const generated = chapters.find(c => c.number === ch.number);
                     const isCurrent = batchCurrentChapter === ch.number;
                     // Count completed materials for this chapter (the same eight the sidebar counts)
@@ -1979,107 +2091,162 @@ Teacher feedback: "${feedback}"`;
                       if (generated.audioTranscript) matCount++;
                       if (generated.slidesJson && generated.slidesJson.length > 0) matCount++;
                     }
+                    const status = isCurrent
+                      ? `${batchMaterial ? `${batchMaterial.toLowerCase()} · ` : ''}${batchPhase === 'thinking' ? 'thinking…' : 'writing…'}`
+                      : generated && matCount === maxMat
+                      ? '— complete'
+                      : generated
+                      ? `— ${matCount} of ${maxMat} drafted`
+                      : '— pending';
                     return (
-                      <div key={ch.number} className="relative flex items-center gap-4 pl-0">
-                        <div className="relative z-10 shrink-0">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-all duration-300 ${
-                            generated && matCount === maxMat
-                              ? 'bg-cb-status-success border-cb-status-success text-cb-status-success'
-                              : generated
-                              ? 'bg-cb-accent-emphasis-quiet border-cb-border-strong text-cb-accent-emphasis'
-                              : isCurrent
-                              ? 'bg-cb-accent-emphasis-quiet border-cb-border-strong text-cb-accent-emphasis'
-                              : 'bg-cb-ground-page border-cb-border-default text-cb-text-muted'
-                          }`}>
-                            {generated && matCount === maxMat ? (
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                            ) : isCurrent ? (
-                              <motion.div
-                                className="w-3 h-3 rounded-full bg-cb-accent-emphasis"
-                                animate={{ scale: [1, 1.3, 1] }}
-                                transition={{ duration: 1, repeat: Infinity }}
-                              />
-                            ) : (
-                              ch.number
-                            )}
-                          </div>
-                        </div>
-                        <div className={`flex-1 py-2 px-3 rounded-xl transition-all ${
-                          isCurrent ? 'bg-cb-accent-emphasis-quiet border border-cb-border-default' : generated ? 'bg-cb-ground-page/50' : ''
-                        }`}>
-                          <div className="text-sm font-medium truncate">{ch.title}</div>
-                          <div className="text-xs text-cb-text-muted mt-0.5">
-                            {generated
-                              ? `${matCount}/${maxMat} materials`
-                              : isCurrent
-                              ? batchMaterial
-                                ? `${batchMaterial}${batchPhase === 'thinking' ? ' — thinking...' : ' — writing...'}`
-                                : batchPhase === 'thinking' ? 'Thinking...' : 'Writing...'
-                              : 'Pending'}
-                          </div>
-                        </div>
+                      <li
+                        key={ch.number}
+                        aria-current={isCurrent ? 'step' : undefined}
+                        style={{
+                          position: 'relative',
+                          display: 'grid',
+                          gridTemplateColumns: '36px minmax(0, 1fr)',
+                          gap: 8,
+                          padding: '10px 20px',
+                          borderTop: idx === 0 ? 'none' : '0.5px solid var(--cb-border-subtle)',
+                          background: isCurrent ? 'var(--cb-accent-emphasis-quiet)' : 'transparent',
+                        }}
+                      >
                         {isCurrent && (
-                          <motion.div
-                            className="w-5 h-5 border-2 border-cb-accent-emphasis border-t-transparent rounded-full shrink-0"
-                            animate={{ rotate: 360 }}
-                            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                          <span
+                            aria-hidden
+                            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 2, background: 'var(--cb-accent-emphasis)' }}
                           />
                         )}
-                      </div>
+                        <span
+                          className="cb-italic"
+                          style={{
+                            fontSize: 16,
+                            lineHeight: 1.35,
+                            color: generated || isCurrent ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-subtle)',
+                          }}
+                        >
+                          {ROMAN_NUMERALS[idx] ?? ch.number}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 14.5,
+                              lineHeight: 1.35,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {ch.title}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
+                            {isCurrent && (
+                              <span
+                                aria-hidden
+                                style={{
+                                  display: 'inline-block',
+                                  width: 28,
+                                  height: 1,
+                                  background: 'var(--cb-border-default)',
+                                  position: 'relative',
+                                  overflow: 'hidden',
+                                  verticalAlign: 'middle',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    background: 'var(--cb-accent-emphasis)',
+                                    animation: 'cb-pen 1.4s cubic-bezier(0.32,0.04,0.32,1) infinite',
+                                  }}
+                                />
+                              </span>
+                            )}
+                            <span
+                              className="cb-italic"
+                              style={{
+                                fontSize: 12.5,
+                                color: isCurrent ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-muted)',
+                              }}
+                            >
+                              {status}
+                            </span>
+                          </div>
+                        </div>
+                      </li>
                     );
                   })}
-                </div>
-              </div>
+                </ol>
+              </ArtifactShell>
             </div>
           )}
 
-          {/* Research panel */}
-          {!batchGenerating && (
-            <ResearchPanel chapterNum={selectedChapterNum} />
+          {/* No Anthropic key (e.g. a project restored in a new browser):
+              nothing that calls Claude fires; say why and offer the fix. */}
+          {!hasClaudeKey && !batchGenerating && (
+            <div style={{ marginBottom: 14 }}>
+              <KeyMissingBanner
+                tone="recommended"
+                text={
+                  <>
+                    <strong>No Anthropic key yet.</strong> Drafting readings and materials
+                    runs on your Anthropic key. Add it to keep building; everything already
+                    drafted stays as it is.
+                  </>
+                }
+                ctaLabel="Add Anthropic key →"
+                onCta={openKeysModal}
+              />
+            </div>
           )}
 
-          {/* Generate all outputs for current class */}
-          {!batchGenerating && currentChapter && !isGenerating && (() => {
-            const missing = [
-              !quizHtml,
-              inClassQuizData.length === 0,
-              discussions.length === 0,
-              activities.length === 0,
-              slidesData.length === 0,
-              !audioTranscript,
-              !currentChapter.weeklyChallengeData,
-            ].filter(Boolean).length;
-            return (
-              <div className="flex items-baseline gap-3 mb-4 flex-wrap">
-                {missing > 0 ? (
+          {/* One status row above the tabs: the research pointer on the left,
+              the chapter's material status and "Generate all" on the right. */}
+          {!batchGenerating && (
+            <ResearchPanel chapterNum={selectedChapterNum}>
+              {currentChapter && !isGenerating && (() => {
+                const missing = [
+                  !quizHtml,
+                  inClassQuizData.length === 0,
+                  discussions.length === 0,
+                  activities.length === 0,
+                  slidesData.length === 0,
+                  !audioTranscript,
+                  !currentChapter.weeklyChallengeData,
+                ].filter(Boolean).length;
+                // Eight materials, counting the reading (as the sidebar does).
+                return missing > 0 ? (
                   <>
+                    <span className="cb-italic" style={{ fontSize: 13, color: 'var(--cb-text-muted)' }}>
+                      {anyLocalGenerating
+                        ? 'Generating… rate limits may cause automatic retries'
+                        : `${missing} of 8 remaining`}
+                    </span>
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => void generateAllOutputs()}
-                      disabled={anyLocalGenerating}
+                      disabled={anyLocalGenerating || !hasClaudeKey}
                       title={
                         anyLocalGenerating
                           ? 'Generation is already running for this chapter.'
-                          : undefined
+                          : 'Drafts every missing material for this chapter. A few minutes, on your keys.'
                       }
                     >
-                      ▸ Generate all materials for this chapter
+                      ▸ Generate all materials
                     </Button>
-                    <span className="text-xs italic text-cb-text-muted">
-                      {anyLocalGenerating
-                        ? 'Generating… rate limits may cause automatic retries'
-                        : `${missing} of 7 remaining · a few minutes, on your keys`}
-                    </span>
                   </>
                 ) : (
-                  <span className="text-xs italic text-cb-text-muted">
-                    All seven materials are drafted for this chapter.
+                  <span className="cb-italic" style={{ fontSize: 13, color: 'var(--cb-text-muted)' }}>
+                    All eight materials are drafted.
                   </span>
-                )}
-              </div>
-            );
-          })()}
+                );
+              })()}
+            </ResearchPanel>
+          )}
 
           {/* Generate chapter button when chapter not yet generated. Shown on
               every undrafted chapter except the one drafting; while another
@@ -2088,7 +2255,7 @@ Teacher feedback: "${feedback}"`;
           {!batchGenerating && !currentChapter && !draftingThisChapter && (() => {
             const hasResearch = researchDossiers.some(d => d.chapterNumber === selectedChapterNum && d.sources.length > 0);
             const romanIdx = selectedChapterNum - 1;
-            const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX'][romanIdx] ?? String(selectedChapterNum);
+            const roman = ROMAN_NUMERALS[romanIdx] ?? String(selectedChapterNum);
             const startDraft = () => {
               // Land on the Reading tab, where the draft's progress shows.
               setActiveTab('chapter');
@@ -2195,7 +2362,7 @@ Teacher feedback: "${feedback}"`;
                       </div>
                     )}
                     {blockedNote}
-                    <Button onClick={startDraft} disabled={!!readingBlockedNote}>
+                    <Button onClick={startDraft} disabled={!!readingBlockedNote || !hasClaudeKey}>
                       Draft this chapter →
                     </Button>
                   </>
@@ -2206,7 +2373,7 @@ Teacher feedback: "${feedback}"`;
                       style={{
                         margin: '0 0 6px',
                         fontSize: 14.5,
-                        color: 'var(--cb-status-warning)',
+                        color: 'var(--cb-status-warning-text)',
                         lineHeight: 1.55,
                       }}
                     >
@@ -2230,7 +2397,7 @@ Teacher feedback: "${feedback}"`;
                       <Button onClick={() => navigate('/research')}>
                         Go to Research
                       </Button>
-                      <Button variant="ghost" onClick={startDraft} disabled={!!readingBlockedNote}>
+                      <Button variant="ghost" onClick={startDraft} disabled={!!readingBlockedNote || !hasClaudeKey}>
                         Draft anyway
                       </Button>
                     </div>
@@ -2365,14 +2532,16 @@ Teacher feedback: "${feedback}"`;
                 >
                   <span>{tabErrors[activeTab]}</span>
                   <span style={{ display: 'flex', gap: 14, flexShrink: 0 }}>
-                    {tabRetryHandlers[activeTab] && (
+                    {/* No retry without a key: it couldn't run (banner above). */}
+                    {tabRetryHandlers[activeTab] && hasClaudeKey && (
                       <button
+                        type="button"
                         onClick={() => {
                           const retry = tabRetryHandlers[activeTab];
                           clearTabError(activeTab);
                           retry?.();
                         }}
-                        className="cb-focus"
+                        className="cb-focus pointer-coarse:min-h-11"
                         style={{
                           background: 'transparent',
                           border: 0,
@@ -2392,8 +2561,9 @@ Teacher feedback: "${feedback}"`;
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => clearTabError(activeTab)}
-                      className="cb-focus"
+                      className="cb-focus pointer-coarse:min-h-11"
                       style={{
                         background: 'transparent',
                         border: 0,
@@ -2432,7 +2602,10 @@ Teacher feedback: "${feedback}"`;
                     thinkingText={draftingThisChapter ? thinkingText : ''}
                     elapsedSec={elapsedSec}
                     onStop={() => abortInFlight(materialAbortKey('reading', selectedChapterNum))}
-                    refineBlockedNote={readingBlockedNote}
+                    refineBlockedNote={
+                      readingBlockedNote ??
+                      (hasClaudeKey ? null : 'Refining runs on your Anthropic key. Add it above to refine this reading.')
+                    }
                     showImageHint={showChapterImageHint}
                     onDismissImageHint={dismissChapterImageHint}
                     refineFeedback={refineFeedback}
@@ -2463,7 +2636,7 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingQuiz === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingQuiz}
+                      canGenerate={!!currentChapter && !generatingQuiz && hasClaudeKey}
                       onGenerate={generateQuiz}
                       onStop={() => abortInFlight(materialAbortKey('quiz', selectedChapterNum))}
                     />
@@ -2482,7 +2655,7 @@ Teacher feedback: "${feedback}"`;
                       courseTitle={syllabus?.courseTitle ?? ''}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingInClassQuiz === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingInClassQuiz}
+                      canGenerate={!!currentChapter && !generatingInClassQuiz && hasClaudeKey}
                       onGenerate={generateInClassQuiz}
                       onStop={() => abortInFlight(materialAbortKey('inclassquiz', selectedChapterNum))}
                       onError={(msg) => setError(friendlyError(msg, 'Quiz export failed.'))}
@@ -2502,7 +2675,7 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingWeeklyChallenge === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingWeeklyChallenge}
+                      canGenerate={!!currentChapter && !generatingWeeklyChallenge && hasClaudeKey}
                       onGenerate={generateWeeklyChallengeContent}
                       onStop={() => abortInFlight(materialAbortKey('weeklychallenge', selectedChapterNum))}
                     />
@@ -2519,7 +2692,7 @@ Teacher feedback: "${feedback}"`;
                     <DiscussionTab
                       discussions={discussions}
                       isGenerating={generatingDiscussion === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingDiscussion}
+                      canGenerate={!!currentChapter && !generatingDiscussion && hasClaudeKey}
                       onGenerate={generateDiscussion}
                       onStop={() => abortInFlight(materialAbortKey('discussion', selectedChapterNum))}
                       onCopy={copyToClipboard}
@@ -2542,7 +2715,8 @@ Teacher feedback: "${feedback}"`;
                       expandingActivity={expandingActivity}
                       copiedLabel={copiedLabel}
                       isGenerating={generatingActivities === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingActivities}
+                      canGenerate={!!currentChapter && !generatingActivities && hasClaudeKey}
+                      canExpand={hasClaudeKey}
                       onGenerate={generateActivities}
                       onStop={() => abortInFlight(materialAbortKey('activities', selectedChapterNum))}
                       onCopy={copyToClipboard}
@@ -2579,7 +2753,10 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingAudio === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingAudio}
+                      // The transcript needs Claude; narrating an existing
+                      // transcript only needs ElevenLabs (one narration at a time).
+                      canGenerate={!!currentChapter && !generatingAudio && hasClaudeKey}
+                      canNarrate={!generatingAudio}
                       hasElevenLabsKey={!!elevenLabsApiKey}
                       onGenerate={generateAudio}
                       onRetry={retryAudio}
@@ -2603,7 +2780,7 @@ Teacher feedback: "${feedback}"`;
                       slides={slidesData}
                       chapterNum={selectedChapterNum}
                       isGenerating={generatingSlides === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingSlides}
+                      canGenerate={!!currentChapter && !generatingSlides && hasClaudeKey}
                       hasOpenAiKey={!!openaiApiKey}
                       showImageHint={showSlideImageHint}
                       onDismissImageHint={dismissSlideImageHint}

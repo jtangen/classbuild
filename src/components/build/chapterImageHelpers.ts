@@ -56,19 +56,15 @@ export function swapChapterImage(
 }
 
 /** Tiny script appended to the chapter iframe srcdoc on BuildPage so that
- *  clicks on rendered images bubble to the parent as postMessages. */
+ *  clicking a rendered image (or focusing it and pressing Enter / Space) posts
+ *  a message to the parent, which opens the refine drawer for that figure. */
 export const CHAPTER_IMAGE_CLICK_SHIM = `<script>(function(){
-  function onClick(e){
-    var t = e.target;
-    if (!t || !t.closest) return;
-    var img = t.closest('img[data-image-idx]');
-    if (!img) return;
+  function post(img){
     var fig = img.closest('figure.ch-figure');
-    if (!fig) return;
+    if (!fig) return false;
     var idxStr = fig.getAttribute('data-image-idx');
     var idx = idxStr == null ? NaN : parseInt(idxStr, 10);
-    if (isNaN(idx)) return;
-    e.preventDefault();
+    if (isNaN(idx)) return false;
     try {
       parent.postMessage({
         __cbImageClick: 1,
@@ -77,10 +73,30 @@ export const CHAPTER_IMAGE_CLICK_SHIM = `<script>(function(){
         aspect: fig.getAttribute('data-aspect') || 'landscape'
       }, '*');
     } catch(err) {}
+    return true;
   }
-  document.addEventListener('click', onClick);
+  document.addEventListener('click', function(e){
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var img = t.closest('img[data-image-idx]');
+    if (img && post(img)) e.preventDefault();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var t = e.target;
+    if (!t || !t.matches || !t.matches('img[data-image-idx]')) return;
+    if (post(t)) e.preventDefault();
+  });
+  var imgs = document.querySelectorAll('figure.ch-figure img[data-image-idx]');
+  for (var i = 0; i < imgs.length; i++) {
+    var f = imgs[i].closest('figure.ch-figure');
+    var n = parseInt(f ? f.getAttribute('data-image-idx') : '', 10);
+    imgs[i].setAttribute('tabindex', '0');
+    imgs[i].setAttribute('role', 'button');
+    imgs[i].setAttribute('aria-label', 'Refine figure ' + (isNaN(n) ? '' : n + 1) + (imgs[i].alt ? ': ' + imgs[i].alt : ''));
+  }
   var s = document.createElement('style');
-  s.textContent = 'figure.ch-figure img[data-image-idx]{transition:outline 160ms ease, box-shadow 160ms ease;outline:2px solid transparent;outline-offset:4px;}figure.ch-figure img[data-image-idx]:hover{outline-color:#6e1f24;box-shadow:0 0 0 1px rgba(110,31,36,0.15);}figure.ch-figure img[data-image-idx]::after{}figure.ch-figure{position:relative;}figure.ch-figure:hover::after{content:"✎ refine";position:absolute;top:8px;right:8px;background:#6e1f24;color:#fff;font-family:ui-monospace,monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;padding:3px 7px;border-radius:2px;opacity:0.92;pointer-events:none;}';
+  s.textContent = 'figure.ch-figure img[data-image-idx]{transition:outline 160ms ease, box-shadow 160ms ease;outline:2px solid transparent;outline-offset:4px;}figure.ch-figure img[data-image-idx]:hover,figure.ch-figure img[data-image-idx]:focus-visible{outline-color:#6e1f24;box-shadow:0 0 0 1px rgba(110,31,36,0.15);}figure.ch-figure{position:relative;}figure.ch-figure:hover::after,figure.ch-figure:focus-within::after{content:"✎ refine";position:absolute;top:8px;right:8px;background:#6e1f24;color:#fff;font-family:ui-monospace,monospace;font-size:10px;letter-spacing:0.1em;text-transform:uppercase;padding:3px 7px;border-radius:2px;opacity:0.92;pointer-events:none;}';
   document.head && document.head.appendChild(s);
 })();</script>`;
 
@@ -92,7 +108,7 @@ export function withImageClickShim(html: string): string {
 }
 
 /** Does this chapter contain at least one rendered image with `data-image-idx`?
- *  Used to decide whether the "Hover any image to refine it" hint is relevant. */
+ *  Used to decide whether the "click or tap any image to refine it" hint is relevant. */
 export function chapterHasRefinableImages(html: string): boolean {
   return /<figure[^>]*\bdata-image-idx="\d+"/i.test(html);
 }

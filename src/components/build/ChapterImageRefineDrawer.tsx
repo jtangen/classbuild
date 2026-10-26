@@ -1,6 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../codex';
+import { useDialogFocus } from './useDialogFocus';
 
 /**
  * Drawer that slides in from the right when the user clicks a chapter image.
@@ -32,6 +33,11 @@ export function ChapterImageRefineDrawer({
   // Esc closes it, as the shortcuts overlay promises. Safe mid-render: the
   // render keeps going and the image swaps in when done.
   const open = state !== null;
+  // Focus lands in the prompt (or the panel while it's disabled mid-render),
+  // Tab stays inside, and closing hands focus back to the reading.
+  const panelRef = useRef<HTMLElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  useDialogFocus(open, panelRef, promptRef);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -60,13 +66,19 @@ export function ChapterImageRefineDrawer({
               position: 'fixed',
               inset: 0,
               background: 'rgba(20, 17, 13, 0.36)',
-              zIndex: 40,
+              // Above the app header (50), like the shortcuts overlay.
+              zIndex: 60,
               cursor: 'pointer',
               pointerEvents: isRefining ? 'none' : 'auto',
             }}
           />
           <motion.aside
             key="drawer"
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cb-figure-refine-title"
+            tabIndex={-1}
             initial={{ x: 480, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 480, opacity: 0 }}
@@ -80,7 +92,8 @@ export function ChapterImageRefineDrawer({
               background: 'var(--cb-ground-page)',
               borderLeft: '1px solid var(--cb-border-default)',
               boxShadow: '-12px 0 36px rgba(20,17,13,0.16)',
-              zIndex: 41,
+              zIndex: 61,
+              outline: 'none',
               display: 'flex',
               flexDirection: 'column',
               fontFamily: 'var(--font-cb-serif)',
@@ -108,6 +121,7 @@ export function ChapterImageRefineDrawer({
                   Refine image
                 </div>
                 <h2
+                  id="cb-figure-refine-title"
                   style={{
                     margin: 0,
                     fontSize: 22,
@@ -121,8 +135,10 @@ export function ChapterImageRefineDrawer({
                 </h2>
               </div>
               <button
+                type="button"
                 onClick={onClose}
                 aria-label="Close"
+                className="cb-focus pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                 style={{
                   background: 'none',
                   border: 0,
@@ -197,6 +213,8 @@ export function ChapterImageRefineDrawer({
                 )}
               </div>
               <textarea
+                ref={promptRef}
+                aria-label="Image prompt"
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 readOnly={!hasOpenAiKey}

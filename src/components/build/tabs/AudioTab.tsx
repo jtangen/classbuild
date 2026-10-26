@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { motion } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { slugify } from '../../../utils/format';
 import { downloadFile } from '../../../utils/download';
 import { isSafeMediaUrl } from '../../../utils/url';
+import { ArtifactShell } from '../ArtifactShell';
 import {
   ArtifactStatusLine,
   ArtifactEmpty,
@@ -21,7 +21,11 @@ export interface AudioTabProps {
   chapterNum: number;
   chapterTitle: string;
   isGenerating: boolean;
+  /** Drafting the transcript (needs the Anthropic key; one at a time). */
   canGenerate: boolean;
+  /** Narrating an existing transcript: ElevenLabs only, but one narration at
+   *  a time across chapters (the in-flight slot is single per kind). */
+  canNarrate?: boolean;
   hasElevenLabsKey: boolean;
   onGenerate: () => void;
   onRetry: () => void;
@@ -43,6 +47,7 @@ export function AudioTab({
   chapterTitle,
   isGenerating,
   canGenerate,
+  canNarrate = true,
   hasElevenLabsKey,
   onGenerate,
   onRetry,
@@ -51,26 +56,22 @@ export function AudioTab({
   onSaveTranscript,
 }: AudioTabProps) {
   if (audioTranscript) {
+    // audioUrl can come from an imported project file; only an app-made
+    // blob:/data:audio URL may reach the imperative href below (a javascript:
+    // URL would run on click).
+    const canDownload = isSafeMediaUrl(audioUrl, 'audio');
     return (
-      <div className="space-y-4">
+      <div style={{ display: 'grid', gap: 16 }}>
         {audioUrl && (
-          <div className="bg-cb-ground-page border border-cb-border-default rounded-xl p-5">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-10 h-10 rounded-full bg-cb-accent-emphasis-quiet flex items-center justify-center">
-                <svg className="w-5 h-5 text-cb-accent-emphasis" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" />
-                </svg>
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">Class Audiobook</p>
-                <p className="text-xs text-cb-text-muted">Generated with ElevenLabs</p>
-              </div>
+          <ArtifactShell
+            kicker="Narration"
+            title="Class audiobook"
+            meta="Generated with ElevenLabs"
+            actions={
               <Button
                 size="sm"
-                // audioUrl can come from an imported project file; only an
-                // app-made blob:/data:audio URL may reach this imperative href
-                // (a javascript: URL would run on click).
-                disabled={!isSafeMediaUrl(audioUrl, 'audio')}
+                variant="secondary"
+                disabled={!canDownload}
                 onClick={() => {
                   if (!isSafeMediaUrl(audioUrl, 'audio')) return;
                   const a = document.createElement('a');
@@ -79,79 +80,87 @@ export function AudioTab({
                   a.click();
                 }}
               >
-                <svg className="mr-1.5 w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                  <polyline points="7 10 12 15 17 10" />
-                  <line x1="12" y1="15" x2="12" y2="3" />
-                </svg>
-                Download .mp3
+                Download .mp3 ↓
               </Button>
-            </div>
-            <audio controls className="w-full" src={audioUrl}>
+            }
+          >
+            <audio controls src={audioUrl} style={{ display: 'block', width: '100%' }}>
               Your browser does not support the audio element.
             </audio>
             {audioPersistNote && (
-              <p className="mt-3 mb-0 text-xs italic text-cb-text-muted leading-relaxed">
+              <p
+                className="cb-italic"
+                style={{ margin: '12px 0 0', fontSize: 13, lineHeight: 1.55, color: 'var(--cb-text-muted)' }}
+              >
                 {audioPersistNote}
               </p>
             )}
-          </div>
+          </ArtifactShell>
         )}
         {!audioUrl && hasElevenLabsKey && audioError && (
-          <div className="bg-cb-status-warning-bg border border-cb-status-warning rounded-xl p-4">
-            <p className="text-cb-status-warning text-sm mb-1">
-              Audio synthesis failed: {audioError}
+          <div
+            role="alert"
+            style={{
+              padding: '12px 14px',
+              background: 'var(--cb-status-warning-bg)',
+              borderLeft: '2px solid var(--cb-status-warning)',
+              borderRadius: 2,
+            }}
+          >
+            <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.55 }}>
+              <span style={{ color: 'var(--cb-status-warning-text)', fontWeight: 500 }}>
+                Audio synthesis failed.
+              </span>{' '}
+              {audioError}
             </p>
-            {/* !canGenerate: another chapter's narration is in flight — the
-                in-flight slot (spinner/Stop) is single per material kind. */}
-            <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating || !canGenerate}>
-              Retry Audio
+            <Button size="sm" variant="secondary" onClick={onRetry} disabled={isGenerating || !canNarrate}>
+              Retry audio
             </Button>
           </div>
         )}
-        {!audioUrl && hasElevenLabsKey && !audioError && (
-          <div className="bg-cb-ground-page border border-cb-border-default rounded-xl p-4 text-center">
-            {isGenerating ? (
-              <div className="flex flex-col items-center gap-3">
-                <div className="flex gap-1">
-                  {[0, 1, 2].map(i => (
-                    <motion.div
-                      key={i}
-                      className="w-2 h-2 rounded-full bg-cb-accent-emphasis"
-                      animate={{ scale: [1, 1.4, 1], opacity: [0.4, 1, 0.4] }}
-                      transition={{ duration: 0.8, delay: i * 0.12, repeat: Infinity }}
-                    />
-                  ))}
+        {!audioUrl && hasElevenLabsKey && !audioError &&
+          (isGenerating ? (
+            <div>
+              <ArtifactStatusLine onStop={onStop}>
+                {audioChunkProgress
+                  ? `Synthesising audio · chunk ${audioChunkProgress.current} of ${audioChunkProgress.total}…`
+                  : 'Synthesising audio…'}
+              </ArtifactStatusLine>
+              {audioChunkProgress && (
+                <div style={{ height: 2, background: 'var(--cb-border-default)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${(audioChunkProgress.current / Math.max(1, audioChunkProgress.total)) * 100}%`,
+                      background: 'var(--cb-accent-emphasis)',
+                      transition: 'width 320ms cubic-bezier(0.32,0.04,0.32,1)',
+                    }}
+                  />
                 </div>
-                <span className="text-cb-text-default text-sm">
-                  {audioChunkProgress
-                    ? `Synthesizing audio: chunk ${audioChunkProgress.current} of ${audioChunkProgress.total}...`
-                    : 'Synthesizing audio...'}
-                </span>
-                {audioChunkProgress && (
-                  <div className="w-48">
-                    <div className="h-1.5 bg-cb-surface-sunken rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-cb-accent-emphasis rounded-full transition-all duration-500"
-                        style={{ width: `${(audioChunkProgress.current / audioChunkProgress.total) * 100}%` }}
-                      />
-                    </div>
-                  </div>
-                )}
-                <Button size="sm" variant="ghost" onClick={onStop}>
-                  Stop
-                </Button>
-              </div>
-            ) : (
-              <>
-                <p className="text-cb-text-default text-sm mb-1">Transcript ready — click below to generate audio.</p>
-                <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating || !canGenerate}>
-                  Generate Audio
-                </Button>
-              </>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: '10px 16px',
+                flexWrap: 'wrap',
+                padding: '14px 16px',
+                background: 'var(--cb-surface-sunken)',
+                border: '1px solid var(--cb-border-default)',
+                borderRadius: 2,
+              }}
+            >
+              <span className="cb-italic" style={{ fontSize: 14, color: 'var(--cb-text-muted)' }}>
+                Transcript ready. Narrate it as a class audiobook.
+              </span>
+              <Button size="sm" variant="secondary" onClick={onRetry} disabled={isGenerating || !canNarrate}>
+                Generate audio
+              </Button>
+            </div>
+          ))}
         {!audioUrl && !hasElevenLabsKey && (
           <KeyMissingBanner
             tone="optional"
@@ -240,12 +249,15 @@ function TranscriptPanel({
   const changed = draft.trim() !== transcript.trim();
 
   return (
-    <div className="bg-cb-ground-page border border-cb-border-default rounded-xl overflow-hidden">
-      <div className="flex items-baseline justify-between gap-3 px-5 py-3 bg-cb-surface-sunken border-b border-cb-border-default">
-        <span className="font-mono text-xs text-cb-text-muted tracking-wide">
-          transcript · {words.toLocaleString()} words · ≈ {minutes} min narrated
+    <ArtifactShell
+      kicker="Transcript"
+      meta={
+        <span className="cb-mono" style={{ fontStyle: 'normal', fontSize: 12 }}>
+          {words.toLocaleString()} words · ≈ {minutes} min narrated
         </span>
-        <div className="flex gap-2 shrink-0">
+      }
+      actions={
+        <>
           {!editing && (
             <Button
               size="sm"
@@ -272,19 +284,34 @@ function TranscriptPanel({
               )
             }
           >
-            Download .txt
+            Download .txt ↓
           </Button>
-        </div>
-      </div>
+        </>
+      }
+      bodyless
+    >
       {editing ? (
-        <div className="p-5">
+        <div style={{ padding: '16px 20px' }}>
           <textarea
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             rows={14}
-            className="w-full text-sm leading-relaxed text-cb-text-default bg-cb-ground-canvas border border-cb-border-default rounded p-3 resize-y outline-none"
+            aria-label="Transcript"
+            className="cb-focus"
+            style={{
+              width: '100%',
+              padding: '10px 12px',
+              fontFamily: 'var(--font-cb-serif)',
+              fontSize: 15,
+              lineHeight: 1.6,
+              color: 'var(--cb-text-default)',
+              background: 'var(--cb-ground-canvas)',
+              border: '0.5px solid var(--cb-border-default)',
+              borderRadius: 2,
+              resize: 'vertical',
+            }}
           />
-          <div className="flex items-baseline gap-2 mt-3 flex-wrap">
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
             <Button
               size="sm"
               disabled={!draft.trim() || !changed}
@@ -306,19 +333,19 @@ function TranscriptPanel({
               Cancel
             </Button>
             {hasAudio && changed && (
-              <span className="text-xs italic text-cb-text-muted">
+              <span className="cb-italic" style={{ fontSize: 13, color: 'var(--cb-text-muted)' }}>
                 Saving won’t change the existing audio — re-narrate to update it.
               </span>
             )}
           </div>
         </div>
       ) : (
-        <div className="px-5 py-4 max-h-96 overflow-y-auto">
-          <p className="m-0 text-sm leading-relaxed text-cb-text-default whitespace-pre-wrap">
+        <div style={{ padding: '14px 20px', maxHeight: 384, overflowY: 'auto' }}>
+          <p style={{ margin: 0, fontSize: 15, lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
             {transcript}
           </p>
         </div>
       )}
-    </div>
+    </ArtifactShell>
   );
 }

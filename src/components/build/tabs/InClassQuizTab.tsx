@@ -1,6 +1,6 @@
-import { motion } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { ArtifactStatusLine, ArtifactEmpty } from '../artifactHelpers';
+import { ArtifactShell } from '../ArtifactShell';
 import type { InClassQuizQuestion } from '../../../types/course';
 
 export interface InClassQuizTabProps {
@@ -45,95 +45,100 @@ export function InClassQuizTab({
     );
   }
 
+  const downloadPack = async () => {
+    try {
+      const { generateQuizDocPackage } = await import(
+        '../../../services/export/quizDocExporter'
+      );
+      const blob = await generateQuizDocPackage(questions, courseTitle, chapterTitle);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `quiz-${chapterTitle
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .slice(0, 40)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : 'Quiz export failed.');
+    }
+  };
+
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-cb-text-muted">
-          {questions.length} questions — 5 shuffled versions (A-E) + answer key
-        </p>
-        <Button
-          size="sm"
-          onClick={async () => {
-            try {
-              const { generateQuizDocPackage } = await import(
-                '../../../services/export/quizDocExporter'
-              );
-              const blob = await generateQuizDocPackage(
-                questions,
-                courseTitle,
-                chapterTitle,
-              );
-              const url = URL.createObjectURL(blob);
-              const a = document.createElement('a');
-              a.href = url;
-              a.download = `quiz-${chapterTitle
-                .toLowerCase()
-                .replace(/[^a-z0-9]+/g, '-')
-                .slice(0, 40)}.zip`;
-              a.click();
-              URL.revokeObjectURL(url);
-            } catch (err) {
-              onError(err instanceof Error ? err.message : 'Quiz export failed.');
-            }
-          }}
-        >
-          <svg
-            className="mr-1.5 w-4 h-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-            <polyline points="7 10 12 15 17 10" />
-            <line x1="12" y1="15" x2="12" y2="3" />
-          </svg>
-          Download Quiz Pack (.zip)
+    <ArtifactShell
+      kicker="In-class quiz"
+      title={`${questions.length} questions`}
+      meta="Exports as five shuffled versions (A–E) and an answer key."
+      actions={
+        <Button size="sm" variant="secondary" onClick={() => void downloadPack()}>
+          Download quiz pack (.zip) ↓
         </Button>
-      </div>
-      {questions.map((q, i) => (
-        <motion.div
-          key={i}
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: i * 0.05 }}
-          className="bg-cb-ground-page border border-cb-border-default rounded-xl p-5"
-        >
-          <div className="flex items-start gap-3 mb-3">
-            <span className="shrink-0 w-7 h-7 rounded-lg bg-cb-accent-emphasis-quiet flex items-center justify-center text-xs font-bold text-cb-accent-emphasis">
-              {i + 1}
+      }
+    >
+      <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+        {questions.map((q, i) => (
+          <li
+            key={i}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '28px minmax(0, 1fr)',
+              gap: 12,
+              padding: i === 0 ? '2px 0 18px' : '18px 0',
+              borderTop: i === 0 ? 'none' : '0.5px solid var(--cb-border-default)',
+            }}
+          >
+            <span
+              className="cb-mono"
+              style={{ fontSize: 12.5, color: 'var(--cb-accent-emphasis)', paddingTop: 3 }}
+            >
+              {String(i + 1).padStart(2, '0')}
             </span>
-            <p className="text-sm font-medium leading-relaxed">{q.question}</p>
-          </div>
-          <div className="ml-10 space-y-1.5">
-            <div className="flex items-start gap-2 text-sm">
-              <span className="text-cb-status-success text-xs font-medium mt-0.5 shrink-0">a)</span>
-              <span className="text-cb-status-success">{q.correctAnswer}</span>
-            </div>
-            {q.distractors.map((d, j) => (
-              <div key={j} className="flex items-start gap-2 text-sm">
-                <span className="text-cb-text-muted text-xs font-medium mt-0.5 shrink-0">
-                  {String.fromCharCode(98 + j)})
-                </span>
-                <span className="text-cb-text-default">{d.text}</span>
+            <div style={{ minWidth: 0 }}>
+              <p style={{ margin: '0 0 10px', fontSize: 16, lineHeight: 1.5 }}>{q.question}</p>
+              <ol style={{ listStyle: 'none', margin: 0, padding: 0, fontSize: 14.5, lineHeight: 1.55 }}>
+                {[{ text: q.correctAnswer, correct: true }, ...q.distractors.map((d) => ({ text: d.text, correct: false }))].map(
+                  (opt, j) => (
+                    <li key={j} style={{ display: 'flex', gap: 8, alignItems: 'baseline', marginBottom: 2 }}>
+                      <span
+                        className="cb-mono"
+                        style={{ fontSize: 12, color: 'var(--cb-text-muted)', flexShrink: 0 }}
+                      >
+                        {String.fromCharCode(97 + j)})
+                      </span>
+                      <span style={{ color: opt.correct ? 'var(--cb-status-success)' : 'var(--cb-text-default)' }}>
+                        {opt.text}
+                      </span>
+                    </li>
+                  ),
+                )}
+              </ol>
+              <div
+                style={{
+                  marginTop: 10,
+                  paddingTop: 10,
+                  borderTop: '0.5px solid var(--cb-border-subtle)',
+                  fontSize: 13,
+                  lineHeight: 1.55,
+                  color: 'var(--cb-text-muted)',
+                }}
+              >
+                <p style={{ margin: '0 0 4px' }}>
+                  <span className="cb-sc" style={{ color: 'var(--cb-status-success)', marginRight: 6 }}>
+                    Correct
+                  </span>
+                  {q.correctFeedback}
+                </p>
+                {q.distractors.map((d, j) => (
+                  <p key={j} style={{ margin: '0 0 4px' }}>
+                    <span style={{ color: 'var(--cb-status-danger)' }}>“{d.text}”</span> {d.feedback}
+                  </p>
+                ))}
               </div>
-            ))}
-          </div>
-          <div className="ml-10 mt-3 pt-3 border-t border-cb-border-subtle">
-            <p className="text-xs text-cb-status-success mb-1.5">
-              <span className="font-medium">Correct:</span> {q.correctFeedback}
-            </p>
-            {q.distractors.map((d, j) => (
-              <p key={j} className="text-xs text-cb-text-muted mb-1">
-                <span className="font-medium text-cb-status-danger">"{d.text}":</span>{' '}
-                {d.feedback}
-              </p>
-            ))}
-          </div>
-        </motion.div>
-      ))}
-    </div>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </ArtifactShell>
   );
 }

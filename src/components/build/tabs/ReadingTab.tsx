@@ -254,7 +254,7 @@ export function ReadingTab(props: ReadingTabProps) {
           </div>
           {showImageHint && chapterHasRefinableImages(chapterHtml) && (
             <DiscoveryHint
-              text="Hover any image in the chapter — click to refine just that one figure."
+              text="Click or tap any image in the chapter to refine just that one figure."
               onDismiss={onDismissImageHint}
             />
           )}

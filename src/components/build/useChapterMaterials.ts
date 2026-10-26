@@ -431,7 +431,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   // ── Generators ─────────────────────────────────────────────────────
 
   const generateQuiz = useCallback(async () => {
-    if (!syllabus || !currentChapter || !syllabusChapter) return;
+    if (!syllabus || !currentChapter || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'quiz',
@@ -506,7 +506,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   ]);
 
   const generateInClassQuiz = useCallback(async () => {
-    if (!syllabus || !currentChapter || !syllabusChapter) return;
+    if (!syllabus || !currentChapter || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'inclassquiz',
@@ -569,7 +569,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   ]);
 
   const generateWeeklyChallenge = useCallback(async () => {
-    if (!syllabus || !currentChapter || !syllabusChapter) return;
+    if (!syllabus || !currentChapter || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'weeklychallenge',
@@ -659,7 +659,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   ]);
 
   const generateDiscussion = useCallback(async () => {
-    if (!syllabus || !syllabusChapter) return;
+    if (!syllabus || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'discussion',
@@ -716,7 +716,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   ]);
 
   const generateActivities = useCallback(async () => {
-    if (!syllabus || !syllabusChapter) return;
+    if (!syllabus || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'activities',
@@ -776,7 +776,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
 
   const fleshOutActivity = useCallback(
     async (index: number) => {
-      if (!syllabusChapter || expandingActivity !== null) return;
+      if (!syllabusChapter || expandingActivity !== null || !claudeApiKey.trim()) return;
       const activity = activities[index];
       if (!activity) return;
       // Captured: the user may switch chapters while the guide is written.
@@ -852,7 +852,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   );
 
   const generateAudio = useCallback(async () => {
-    if (!currentChapter || !syllabus) return;
+    if (!currentChapter || !syllabus || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'audio',
@@ -992,7 +992,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   ]);
 
   const generateSlides = useCallback(async () => {
-    if (!currentChapter || !syllabus || !syllabusChapter) return;
+    if (!currentChapter || !syllabus || !syllabusChapter || !claudeApiKey.trim()) return;
     const chapterNum = selectedChapterNum;
     await runGenerationLifecycle({
       kind: 'slides',

@@ -1,6 +1,6 @@
-import { motion } from 'framer-motion';
+import { CodexButton as Button } from '../../codex';
 import { ArtifactShell } from '../ArtifactShell';
-import { ArtifactStatusLine, ArtifactEmpty } from '../artifactHelpers';
+import { ArtifactStatusLine, ArtifactEmpty, CopyIconButton } from '../artifactHelpers';
 
 export interface DiscussionPrompt {
   prompt: string;
@@ -56,97 +56,52 @@ export function DiscussionTab({
       title={`${discussions.length} conversation prompts`}
       meta="Designed to display on a slide as students arrive."
       actions={
-        <button
+        <Button
+          size="sm"
+          variant="secondary"
           onClick={() => onCopy(formatDiscussionsText(), 'discussions')}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-cb-accent-emphasis-quiet text-cb-accent-emphasis hover:bg-cb-accent-emphasis-quiet transition-colors cursor-pointer shrink-0"
         >
-          {copiedLabel === 'discussions' ? (
-            <>
-              <svg
-                className="w-3.5 h-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Copied
-            </>
-          ) : (
-            <>
-              <svg
-                className="w-3.5 h-3.5"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-              </svg>
-              Copy all ↓
-            </>
-          )}
-        </button>
+          {copiedLabel === 'discussions' ? 'Copied' : 'Copy all'}
+        </Button>
       }
     >
-      <div className="space-y-3">
+      <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {discussions.map((d, i) => (
-          <motion.div
+          <li
             key={i}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: i * 0.08 }}
-            className="bg-cb-ground-page border border-cb-border-default rounded-xl p-6"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'minmax(0, 1fr) auto',
+              gap: 12,
+              alignItems: 'start',
+              padding: i === 0 ? '2px 0 16px' : '16px 0',
+              borderTop: i === 0 ? 'none' : '0.5px solid var(--cb-border-default)',
+            }}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <span className="text-xs px-2.5 py-1 rounded-full bg-cb-accent-emphasis-quiet text-cb-accent-emphasis font-medium inline-block mb-3">
+            <div style={{ minWidth: 0 }}>
+              {d.hook && (
+                <div
+                  className="cb-italic"
+                  style={{
+                    fontSize: 13.5,
+                    lineHeight: 1.5,
+                    color: 'var(--cb-accent-emphasis)',
+                    marginBottom: 6,
+                  }}
+                >
                   {d.hook}
-                </span>
-                <p className="text-base text-cb-text-default leading-relaxed">
-                  {d.prompt}
-                </p>
-              </div>
-              <button
-                onClick={() => onCopy(d.prompt, `discussion-${i}`)}
-                className="shrink-0 p-1.5 rounded-md text-cb-text-muted hover:text-cb-accent-emphasis hover:bg-cb-accent-emphasis-quiet transition-colors cursor-pointer"
-                title="Copy prompt"
-              >
-                {copiedLabel === `discussion-${i}` ? (
-                  <svg
-                    className="w-4 h-4 text-cb-status-success"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                    strokeLinecap="round"
-                  >
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                ) : (
-                  <svg
-                    className="w-4 h-4"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
-                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
-                  </svg>
-                )}
-              </button>
+                </div>
+              )}
+              <p style={{ margin: 0, fontSize: 16, lineHeight: 1.55 }}>{d.prompt}</p>
             </div>
-          </motion.div>
+            <CopyIconButton
+              copied={copiedLabel === `discussion-${i}`}
+              onClick={() => onCopy(d.prompt, `discussion-${i}`)}
+              label="Copy prompt"
+            />
+          </li>
         ))}
-      </div>
+      </ol>
     </ArtifactShell>
   );
 }

@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { CodexButton as Button } from '../codex';
+import { useDialogFocus } from './useDialogFocus';
 
 const SHORTCUTS: Array<{ keys: string; label: string }> = [
   { keys: '1 … 8',  label: 'Switch tab (Reading / Quizzes / Slides / …)' },
@@ -12,7 +14,9 @@ const SHORTCUTS: Array<{ keys: string; label: string }> = [
 ];
 
 /** Modal overlay listing the keyboard shortcuts. Toggled by `?`. Dismisses
- *  with Escape, scrim click, or any external close trigger. */
+ *  with Escape, scrim click, the Close button, or any external close trigger.
+ *  Takes focus while open (Tab stays inside) and hands it back on close;
+ *  BuildPage ignores its page shortcuts meanwhile. */
 export function ShortcutsHelpOverlay({
   open,
   onClose,
@@ -20,6 +24,9 @@ export function ShortcutsHelpOverlay({
   open: boolean;
   onClose: () => void;
 }) {
+  const panelRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(open, panelRef);
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -50,12 +57,18 @@ export function ShortcutsHelpOverlay({
           }}
         >
           <motion.div
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cb-shortcuts-title"
+            tabIndex={-1}
             initial={{ opacity: 0, y: 6 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             transition={{ duration: 0.2 }}
             onClick={(e) => e.stopPropagation()}
             style={{
+              outline: 'none',
               background: 'var(--cb-surface-raised, var(--cb-ground-page))',
               border: '1px solid var(--cb-border-default)',
               borderRadius: 3,
@@ -77,6 +90,7 @@ export function ShortcutsHelpOverlay({
               Keyboard
             </div>
             <h3
+              id="cb-shortcuts-title"
               style={{
                 margin: '0 0 18px',
                 fontSize: 22,
@@ -116,17 +130,30 @@ export function ShortcutsHelpOverlay({
                 ))}
               </tbody>
             </table>
-            <p
-              className="cb-italic"
+            <div
               style={{
-                margin: '18px 0 0',
-                fontSize: 12.5,
-                color: 'var(--cb-text-muted)',
-                lineHeight: 1.55,
+                display: 'flex',
+                alignItems: 'baseline',
+                justifyContent: 'space-between',
+                gap: 16,
+                marginTop: 18,
               }}
             >
-              Shortcuts only fire when you're not typing in a field. Esc or click outside to dismiss.
-            </p>
+              <p
+                className="cb-italic"
+                style={{
+                  margin: 0,
+                  fontSize: 12.5,
+                  color: 'var(--cb-text-muted)',
+                  lineHeight: 1.55,
+                }}
+              >
+                Shortcuts only fire when you're not typing in a field. Esc or click outside to dismiss.
+              </p>
+              <Button size="sm" variant="secondary" onClick={onClose} style={{ flexShrink: 0 }}>
+                Close
+              </Button>
+            </div>
           </motion.div>
         </motion.div>
       )}
