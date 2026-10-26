@@ -8,6 +8,21 @@
  *   setTabError('quiz', friendlyError(err));
  */
 
+/**
+ * Claude's safety classifiers declined the request and no fallback model took
+ * it (stop_reason 'refusal'). `category` is the API's stop_details.category,
+ * e.g. 'bio' or 'cyber', or null when the API doesn't say.
+ */
+export class ModelRefusalError extends Error {
+  category: string | null;
+
+  constructor(category: string | null) {
+    super(`Claude declined this request${category ? ` (safety category: ${category})` : ''}.`);
+    this.name = 'ModelRefusalError';
+    this.category = category;
+  }
+}
+
 interface StatusLike {
   status?: number;
   statusCode?: number;
@@ -16,6 +31,10 @@ interface StatusLike {
 
 export function friendlyError(err: unknown, fallback = 'Something went wrong. Try again in a moment.'): string {
   if (err == null) return fallback;
+
+  if (err instanceof ModelRefusalError) {
+    return "Claude's safety filters declined this request. Try rewording the topic or this chapter's focus.";
+  }
 
   const message = err instanceof Error ? err.message : String(err);
   const status = getStatus(err);

@@ -1,5 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import { getClient, getThinkingTokens, MODELS, type ThinkingBudget } from './client';
+import { ModelRefusalError } from '../../utils/errors';
 
 export interface WebSearchResult {
   title: string;
@@ -65,12 +66,11 @@ export async function streamMessage(
     if (thinkingBudget) {
       const budgetTokens = getThinkingTokens(thinkingBudget);
       if (model === MODELS.opus) {
-        // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
-        // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
-        // Two non-obvious defaults on 4.7+: adaptive thinking is OFF unless you
-        // set it explicitly (effort alone does NOT make Opus think), and the
-        // thinking summary text is omitted by default — `display: 'summarized'`
-        // restores the streamed reasoning the UI shows via onThinking.
+        // Opus 5.5: thinking is always on — `budget_tokens` and `disabled` both
+        // 400. Depth is steered only with `effort`, which defaults to `medium` on
+        // 5.5, so always pass it explicitly. The thinking summary text is omitted
+        // by default — `display: 'summarized'` restores the streamed reasoning
+        // the UI shows via onThinking.
         // SDK 0.74.0 doesn't type `display` on the adaptive config yet; the
         // field is still sent through to the API, so cast.
         params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
@@ -93,13 +93,30 @@ export async function streamMessage(
       params.tools = tools;
     }
 
-    const stream = await client.messages.stream(params, signal ? { signal } : undefined);
+    const headers: Record<string, string> = {};
+    if (model === MODELS.opus) {
+      // Opus 5.5's safety classifiers can decline a request (stop_reason
+      // 'refusal') — a real risk for courses on microbiology, security, etc.
+      // The server-side fallback re-runs a declined request on a suitable
+      // model inside the same stream, continuing from any partial text.
+      // SDK 0.74.0 doesn't type `fallbacks`, so cast and send the beta header.
+      (params as unknown as Record<string, unknown>).fallbacks = 'default';
+      headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
+    }
+
+    const stream = await client.messages.stream(params, { headers, ...(signal ? { signal } : {}) });
 
     // Track server tool use blocks to capture search queries from deltas
     const serverToolInputs = new Map<number, string>();
+    // The refusal category rides on message_delta; SDK 0.74.0's accumulator
+    // drops fields it doesn't know, so it never reaches finalMessage().
+    let refusalCategory: string | null = null;
 
     for await (const event of stream) {
-      if (event.type === 'content_block_start') {
+      if (event.type === 'message_delta') {
+        const details = (event.delta as { stop_details?: { category?: string | null } | null }).stop_details;
+        if (details?.category) refusalCategory = details.category;
+      } else if (event.type === 'content_block_start') {
         const block = event.content_block;
         if (block.type === 'server_tool_use') {
           // Server-side tool use (e.g., web_search)
@@ -164,6 +181,14 @@ export async function streamMessage(
 
     // Process final message for complete tool use blocks
     const finalMessage = await stream.finalMessage();
+    if (finalMessage.stop_reason === 'refusal') {
+      // Every model in the chain declined (the Opus fallback included), so any
+      // partial text is unusable — fail instead of returning it as a result.
+      throw new ModelRefusalError(refusalCategory);
+    }
+    if (finalMessage.stop_reason === 'max_tokens') {
+      console.warn(`Claude stopped at max_tokens (${params.max_tokens}); the response is truncated.`);
+    }
     for (const block of finalMessage.content) {
       if (block.type === 'tool_use') {
         callbacks.onToolUse?.(block.name, block.input as Record<string, unknown>);
@@ -179,86 +204,54 @@ export async function streamMessage(
   }
 }
 
+/** Rate limits, overloads and 5xx. Errors that arrive mid-stream as SSE
+ *  `error` events carry no HTTP status, only the error type in the message. */
+function isTransientError(err: unknown): boolean {
+  if (err instanceof ModelRefusalError || typeof err !== 'object' || err === null) return false;
+  const status = (err as { status?: unknown }).status;
+  if (typeof status === 'number') return status === 429 || status >= 500;
+  const message = err instanceof Error ? err.message : String(err);
+  return /\b(rate_limit_error|overloaded_error|api_error)\b/.test(message);
+}
+
+/**
+ * streamMessage with retries on transient failures. The SDK already retries
+ * the initial HTTP request; this layer catches failures once the stream is
+ * open. An attempt is only retried if it hadn't streamed anything yet —
+ * replaying after partial output would feed the same text to onText twice.
+ * onError fires once, for the final failure, so a call that recovers on a
+ * retry never flashes an error banner.
+ */
 export async function streamWithRetry(
   options: StreamOptions,
   callbacks: StreamCallbacks,
   maxRetries = 3,
 ): Promise<string> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  const { onError, ...rest } = callbacks;
+  for (let attempt = 0; ; attempt++) {
+    let streamed = false;
+    const attemptCallbacks: StreamCallbacks = {
+      ...rest,
+      onText: (text) => {
+        streamed = true;
+        rest.onText?.(text);
+      },
+      onThinking: (text) => {
+        streamed = true;
+        rest.onThinking?.(text);
+      },
+    };
     try {
-      return await streamMessage(options, callbacks);
+      return await streamMessage(options, attemptCallbacks);
     } catch (err) {
       // Never retry a user-initiated cancel.
-      if (options.signal?.aborted) throw err;
-      const msg = err instanceof Error ? err.message : String(err);
-      const isRateLimit = msg.includes('429') || msg.toLowerCase().includes('rate');
-      if (isRateLimit && attempt < maxRetries) {
-        await new Promise(r => setTimeout(r, (attempt + 1) * 1500));
+      const retry = !options.signal?.aborted && !streamed && attempt < maxRetries && isTransientError(err);
+      if (retry) {
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 1500));
         continue;
       }
+      onError?.(err instanceof Error ? err : new Error(String(err)));
       throw err;
     }
   }
-  throw new Error('Max retries exceeded');
-}
-
-// Non-streaming version for simpler calls
-export async function sendMessage(
-  options: Omit<StreamOptions, 'maxTokens'> & { maxTokens?: number }
-): Promise<Anthropic.Message> {
-  const {
-    apiKey,
-    model = MODELS.sonnet,
-    system,
-    messages,
-    thinkingBudget,
-    tools,
-    maxTokens = 16000,
-    signal,
-  } = options;
-
-  const client = getClient(apiKey);
-
-  const params: Anthropic.MessageCreateParams = {
-    model,
-    max_tokens: maxTokens,
-    messages,
-  };
-
-  if (system) {
-    params.system = system;
-  }
-
-  if (thinkingBudget) {
-    const budgetTokens = getThinkingTokens(thinkingBudget);
-    if (model === MODELS.opus) {
-      // Opus 4.8: manual extended thinking (`budget_tokens`) is rejected on
-      // Opus 4.7+. Enable adaptive thinking and steer depth with `effort`.
-      // Two non-obvious defaults on 4.7+: adaptive thinking is OFF unless you
-      // set it explicitly (effort alone does NOT make Opus think), and the
-      // thinking summary text is omitted by default — `display: 'summarized'`
-      // restores the streamed reasoning the UI shows via onThinking.
-      // SDK 0.74.0 doesn't type `display` on the adaptive config yet; the
-      // field is still sent through to the API, so cast.
-      params.thinking = { type: 'adaptive', display: 'summarized' } as Anthropic.ThinkingConfigParam;
-      params.output_config = { effort: thinkingBudget };
-      // Adaptive thinking tokens count toward max_tokens. Reserve generous
-      // headroom ABOVE the caller's intended output so a deep think can't eat
-      // the output budget and truncate the answer — a truncated JSON material
-      // (quiz, weekly challenge) then fails to parse and silently reverts.
-      // Capped at the 128k output ceiling.
-      params.max_tokens = Math.min(128000, maxTokens + budgetTokens * 2);
-    } else {
-      // Sonnet 4.6 / Haiku 4.5 still accept manual extended thinking, where
-      // budget_tokens must fit inside max_tokens.
-      params.thinking = { type: 'enabled', budget_tokens: budgetTokens };
-      params.max_tokens = Math.max(maxTokens, budgetTokens + maxTokens);
-    }
-  }
-
-  if (tools && tools.length > 0) {
-    params.tools = tools;
-  }
-
-  return client.messages.create(params, signal ? { signal } : undefined);
 }
