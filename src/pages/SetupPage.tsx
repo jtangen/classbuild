@@ -619,7 +619,7 @@ export function SetupPage() {
               whiteSpace: 'nowrap',
             }}
           >
-            {hasApiKey ? 'Manage keys ↗' : 'Set keys ↗'}
+            {hasApiKey ? 'Manage keys' : 'Set keys'}
           </button>
           <span className="cb-italic">
             Keys live in this browser. Nothing is sent to ClassBuild — there is no
