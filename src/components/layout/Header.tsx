@@ -6,6 +6,7 @@ import type { MaterialKind } from '../../store/uiStore';
 import { useCourseStore } from '../../store/courseStore';
 import { CodexButton } from '../codex/Button';
 import { Colophon } from '../codex/Colophon';
+import { useCourseBusy } from './useCourseBusy';
 
 const ROMAN_LOWER = [
   'i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x',
@@ -48,6 +49,10 @@ export function Header() {
     setSelectedChapterNum,
   } = useUiStore();
   const { reset, currentStage } = useCourseStore();
+  // Not just isGenerating: a batch, slide render or per-material job keeps
+  // writing into the course by chapter number, so resetting under it would
+  // land the old course's output in the new one.
+  const isBusy = useCourseBusy();
   const [showConfirm, setShowConfirm] = useState(false);
 
   // Re-tick the relative "Saved · Xs ago" label. Once per 5s is plenty:
@@ -254,7 +259,7 @@ export function Header() {
               </button>
             )}
 
-            {!isLanding && !isGenerating && (
+            {!isLanding && !isBusy && (
               <CodexButton variant="ghost" size="sm" onClick={handleNewCourse}>
                 + new course
               </CodexButton>

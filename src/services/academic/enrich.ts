@@ -30,6 +30,8 @@ export interface EnrichOptions {
   /** Concurrency cap for parallel enrichment. Default 4. */
   concurrency?: number;
   onProgress?: (done: number, total: number) => void;
+  /** Cancels outstanding lookups; enrichDossier then rejects with an AbortError. */
+  signal?: AbortSignal;
 }
 
 function normalizeTitle(s: string): string {
@@ -59,11 +61,13 @@ function titlesMatch(a: string, b: string): boolean {
 async function enrichSource(
   source: ResearchSource,
   stats: EnrichmentStats,
+  signal?: AbortSignal,
 ): Promise<ResearchSource> {
   // Path A: source already claims a DOI — verify it against Crossref.
   if (source.doi) {
-    const work = await fetchCrossrefWork(source.doi);
-    if (work && work.title) {
+    const lookup = await fetchCrossrefWork(source.doi, signal);
+    if (lookup.status === 'found' && lookup.work.title) {
+      const work = lookup.work;
       const titleOk = !source.title || titlesMatch(source.title, work.title);
       if (!titleOk) {
         // Title doesn't match the DOI's actual paper — the model likely
@@ -72,7 +76,7 @@ async function enrichSource(
         return { ...source, doi: undefined, isVerified: false };
       }
       stats.doiVerified++;
-      const oa = await findOpenAccess(work.doi);
+      const oa = await findOpenAccess(work.doi, signal);
       if (oa?.isOa && oa.bestOaUrl) stats.oaFound++;
       return {
         ...source,
@@ -84,13 +88,16 @@ async function enrichSource(
         isVerified: true,
       };
     }
-    // DOI didn't resolve. Fall through to title lookup, but strip the DOI.
-    source = { ...source, doi: undefined };
+    // Crossref has no such DOI — a likely hallucination, so strip it before
+    // the title lookup. On a transient failure (rate limit, timeout, 5xx) the
+    // DOI is kept: the model may well have copied it from a search result,
+    // and it simply goes unverified if the title lookup can't place it.
+    if (lookup.status === 'not-found') source = { ...source, doi: undefined };
   }
 
-  // Path B: no DOI — search Semantic Scholar by title.
+  // Path B: no DOI (or an unconfirmed one) — search Semantic Scholar by title.
   if (source.title && source.title.length > 8) {
-    const results = await searchPapers(source.title, 3);
+    const results = await searchPapers(source.title, 3, signal);
     const match = results.find((r) => r.title && titlesMatch(source.title, r.title));
     if (match) {
       const doi = match.externalIds?.DOI;
@@ -101,7 +108,7 @@ async function enrichSource(
         .join(', ');
       if (doi) {
         stats.doiResolved++;
-        const oa = await findOpenAccess(doi);
+        const oa = await findOpenAccess(doi, signal);
         if (oa?.isOa && oa.bestOaUrl) stats.oaFound++;
         return {
           ...source,
@@ -134,11 +141,12 @@ async function enrichSource(
 async function runWithConcurrency<T>(
   tasks: Array<() => Promise<T>>,
   limit: number,
+  signal?: AbortSignal,
 ): Promise<T[]> {
   const results: T[] = new Array(tasks.length);
   let cursor = 0;
   async function worker() {
-    while (cursor < tasks.length) {
+    while (cursor < tasks.length && !signal?.aborted) {
       const i = cursor++;
       results[i] = await tasks[i]();
     }
@@ -166,17 +174,21 @@ export async function enrichDossier(
     return { dossier, stats };
   }
 
+  const signal = options?.signal;
   let done = 0;
   const tasks = dossier.sources.map((s) => async () => {
     try {
-      return await enrichSource(s, stats);
+      return await enrichSource(s, stats, signal);
     } finally {
       done++;
       options?.onProgress?.(done, dossier.sources.length);
     }
   });
 
-  const enriched = await runWithConcurrency(tasks, options?.concurrency ?? 4);
+  const enriched = await runWithConcurrency(tasks, options?.concurrency ?? 4, signal);
+  // Cancelled lookups degrade to "unverified" and the queue stops early, so
+  // a partial result would be wrong — and the caller is discarding it anyway.
+  if (signal?.aborted) throw new DOMException('Enrichment aborted.', 'AbortError');
   return {
     dossier: { ...dossier, sources: enriched },
     stats,

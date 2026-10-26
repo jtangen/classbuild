@@ -11,14 +11,19 @@ import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
 import { streamMessage } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
+import { beginAbortable, endAbortable, isInFlight } from '../services/abortRegistry';
 import {
   buildSyllabusPrompt,
+  isBriefReady,
   parseSyllabusResponse,
   parsePartialChapters,
 } from '../prompts/syllabus';
 import type { ChapterSyllabus, WidgetSpec } from '../types/course';
-import { friendlyError } from '../utils/errors';
+import { friendlyError, isAbortError } from '../utils/errors';
 import { CodexButton, CodexInput, CodexTextarea, CodexModal } from '../components/codex';
+
+/** Abort-registry key for the syllabus stream (one at a time). */
+const SYLLABUS_ABORT_KEY = 'syllabus';
 
 const ROMAN_UPPER = [
   'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
@@ -36,6 +41,7 @@ export function SyllabusPage() {
     updateSyllabusChapter,
     syllabusConversation,
     addSyllabusMessage,
+    clearSyllabusConversation,
     setStage,
     completeStage,
     chapters,
@@ -43,7 +49,7 @@ export function SyllabusPage() {
     resetDownstream,
   } = useCourseStore();
   const { claudeApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, error, setError } = useUiStore();
+  const { isGenerating, setIsGenerating, error, setError, setOpenKeysOnNextSetupVisit } = useUiStore();
 
   const [isThinking, setIsThinking] = useState(false);
   const [partialChapters, setPartialChapters] = useState<ChapterSyllabus[]>([]);
@@ -58,6 +64,23 @@ export function SyllabusPage() {
 
   const generateSyllabus = useCallback(
     async (feedbackText?: string) => {
+      // No brief, no paid call: an Opus draft of an empty topic is a junk
+      // syllabus (reached via browser Back after "+ new course", a stale tab,
+      // a bookmarked /syllabus). Send the user to write the brief instead.
+      if (!isBriefReady(setup)) {
+        navigate('/setup', { replace: true });
+        return;
+      }
+      if (!claudeApiKey.trim()) {
+        setOpenKeysOnNextSetupVisit(true);
+        navigate('/setup', { replace: true });
+        return;
+      }
+      // Registered so "Begin again", a regenerate, or a course reset/restore
+      // (abortAll) cancels this stream instead of letting it land the old
+      // brief's syllabus in the new course.
+      const controller = beginAbortable(SYLLABUS_ABORT_KEY);
+      const { signal } = controller;
       setIsGenerating(true);
       setIsThinking(true);
       setPartialChapters([]);
@@ -70,24 +93,22 @@ export function SyllabusPage() {
       fullTextRef.current = '';
 
       try {
-        const { systemPrompt, userMessage } = buildSyllabusPrompt(
-          setup,
-          feedbackText,
-          syllabusConversation,
-        );
+        const { systemPrompt, userMessage } = buildSyllabusPrompt(setup, feedbackText);
+
+        // A refine replays the conversation behind the original brief, so the
+        // model still sees the topic, audience and exclusions it designed
+        // against (and the history opens on a user turn, as the API requires).
+        // A fresh generation starts a new conversation.
+        const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        if (feedbackText && syllabusConversation.length > 0) {
+          messages.push({ role: 'user', content: buildSyllabusPrompt(setup).userMessage });
+          messages.push(...syllabusConversation);
+        } else {
+          clearSyllabusConversation();
+        }
+        messages.push({ role: 'user', content: userMessage });
 
         if (feedbackText) addSyllabusMessage('user', feedbackText);
-
-        const messages =
-          feedbackText && syllabusConversation.length > 0
-            ? [
-                ...syllabusConversation.map((m) => ({
-                  role: m.role as 'user' | 'assistant',
-                  content: m.content,
-                })),
-                { role: 'user' as const, content: userMessage },
-              ]
-            : [{ role: 'user' as const, content: userMessage }];
 
         const fullText = await streamMessage(
           {
@@ -95,12 +116,13 @@ export function SyllabusPage() {
             model: MODELS.opus,
             system: systemPrompt,
             messages,
-            // 'high' (not 'max'): on Opus 4.8 the effort levels were
+            // 'high' (not 'max'): since Opus 4.8 the effort levels were
             // recalibrated and 'max' overthinks — it stalled ~7 min before the
             // first token. 'high' matches the (fast) chapter build and is the
             // recommended floor for intelligence-sensitive work.
             thinkingBudget: 'high',
             maxTokens: 16000,
+            signal,
           },
           {
             onText: (text) => {
@@ -114,9 +136,11 @@ export function SyllabusPage() {
               }
             },
             onThinking: (text) => setThinkingText((prev) => prev + text),
-            onError: (err) => setError(err.message),
+            // No onError: the catch below sets the user-facing message (and
+            // stays silent for a cancel).
           },
         );
+        if (signal.aborted) return;
 
         addSyllabusMessage('assistant', fullText);
         const parsed = parseSyllabusResponse(fullText);
@@ -130,11 +154,17 @@ export function SyllabusPage() {
           );
         }
       } catch (err) {
+        if (signal.aborted || isAbortError(err)) return;
         setError(friendlyError(err, 'Syllabus generation failed.'));
       } finally {
-        setIsGenerating(false);
-        // Collapse thinking once we leave the thinking phase.
-        setIsThinking(false);
+        endAbortable(SYLLABUS_ABORT_KEY, controller);
+        // A superseding run owns the flags now; only the last one out (or a
+        // run cancelled by a course reset) clears them.
+        if (!isInFlight(SYLLABUS_ABORT_KEY)) {
+          setIsGenerating(false);
+          // Collapse thinking once we leave the thinking phase.
+          setIsThinking(false);
+        }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,7 +172,10 @@ export function SyllabusPage() {
   );
 
   useEffect(() => {
-    if (!syllabus && !isGenerating && claudeApiKey && !generationStarted.current) {
+    // The registry, not isGenerating: right after "Begin again" aborts a
+    // running draft, isGenerating is still true until that stream unwinds —
+    // gating on it would skip the new draft entirely.
+    if (!syllabus && !isInFlight(SYLLABUS_ABORT_KEY) && !generationStarted.current) {
       generationStarted.current = true;
       void generateSyllabus();
     }

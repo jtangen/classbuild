@@ -34,11 +34,19 @@ export function CodexModal({
   width = 480,
 }: CodexModalProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass inline arrows, so onClose changes on every parent render. If
+  // the open effect depended on it, each re-render (one per keystroke in an
+  // input inside the modal) would re-run it and yank focus back to the
+  // dialog. Keep the latest handler in a ref and run the effect per open.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') onCloseRef.current();
     };
     window.addEventListener('keydown', onKey);
     // Move focus into the modal so the screen reader and keyboard land here.
@@ -50,7 +58,7 @@ export function CodexModal({
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>

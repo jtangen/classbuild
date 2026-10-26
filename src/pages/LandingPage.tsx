@@ -10,6 +10,7 @@ import {
   parseProjectFile,
   type ProjectFileState,
 } from '../utils/projectFile';
+import { useCourseBusy } from '../components/layout/useCourseBusy';
 
 // ─── Example courses ─────────────────────────────────────────────────────
 
@@ -249,6 +250,11 @@ function formatSavedAt(iso: string | null): string | null {
 export function LandingPage() {
   const navigate = useNavigate();
   const { currentStage, reset, setup, syllabus, chapters } = useCourseStore();
+  // Replacing the course (Start fresh / Restore) waits for running generation
+  // to settle — see useCourseBusy.
+  const isBusy = useCourseBusy();
+  const busyNote =
+    'ClassBuild is still generating for the current course — let it finish, or stop it on the Build page, first.';
   const [showConfirm, setShowConfirm] = useState(false);
 
   // ── Restore-a-project-file flow ──
@@ -271,6 +277,7 @@ export function LandingPage() {
   };
 
   const startFresh = () => {
+    if (isBusy) return;
     setShowConfirm(false);
     reset();
     navigate('/setup');
@@ -282,6 +289,11 @@ export function LandingPage() {
   };
 
   const applyRestore = (state: ProjectFileState) => {
+    if (isBusy) {
+      setPendingRestore(null);
+      setRestoreError(busyNote);
+      return;
+    }
     applyProjectFile(state);
     setPendingRestore(null);
     navigate(stagePathFor(state.currentStage));
@@ -292,6 +304,10 @@ export function LandingPage() {
     e.target.value = ''; // allow re-selecting the same file after an error
     if (!file) return;
     setRestoreError(null);
+    if (isBusy) {
+      setRestoreError(busyNote);
+      return;
+    }
     let text: string;
     try {
       text = await file.text();
@@ -407,6 +423,10 @@ export function LandingPage() {
               <button
                 type="button"
                 onClick={() => {
+                  if (isBusy) {
+                    setRestoreError(busyNote);
+                    return;
+                  }
                   setRestoreError(null);
                   fileInputRef.current?.click();
                 }}
@@ -868,7 +888,12 @@ export function LandingPage() {
             <CodexButton variant="ghost" onClick={() => setShowConfirm(false)}>
               Cancel
             </CodexButton>
-            <CodexButton variant="destructive" onClick={startFresh}>
+            <CodexButton
+              variant="destructive"
+              onClick={startFresh}
+              disabled={isBusy}
+              title={isBusy ? busyNote : undefined}
+            >
               Start fresh
             </CodexButton>
             <CodexButton variant="primary" onClick={continueExisting}>
@@ -890,6 +915,14 @@ export function LandingPage() {
             {STAGE_LABELS[currentStage] ?? 'where you were'}
           </span>
           . Starting fresh clears the current syllabus, research, and chapters.
+          {isBusy && (
+            <>
+              {' '}
+              <span className="cb-italic" style={{ color: 'var(--cb-status-warning)' }}>
+                {busyNote}
+              </span>
+            </>
+          )}
         </p>
       </CodexModal>
 

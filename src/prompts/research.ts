@@ -45,6 +45,20 @@ export function buildResearchUserPrompt(chapterTitle: string, chapterNarrative: 
 Search for real academic sources. Find 5-8 high-quality references.`;
 }
 
+/**
+ * Model JSON is loosely typed — `"year": 2019`, `"authors": ["A", "B"]` — and
+ * the UI calls string methods on these fields, so coerce rather than cast.
+ */
+function asText(v: unknown): string {
+  if (typeof v === 'string') return v;
+  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
+  if (Array.isArray(v)) return v.map(asText).filter(Boolean).join(', ');
+  return '';
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 export function parseResearchResponse(text: string, chapterNumber: number): ResearchDossier | null {
   try {
     let jsonStr = text;
@@ -57,19 +71,22 @@ export function parseResearchResponse(text: string, chapterNumber: number): Rese
     if (firstBrace !== -1 && lastBrace !== -1) jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
 
     const raw = JSON.parse(jsonStr);
+    if (!isObject(raw)) return null;
     return {
       chapterNumber,
-      sources: (raw.sources || []).map((s: Record<string, unknown>): ResearchSource => ({
-        title: (s.title as string) || '',
-        authors: (s.authors as string) || '',
-        year: (s.year as string) || '',
-        url: s.url as string | undefined,
-        doi: s.doi as string | undefined,
-        summary: (s.summary as string) || '',
-        relevance: (s.relevance as string) || '',
-        isVerified: (s.isVerified as boolean) ?? false,
-      })),
-      synthesisNotes: (raw.synthesisNotes as string) || '',
+      sources: (Array.isArray(raw.sources) ? raw.sources : [])
+        .filter(isObject)
+        .map((s): ResearchSource => ({
+          title: asText(s.title),
+          authors: asText(s.authors),
+          year: asText(s.year),
+          url: asText(s.url) || undefined,
+          doi: asText(s.doi) || undefined,
+          summary: asText(s.summary),
+          relevance: asText(s.relevance),
+          isVerified: s.isVerified === true,
+        })),
+      synthesisNotes: asText(raw.synthesisNotes),
     };
   } catch {
     return null;

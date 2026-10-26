@@ -4,6 +4,7 @@ import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
 import { MODELS } from '../services/claude/client';
+import { isBriefReady } from '../prompts/syllabus';
 import { STAGES } from '../types/course';
 import type {
   CourseSetup,
@@ -114,16 +115,16 @@ export function SetupPage() {
     setOpenKeysOnNextSetupVisit,
   } = useUiStore();
   const [refineOpen, setRefineOpen] = useState(false);
-  const [keysOpen, setKeysOpen] = useState(false);
+  // Honour a cross-page request to open the keys modal — e.g. the user
+  // clicked an "Add OpenAI key →" CTA on the Build page. Read once on mount;
+  // the effect below then consumes the one-shot flag.
+  const [keysOpen, setKeysOpen] = useState(
+    () => useUiStore.getState().openKeysOnNextSetupVisit,
+  );
   const [showBeginConfirm, setShowBeginConfirm] = useState(false);
 
-  // Honour cross-page request to open the keys modal — e.g. user clicked an
-  // "Add OpenAI key →" CTA on the Build page.
   useEffect(() => {
-    if (openKeysOnNextSetupVisit) {
-      setKeysOpen(true);
-      setOpenKeysOnNextSetupVisit(false);
-    }
+    if (openKeysOnNextSetupVisit) setOpenKeysOnNextSetupVisit(false);
   }, [openKeysOnNextSetupVisit, setOpenKeysOnNextSetupVisit]);
 
   // Snap stale cohort values to the nearest valid pill.
@@ -158,7 +159,7 @@ export function SetupPage() {
     else if (setup.numChapters > 20) updateSetup({ numChapters: 20 });
   }, [setup.numChapters, updateSetup]);
 
-  const hasTopic = setup.topic.trim().length > 10;
+  const hasTopic = isBriefReady(setup);
   const hasApiKey = claudeApiKey.trim().length > 0;
   const canProceed = hasTopic && hasApiKey;
   // Anything downstream that "Begin" would wipe.
@@ -1144,6 +1145,12 @@ function EachChapterIncludes() {
 
 // ─── API keys modal ──────────────────────────────────────────────────────
 
+/** Only an auth rejection says a key is bad. A rate limit, outage or other
+ *  error leaves it unverified (null) rather than branding it "failed". */
+function verdictFromStatus(status: unknown): boolean | null {
+  return status === 401 || status === 403 ? false : null;
+}
+
 function ApiKeysModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { setup, updateSetup } = useCourseStore();
   const {
@@ -1167,13 +1174,21 @@ function ApiKeysModal({ open, onClose }: { open: boolean; onClose: () => void })
     setIsValidatingElevenLabs,
   } = useApiStore();
 
+  // Each provider's latest check. A check that finishes after the key was
+  // edited (or after a newer check began) must not stamp its verdict on the
+  // current key.
+  const latestCheck = useRef({ claude: 0, openai: 0, elevenLabs: 0 });
+
   const validateClaude = useCallback(async () => {
-    if (!claudeApiKey.trim()) return;
+    const key = claudeApiKey.trim();
+    if (!key) return;
+    const check = ++latestCheck.current.claude;
     setIsValidatingClaude(true);
+    let valid: boolean | null = null;
     try {
       const { default: Anthropic } = await import('@anthropic-ai/sdk');
       const client = new Anthropic({
-        apiKey: claudeApiKey.trim(),
+        apiKey: key,
         dangerouslyAllowBrowser: true,
       });
       // countTokens is free — it authenticates without spending tokens.
@@ -1181,42 +1196,51 @@ function ApiKeysModal({ open, onClose }: { open: boolean; onClose: () => void })
         model: MODELS.haiku,
         messages: [{ role: 'user', content: 'Hi' }],
       });
-      setClaudeKeyValid(true);
-    } catch {
-      setClaudeKeyValid(false);
-    } finally {
-      setIsValidatingClaude(false);
+      valid = true;
+    } catch (err) {
+      valid = verdictFromStatus((err as { status?: unknown } | null)?.status);
     }
+    if (check !== latestCheck.current.claude) return;
+    setIsValidatingClaude(false);
+    if (useApiStore.getState().claudeApiKey.trim() === key) setClaudeKeyValid(valid);
   }, [claudeApiKey, setClaudeKeyValid, setIsValidatingClaude]);
 
   const validateOpenai = useCallback(async () => {
-    if (!openaiApiKey.trim()) return;
+    const key = openaiApiKey.trim();
+    if (!key) return;
+    const check = ++latestCheck.current.openai;
     setIsValidatingOpenai(true);
+    let valid: boolean | null = null;
     try {
       const res = await fetch('https://api.openai.com/v1/models', {
-        headers: { Authorization: `Bearer ${openaiApiKey.trim()}` },
+        headers: { Authorization: `Bearer ${key}` },
       });
-      setOpenaiKeyValid(res.ok);
+      valid = res.ok ? true : verdictFromStatus(res.status);
     } catch {
-      setOpenaiKeyValid(false);
-    } finally {
-      setIsValidatingOpenai(false);
+      valid = null; // offline / blocked — says nothing about the key
     }
+    if (check !== latestCheck.current.openai) return;
+    setIsValidatingOpenai(false);
+    if (useApiStore.getState().openaiApiKey.trim() === key) setOpenaiKeyValid(valid);
   }, [openaiApiKey, setOpenaiKeyValid, setIsValidatingOpenai]);
 
   const validateElevenLabs = useCallback(async () => {
-    if (!elevenLabsApiKey.trim()) return;
+    const key = elevenLabsApiKey.trim();
+    if (!key) return;
+    const check = ++latestCheck.current.elevenLabs;
     setIsValidatingElevenLabs(true);
+    let valid: boolean | null = null;
     try {
       const res = await fetch('https://api.elevenlabs.io/v1/user/subscription', {
-        headers: { 'xi-api-key': elevenLabsApiKey.trim() },
+        headers: { 'xi-api-key': key },
       });
-      setElevenLabsKeyValid(res.ok);
+      valid = res.ok ? true : verdictFromStatus(res.status);
     } catch {
-      setElevenLabsKeyValid(false);
-    } finally {
-      setIsValidatingElevenLabs(false);
+      valid = null;
     }
+    if (check !== latestCheck.current.elevenLabs) return;
+    setIsValidatingElevenLabs(false);
+    if (useApiStore.getState().elevenLabsApiKey.trim() === key) setElevenLabsKeyValid(valid);
   }, [elevenLabsApiKey, setElevenLabsKeyValid, setIsValidatingElevenLabs]);
 
   // Re-validate stored keys when modal opens for the first time.

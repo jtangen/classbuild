@@ -5,6 +5,7 @@
  */
 
 import { normalizeDoi } from './crossref';
+import { academicFetch } from './request';
 
 const UNPAYWALL_EMAIL = 'classbuild@example.com';
 
@@ -16,6 +17,7 @@ export interface UnpaywallHit {
 
 export async function findOpenAccess(
   doi: string,
+  signal?: AbortSignal,
 ): Promise<UnpaywallHit | null> {
   const normalized = normalizeDoi(doi);
   if (!normalized || !normalized.includes('/')) return null;
@@ -23,7 +25,7 @@ export async function findOpenAccess(
     const url = `https://api.unpaywall.org/v2/${encodeURIComponent(
       normalized,
     )}?email=${UNPAYWALL_EMAIL}`;
-    const res = await fetch(url);
+    const res = await academicFetch(url, signal);
     if (!res.ok) return null;
     const data = await res.json();
     const best = data?.best_oa_location;

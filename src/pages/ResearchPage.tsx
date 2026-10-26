@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
@@ -8,8 +8,16 @@ import type { WebSearchResult } from '../services/claude/streaming';
 import type { ResearchDossier, ResearchSource } from '../types/course';
 import { enrichDossier } from '../services/academic';
 import type { EnrichmentStats } from '../services/academic';
+import {
+  abortableVersion,
+  beginAbortable,
+  endAbortable,
+  isInFlight,
+  materialAbortKey,
+  subscribeAbortable,
+} from '../services/abortRegistry';
 import { isSafeHttpUrl } from '../utils/url';
-import { friendlyError } from '../utils/errors';
+import { friendlyError, isAbortError } from '../utils/errors';
 import {
   RESEARCH_SYSTEM_PROMPT,
   buildResearchUserPrompt,
@@ -50,6 +58,28 @@ const emptyResearchState: ChapterResearchState = {
   error: '',
 };
 
+/** Abort-registry key for one chapter's research run. */
+const researchKey = (chapterNum: number) => materialAbortKey('research', chapterNum);
+/** Registry key for the "Research all remaining" queue itself. */
+const RESEARCH_ALL_KEY = 'research:all';
+/** Chapters researched at once by "Research all" — every chapter in parallel
+ *  trips Anthropic (and Crossref / Semantic Scholar) rate limits on
+ *  lower-tier keys. */
+const RESEARCH_ALL_CONCURRENCY = 3;
+
+/**
+ * The raw API error says the web-search tool itself is unavailable (not
+ * enabled for the organisation, unsupported tool version, …). Checked on the
+ * raw error: friendlyError's sentences never name the tool.
+ */
+function isWebSearchUnavailable(err: unknown): boolean {
+  const status = typeof err === 'object' && err !== null ? (err as { status?: unknown }).status : undefined;
+  // A rate limit or outage is worth a retry, whatever its message says.
+  if (status === 429 || (typeof status === 'number' && status >= 500)) return false;
+  const raw = err instanceof Error ? err.message : String(err);
+  return /web[_\s-]?search|\btools?\b/i.test(raw);
+}
+
 export function ResearchPage() {
   const navigate = useNavigate();
   const {
@@ -62,13 +92,25 @@ export function ResearchPage() {
   const { claudeApiKey } = useApiStore();
   const { setActiveTab } = useUiStore();
   const [currentChapter, setCurrentChapter] = useState(0);
-  const [researchingSet, setResearchingSet] = useState<Set<number>>(new Set());
   const [chapterStates, setChapterStates] = useState<
     Record<number, ChapterResearchState>
   >({});
   const researchStarted = useRef(false);
 
-  const isResearching = researchingSet.size > 0;
+  // In-flight research lives in the abort registry, not component state, so
+  // a run that outlived a previous mount of this page (navigate away and
+  // back) still reads as in flight — and can't be started a second time.
+  // Subscribing re-renders whenever a run starts or settles.
+  useSyncExternalStore(subscribeAbortable, abortableVersion);
+  const researchingSet = new Set(
+    (syllabus?.chapters ?? [])
+      .map((c) => c.number)
+      .filter((n) => isInFlight(researchKey(n))),
+  );
+
+  // A "Research all" queue counts too — between one chapter settling and the
+  // next starting, nothing is in flight but the run isn't over.
+  const isResearching = researchingSet.size > 0 || isInFlight(RESEARCH_ALL_KEY);
 
   const updateChapterState = useCallback(
     (
@@ -87,12 +129,19 @@ export function ResearchPage() {
     async (chapterIndex: number) => {
       if (!syllabus) return;
       const chapter = syllabus.chapters[chapterIndex];
+      if (!chapter) return;
       const chapterNum = chapter.number;
+      const abortKey = researchKey(chapterNum);
 
-      if (researchingSet.has(chapterNum)) return;
-      if (researchDossiers.some((d) => d.chapterNumber === chapterNum)) return;
+      // Both checks read live state: this may be a stale closure (a queued
+      // "Research all" worker, or a callback from before a remount).
+      if (isInFlight(abortKey)) return;
+      if (useCourseStore.getState().researchDossiers.some((d) => d.chapterNumber === chapterNum)) return;
 
-      setResearchingSet((prev) => new Set(prev).add(chapterNum));
+      // Registered so a course reset / restore (abortAll) cancels it, and so
+      // nothing else starts the same chapter while it runs.
+      const controller = beginAbortable(abortKey);
+      const { signal } = controller;
       updateChapterState(chapterNum, () => ({
         ...emptyResearchState,
         phase: 'thinking',
@@ -117,6 +166,7 @@ export function ResearchPage() {
             ],
             tools: [{ type: 'web_search_20250305', name: 'web_search' }],
             maxTokens: 16000,
+            signal,
           },
           {
             onThinking: () =>
@@ -134,25 +184,27 @@ export function ResearchPage() {
                 searchQueries: [...s.searchQueries, query],
               })),
             onWebSearchResults: (results) => {
-              updateChapterState(chapterNum, (s) => {
-                const newResults = results.filter(
-                  (r) => !s.webResults.some((existing) => existing.url === r.url),
-                );
-                localWebResults = [...s.webResults, ...newResults];
-                return {
-                  ...s,
-                  webResults: localWebResults,
-                  latestSource:
-                    newResults.length > 0
-                      ? newResults[newResults.length - 1]
-                      : s.latestSource,
-                };
-              });
+              // Accumulated here, not inside the state updater: after an
+              // unmount the updater never runs, and the fallback dossier
+              // below would lose every result.
+              const newResults = results.filter(
+                (r) => !localWebResults.some((existing) => existing.url === r.url),
+              );
+              localWebResults = [...localWebResults, ...newResults];
+              const webResults = localWebResults;
+              updateChapterState(chapterNum, (s) => ({
+                ...s,
+                webResults,
+                latestSource:
+                  newResults.length > 0
+                    ? newResults[newResults.length - 1]
+                    : s.latestSource,
+              }));
             },
-            onError: (err) =>
-              updateChapterState(chapterNum, (s) => ({ ...s, error: err.message })),
+            // No onError: the catch below sets the user-facing message.
           },
         );
+        if (signal.aborted) return;
 
         let dossier = parseResearchResponse(fullText, chapterNum);
         if (!dossier) {
@@ -181,6 +233,7 @@ export function ResearchPage() {
           try {
             const { dossier: enriched, stats } = await enrichDossier(dossier, {
               concurrency: 4,
+              signal,
               onProgress: (done, total) =>
                 updateChapterState(chapterNum, (s) => ({
                   ...s,
@@ -202,12 +255,21 @@ export function ResearchPage() {
           }
         }
 
+        // The course was reset or replaced while this ran: its sources
+        // belong to a course that no longer exists.
+        if (signal.aborted) return;
         addResearchDossier(dossier);
+        updateChapterState(chapterNum, (s) => ({ ...s, error: '' }));
       } catch (err) {
-        const message = friendlyError(err, 'Research failed.');
-        updateChapterState(chapterNum, (s) => ({ ...s, error: message }));
+        if (signal.aborted || isAbortError(err)) return;
+        console.error(`Research failed for chapter ${chapterNum}:`, err);
 
-        if (message.includes('web_search') || message.includes('tool')) {
+        if (isWebSearchUnavailable(err)) {
+          updateChapterState(chapterNum, (s) => ({
+            ...s,
+            error:
+              'Web search is unavailable for this API key, so this chapter will be drafted from model knowledge.',
+          }));
           const fallbackDossier: ResearchDossier = {
             chapterNumber: chapterNum,
             sources: [],
@@ -215,24 +277,16 @@ export function ResearchPage() {
               'Web search unavailable. Chapter will be generated from model knowledge. Citations should be independently verified.',
           };
           addResearchDossier(fallbackDossier);
+        } else {
+          const message = friendlyError(err, 'Research failed.');
+          updateChapterState(chapterNum, (s) => ({ ...s, error: message }));
         }
       } finally {
-        setResearchingSet((prev) => {
-          const next = new Set(prev);
-          next.delete(chapterNum);
-          return next;
-        });
+        endAbortable(abortKey, controller);
         updateChapterState(chapterNum, (s) => ({ ...s, phase: 'idle' }));
       }
     },
-    [
-      syllabus,
-      claudeApiKey,
-      addResearchDossier,
-      updateChapterState,
-      researchingSet,
-      researchDossiers,
-    ],
+    [syllabus, claudeApiKey, addResearchDossier, updateChapterState],
   );
 
   // Auto-start first chapter research on mount.
@@ -250,18 +304,32 @@ export function ResearchPage() {
   }, []);
 
   const researchAll = useCallback(async () => {
-    if (!syllabus) return;
-    const tasks: Promise<void>[] = [];
-    for (let i = 0; i < syllabus.chapters.length; i++) {
-      const ch = syllabus.chapters[i];
-      const hasDossier = researchDossiers.some((d) => d.chapterNumber === ch.number);
-      const isActive = researchingSet.has(ch.number);
-      if (!hasDossier && !isActive) {
-        tasks.push(researchChapter(i).catch(() => {}));
+    if (!syllabus || isInFlight(RESEARCH_ALL_KEY)) return;
+    // Registered so a course reset stops the queue from starting chapters of
+    // a course that no longer exists.
+    const run = beginAbortable(RESEARCH_ALL_KEY);
+    const { researchDossiers: dossiersNow } = useCourseStore.getState();
+    const queue = syllabus.chapters
+      .map((ch, index) => ({ number: ch.number, index }))
+      .filter(
+        ({ number }) =>
+          !dossiersNow.some((d) => d.chapterNumber === number) && !isInFlight(researchKey(number)),
+      );
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < queue.length && !run.signal.aborted) {
+        const { index } = queue[cursor++];
+        await researchChapter(index).catch(() => {});
       }
+    };
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(RESEARCH_ALL_CONCURRENCY, queue.length) }, worker),
+      );
+    } finally {
+      endAbortable(RESEARCH_ALL_KEY, run);
     }
-    await Promise.allSettled(tasks);
-  }, [syllabus, researchDossiers, researchingSet, researchChapter]);
+  }, [syllabus, researchChapter]);
 
   const handleProceed = () => {
     completeStage('research');
@@ -311,7 +379,11 @@ export function ResearchPage() {
   }
 
   const totalChapters = syllabus.chapters.length;
-  const completedCount = researchDossiers.length;
+  // Chapters with a dossier, not dossiers — robust to duplicates saved by
+  // older builds and to strays keyed to chapters this syllabus doesn't have.
+  const completedCount = syllabus.chapters.filter((ch) =>
+    researchDossiers.some((d) => d.chapterNumber === ch.number),
+  ).length;
   const remainingCount = totalChapters - completedCount - researchingSet.size;
   const unresearchedCount = syllabus.chapters.filter(
     (ch) =>
@@ -823,39 +895,31 @@ function DossierPanel({
             }}
           >
             <div>{state.error}</div>
-            {state.error.includes('web_search') && (
-              <p
-                className="cb-italic"
+            {/* With a dossier in place (the web-search fallback) a retry
+                would be a no-op — research only runs for chapters without one. */}
+            {!dossier && (
+              <button
+                type="button"
+                onClick={onStart}
+                disabled={isResearching}
+                className="cb-mono cb-focus"
                 style={{
-                  margin: '6px 0 0',
-                  fontSize: 13.5,
-                  color: 'var(--cb-text-muted)',
+                  marginTop: 12,
+                  background: 'transparent',
+                  border: '1px solid var(--cb-border-strong)',
+                  padding: '5px 12px',
+                  borderRadius: 2,
+                  fontSize: 11,
+                  letterSpacing: '0.12em',
+                  textTransform: 'uppercase',
+                  color: 'var(--cb-text-default)',
+                  cursor: isResearching ? 'wait' : 'pointer',
+                  opacity: isResearching ? 0.5 : 1,
                 }}
               >
-                Web search isn't responding. You can retry, or proceed with what's drafted.
-              </p>
+                {isResearching ? 'retrying…' : 'retry research ↻'}
+              </button>
             )}
-            <button
-              type="button"
-              onClick={onStart}
-              disabled={isResearching}
-              className="cb-mono cb-focus"
-              style={{
-                marginTop: 12,
-                background: 'transparent',
-                border: '1px solid var(--cb-border-strong)',
-                padding: '5px 12px',
-                borderRadius: 2,
-                fontSize: 11,
-                letterSpacing: '0.12em',
-                textTransform: 'uppercase',
-                color: 'var(--cb-text-default)',
-                cursor: isResearching ? 'wait' : 'pointer',
-                opacity: isResearching ? 0.5 : 1,
-              }}
-            >
-              {isResearching ? 'retrying…' : 'retry research ↻'}
-            </button>
           </div>
         )}
 

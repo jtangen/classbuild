@@ -5,6 +5,8 @@
  * https://api.crossref.org/swagger-ui/index.html
  */
 
+import { academicFetch } from './request';
+
 export interface CrossrefWork {
   doi: string;
   title: string;
@@ -50,27 +52,43 @@ function formatAuthors(authors?: CrossrefAuthor[]): string {
   return `${names[0]} et al.`;
 }
 
+/**
+ * 'not-found' means Crossref has no such DOI (404, or not a DOI at all) — the
+ * only result that justifies discarding a model-supplied DOI. 'error' (rate
+ * limit, 5xx, timeout, offline) says nothing about the DOI either way.
+ */
+export type CrossrefLookup =
+  | { status: 'found'; work: CrossrefWork }
+  | { status: 'not-found' }
+  | { status: 'error' };
+
 export async function fetchCrossrefWork(
   doi: string,
-): Promise<CrossrefWork | null> {
+  signal?: AbortSignal,
+): Promise<CrossrefLookup> {
   const normalized = normalizeDoi(doi);
-  if (!normalized || !normalized.includes('/')) return null;
+  if (!normalized || !normalized.includes('/')) return { status: 'not-found' };
   try {
-    const res = await fetch(
+    const res = await academicFetch(
       `https://api.crossref.org/works/${encodeURIComponent(normalized)}`,
+      signal,
     );
-    if (!res.ok) return null;
+    if (res.status === 404) return { status: 'not-found' };
+    if (!res.ok) return { status: 'error' };
     const data = await res.json();
     const m: CrossrefRaw = data?.message ?? {};
     return {
-      doi: m.DOI || normalized,
-      title: m.title?.[0] ?? '',
-      authors: formatAuthors(m.author),
-      year: m.issued?.['date-parts']?.[0]?.[0]?.toString() ?? '',
-      container: m['container-title']?.[0] ?? '',
-      url: m.URL,
+      status: 'found',
+      work: {
+        doi: m.DOI || normalized,
+        title: m.title?.[0] ?? '',
+        authors: formatAuthors(m.author),
+        year: m.issued?.['date-parts']?.[0]?.[0]?.toString() ?? '',
+        container: m['container-title']?.[0] ?? '',
+        url: m.URL,
+      },
     };
   } catch {
-    return null;
+    return { status: 'error' };
   }
 }

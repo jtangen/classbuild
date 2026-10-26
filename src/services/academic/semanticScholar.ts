@@ -4,6 +4,8 @@
  * https://api.semanticscholar.org/api-docs/graph
  */
 
+import { academicFetch } from './request';
+
 const BASE = 'https://api.semanticscholar.org/graph/v1';
 const FIELDS =
   'title,authors,year,journal,externalIds,openAccessPdf,tldr,abstract';
@@ -23,10 +25,11 @@ export interface SsPaper {
 export async function searchPapers(
   query: string,
   limit = 3,
+  signal?: AbortSignal,
 ): Promise<SsPaper[]> {
   const url = `${BASE}/paper/search?query=${encodeURIComponent(query)}&limit=${limit}&fields=${FIELDS}`;
   try {
-    const res = await fetch(url);
+    const res = await academicFetch(url, signal);
     if (!res.ok) return [];
     const data = await res.json();
     return Array.isArray(data?.data) ? (data.data as SsPaper[]) : [];
@@ -38,7 +41,7 @@ export async function searchPapers(
 export async function getPaperByDoi(doi: string): Promise<SsPaper | null> {
   const url = `${BASE}/paper/DOI:${encodeURIComponent(doi)}?fields=${FIELDS}`;
   try {
-    const res = await fetch(url);
+    const res = await academicFetch(url);
     if (!res.ok) return null;
     return (await res.json()) as SsPaper;
   } catch {
