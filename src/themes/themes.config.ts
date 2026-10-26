@@ -181,6 +181,21 @@ function phoneCss(theme: ChapterTheme): string {
 }
 
 /**
+ * A figure box holding text rather than an image (the chapter prompt used to
+ * invite hand-made ones, e.g. a framework list). Themes size .ch-figbox as a
+ * fixed-height image frame in an accent colour with the tag pinned over its
+ * foot, which cut the text off and printed the tag across it. Such a box grows
+ * to fit, takes the body colour, and keeps its tag in the flow. Image boxes,
+ * "image unavailable" boxes (only the tag) and the old drawn placeholders (an
+ * absolutely placed <svg>) are untouched.
+ */
+function textFigureCss(theme: ChapterTheme): string {
+  const box = `.theme-${theme.id} .ch-figbox:not(:has(> img, > svg)):has(> :not(.ch-figbox-tag))`;
+  return `${box} { height: auto; overflow: visible; color: inherit; padding: 18px 20px; }
+${box} > .ch-figbox-tag { position: static; transform: none; display: table; margin-top: 12px; }`;
+}
+
+/**
  * Wrap a chapter body fragment (`<article class="ch">…</article>` + any widget
  * scripts) into a self-contained HTML document styled by the chosen theme.
  *
@@ -210,6 +225,7 @@ export function wrapChapterHtml(
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 ${theme.css}
+${textFigureCss(theme)}
 ${phoneCss(theme)}
 </style>
 </head>

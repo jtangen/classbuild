@@ -86,14 +86,10 @@ Use these class names exactly. Themes style this contract; deviating breaks the 
     <button class="ch-widget-btn">Action label</button>
   </div>
 
-${hasImageGen ? `  <figure class="ch-figure">
-    <div class="ch-figbox">
-      <!-- Use <figure class="ai-image" data-prompt="…"> instead, see IMAGES rules. -->
-      <span class="ch-figbox-tag">DIAGRAM</span>
-    </div>
-    <figcaption>
-      <span class="ch-fig-num">Fig. 1</span> Caption text.
-    </figcaption>
+${hasImageGen ? `  <!-- A figure is only ever an image placeholder (see IMAGES). The app draws
+       the image and builds the numbered, themed figure around it. -->
+  <figure class="ai-image" data-prompt="…the image brief…" data-aspect="landscape">
+    <figcaption>One-line caption.</figcaption>
   </figure>` : `  <!-- Figures are disabled for this chapter. The reading has zero visual apparatus — see NO FIGURES rules below. -->`}
 
   <blockquote class="ch-quote">
@@ -135,7 +131,7 @@ ${hasImageGen ? `  <figure class="ch-figure">
 - \`.ch-widget\`, \`.ch-widget-head\`, \`.ch-widget-label\`, \`.ch-widget-title\`, \`.ch-widget-sub\`,
   \`.ch-widget-row\`, \`.ch-widget-field\`, \`.ch-widget-fieldlabel\`, \`.ch-widget-select\`,
   \`.ch-widget-meters\`, \`.ch-meter\`, \`.ch-meter-label\`, \`.ch-meter-bar\`, \`.ch-meter-num\`, \`.ch-widget-btn\`
-${hasImageGen ? `- \`.ch-figure\`, \`.ch-figbox\`, \`.ch-figbox-tag\`, \`.ch-fig-num\`` : `- (Figures are disabled for this chapter — do NOT use \`.ch-figure\`, \`.ch-figbox\`, \`.ch-figbox-tag\`, \`.ch-fig-num\`, or any \`<figure>\` element.)`}
+${hasImageGen ? `- (Figures are the exception: write them only as \`<figure class="ai-image">\` placeholders, see IMAGES. Never write \`.ch-figure\`, \`.ch-figbox\`, \`.ch-figbox-tag\` or \`.ch-fig-num\` yourself: the app builds that markup around each image, and a hand-made figure box renders as an empty image frame that cuts off whatever you put in it.)` : `- (Figures are disabled for this chapter — do NOT use \`.ch-figure\`, \`.ch-figbox\`, \`.ch-figbox-tag\`, \`.ch-fig-num\`, or any \`<figure>\` element.)`}
 - \`.ch-quote\` with \`<cite>\` inside
 - \`.ch-takeaways\` with \`<h2>\` and \`<ul><li>…\`
 - \`.ch-lookahead\`, \`.ch-lookahead-label\`
@@ -160,7 +156,7 @@ When a concept feels like it wants a picture, do one of:
 - Describe it concretely in prose (a vivid sentence beats a missing figure).
 - Build an interactive \`<div class="ch-widget">\` if the concept is dynamic.
 - Pull in a \`<blockquote class="ch-quote">\` if a quoted line lands the idea better.
-` : `When an image would genuinely aid understanding, include 2–3 image placeholders. Each placeholder is a single \`<figure>\` element, always closed with \`</figure>\`, with \`class="ai-image"\` plus \`data-prompt\` and \`data-aspect\` attributes — they replace the normal \`<figure class="ch-figure">\` block in the reading.
+` : `When an image would genuinely aid understanding, include 2–3 image placeholders. Each placeholder is a single \`<figure>\` element, always closed with \`</figure>\`, with \`class="ai-image"\` plus \`data-prompt\` and \`data-aspect\` attributes. The app draws each one and numbers the figures in order, so never write "Fig. N" labels or figure boxes yourself. A framework, list or comparison that isn't a picture belongs in the prose, a list, a \`.ch-callout\` or a widget, not in a figure.
 
 \`\`\`html
 <figure class="ai-image" data-prompt="…full prompt…" data-aspect="landscape">
