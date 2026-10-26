@@ -98,7 +98,11 @@ export function BuildPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, chapters, addChapter, updateChapter, setSlideImage, updateSlide, setup, setStage, completeStage } = useCourseStore();
   const { claudeApiKey, openaiApiKey, elevenLabsApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, batchIndex, batchTotal, batchChapterMs, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, batchSummary, setBatchSummary, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
+  // readingDraft / thinkingText / streamingText: the reading draft or refine in
+  // flight lives in uiStore so it survives leaving /build. Coming back shows
+  // that chapter's stream, thinking trace, timer and a working Stop. Only one
+  // runs at a time.
+  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, readingDraft, setReadingDraft, thinkingText, setThinkingText, appendThinkingText, rebuildMaterialsFor, setRebuildMaterialsFor, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, batchIndex, batchTotal, batchChapterMs, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, batchSummary, setBatchSummary, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
 
   // Navigate to /setup with the keys modal auto-opening. Used by inline
   // "Add OpenAI key →" / "Add ElevenLabs key →" CTAs on the Slides and Audio
@@ -128,17 +132,8 @@ export function BuildPage() {
   const setGeneratingSlides = useCallback((v: number | null) => setInFlight('slides', v), [setInFlight]);
   const setGeneratingWeeklyChallenge = useCallback((v: number | null) => setInFlight('weeklychallenge', v), [setInFlight]);
 
-  const [thinkingText, setThinkingText] = useState('');
   const [refineFeedback, setRefineFeedback] = useState('');
   const [showRefineConfirm, setShowRefineConfirm] = useState(false);
-  /** Which chapter (if any) is currently in the chapter-drafting pipeline.
-   *  Distinct from uiStore.isGenerating (which is global). Lets ReadingTab
-   *  show the drafting UI ONLY on the chapter that's actually being drafted,
-   *  not whichever chapter the user has clicked to. */
-  const [chapterDraftingFor, setChapterDraftingFor] = useState<number | null>(null);
-  /** True while a refine is in flight — drives the streaming UI to show
-   *  "Refining…" feedback instead of the old iframe. */
-  const [isRefining, setIsRefining] = useState(false);
   /** Confirm-panel checkbox: when a refine clears dependent materials,
    *  should we automatically regenerate them once the new reading lands? */
   const [refineAutoRegen, setRefineAutoRegen] = useState(true);
@@ -179,6 +174,15 @@ export function BuildPage() {
   const autoGenStarted = useRef(false);
   const selectedChapterRef = useRef(selectedChapterNum);
   const batchCancelRef = useRef(false);
+  // A draft or refine outlives this page when the user navigates away; its
+  // completion must not act on a closed page's stale closures.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Derived: the chapter currently in view from courseStore.
   const currentChapterEarly = chapters.find((c) => c.number === selectedChapterNum);
@@ -390,20 +394,20 @@ export function BuildPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [batchGenerating, syllabus, selectedChapterNum, setActiveTab, setSelectedChapterNum]);
 
-  // Tick elapsed seconds while a single-chapter generation is running so the
-  // "Thinking..." phase (~30-90s on Opus) shows observable progress.
+  // Tick elapsed seconds while a reading draft/refine is running so the
+  // "Thinking..." phase (~30-90s on Opus) shows observable progress. Counted
+  // from the stored start time, so it carries on across leaving /build.
+  const readingStartedAt = readingDraft?.startedAt ?? null;
   useEffect(() => {
-    if (!isGenerating) {
+    if (readingStartedAt === null) {
       setElapsedSec(0);
       return;
     }
-    const t0 = Date.now();
-    setElapsedSec(0);
-    const id = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - t0) / 1000));
-    }, 500);
+    const tick = () => setElapsedSec(Math.floor((Date.now() - readingStartedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [isGenerating]);
+  }, [readingStartedAt]);
 
   // Close the batch-confirm modal on Escape.
   useEffect(() => {
@@ -423,8 +427,20 @@ export function BuildPage() {
   const syllabusChapter = syllabus?.chapters.find(c => c.number === selectedChapterNum);
   const anyLocalGenerating = !!(generatingQuiz || generatingInClassQuiz || generatingDiscussion || generatingActivities || generatingAudio || generatingSlides || generatingWeeklyChallenge);
   const anyBusy = isGenerating || anyLocalGenerating || batchGenerating;
+  /** The in-progress reading UI belongs to this chapter only. */
+  const draftingThisChapter = readingDraft?.chapterNum === selectedChapterNum;
+  /** Why this chapter's reading can't be drafted or refined right now: one
+   *  reading at a time, and the note names the chapter that holds the slot.
+   *  isGenerating without a readingDraft is another page's draft (Export's
+   *  single-chapter generate, a syllabus redraft). */
+  const readingBlockedNote = draftingThisChapter || !(isGenerating || readingDraft)
+    ? null
+    : readingDraft
+      ? `Chapter ${readingDraft.chapterNum} is ${readingDraft.mode === 'refine' ? 'being refined' : 'drafting'} right now. One reading runs at a time, so this one unlocks when it finishes.`
+      : 'Another draft is running right now. This unlocks when it finishes.';
 
   const tabGenerating: Record<string, boolean> = {
+    chapter: draftingThisChapter,
     quiz: generatingQuiz === selectedChapterNum,
     inclassquiz: generatingInClassQuiz === selectedChapterNum,
     discussion: generatingDiscussion === selectedChapterNum,
@@ -512,8 +528,9 @@ export function BuildPage() {
   // any chapter, each slide image render) wiped a half-typed refine note. All
   // material state (quiz/discussion/audio/slides/etc.) is managed inside
   // useChapterMaterials; its own effects handle reset + rehydrate.
+  // (The thinking trace isn't reset here: it belongs to the reading draft in
+  // flight, not to the chapter in view.)
   useEffect(() => {
-    setThinkingText('');
     setRefineFeedback('');
     setShowRefineConfirm(false);
     setEditedSlidePrompts({});
@@ -545,11 +562,16 @@ export function BuildPage() {
     if (!syllabus) return;
     const ch = syllabus.chapters.find(c => c.number === chapterNum);
     if (!ch) return;
+    // One reading at a time (the buttons are disabled too; this is the
+    // backstop). readingDraft too: ErrorBoundary resets isGenerating on a
+    // crash while the draft itself keeps running.
+    const ui = useUiStore.getState();
+    if (ui.isGenerating || ui.readingDraft) return;
 
     const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
     setIsGenerating(true);
-    setChapterDraftingFor(chapterNum);
+    setReadingDraft({ chapterNum, mode: 'draft', startedAt: Date.now() });
     setStreamingText('');
     setThinkingText('');
 
@@ -587,7 +609,7 @@ export function BuildPage() {
           signal: controller.signal,
         },
         {
-          onThinking: (text) => setThinkingText(prev => prev + text),
+          onThinking: (text) => appendThinkingText(text),
           onText: (text) => appendStreamingText(text),
         }
       );
@@ -611,13 +633,17 @@ export function BuildPage() {
     } finally {
       endAbortable(abortKey, controller);
       setIsGenerating(false);
-      setChapterDraftingFor(null);
+      setReadingDraft(null);
       setThinkingText('');
+      setStreamingText('');
     }
-  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, addChapter, setIsGenerating, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText, setError]);
 
   const refineChapter = useCallback(async (feedback: string) => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
+    // One reading at a time; checked before the destructive clear below.
+    const ui = useUiStore.getState();
+    if (ui.isGenerating || ui.readingDraft) return;
     // Captured: a refine runs for minutes and the UI invites clicking away.
     const chapterNum = selectedChapterNum;
     // Only rebuild what this refine clears ("only the reading will change"
@@ -657,9 +683,8 @@ export function BuildPage() {
 
     const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
-    setIsRefining(true);
     setIsGenerating(true);
-    setChapterDraftingFor(chapterNum);
+    setReadingDraft({ chapterNum, mode: 'refine', startedAt: Date.now() });
     setStreamingText('');
     setThinkingText('');
 
@@ -715,7 +740,7 @@ Teacher feedback: "${feedback}"`;
           signal: controller.signal,
         },
         {
-          onThinking: (text) => setThinkingText(prev => prev + text),
+          onThinking: (text) => appendThinkingText(text),
           onText: (text) => appendStreamingText(text),
         }
       );
@@ -733,16 +758,19 @@ Teacher feedback: "${feedback}"`;
       // against the new reading. The setTimeout lets React flush the chapter
       // state update so the refreshed generateAllOutputs callback reads from
       // the new content, not the pre-refine snapshot. generateAllOutputs
-      // works on the *selected* chapter, so it only runs if this one is still
-      // in view; otherwise building would land on whichever chapter is open.
+      // works on the *selected* chapter of a *mounted* page: if the user has
+      // switched chapters or left /build, leave a marker instead, and the
+      // rebuild runs when this chapter is next opened (never on whichever
+      // chapter happens to be open, nor from a closed page's stale closures).
       if (refineAutoRegen && hadDependents) {
         setTimeout(() => {
-          if (selectedChapterRef.current === chapterNum) {
+          if (mountedRef.current && selectedChapterRef.current === chapterNum) {
             void generateAllOutputsRef.current();
-          } else {
-            setTransientToast(
-              `Chapter ${chapterNum} is refined and its materials were cleared. Open it and use "Generate all materials" to rebuild them.`,
-            );
+            return;
+          }
+          useUiStore.getState().setRebuildMaterialsFor({ chapterNum, htmlContent: html });
+          if (mountedRef.current) {
+            setTransientToast(`Chapter ${chapterNum} is refined. Its materials will rebuild when you open it.`);
           }
         }, 250);
       }
@@ -764,13 +792,13 @@ Teacher feedback: "${feedback}"`;
     } finally {
       endAbortable(abortKey, controller);
       setIsGenerating(false);
-      setIsRefining(false);
-      setChapterDraftingFor(null);
+      setReadingDraft(null);
       setThinkingText('');
+      setStreamingText('');
     }
     // refineAutoRegen is listed: without it, unticking "Rebuild automatically"
     // was ignored (the callback kept the value from when it was last built).
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError, refineAutoRegen]);
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, updateChapter, setIsGenerating, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText, setError, refineAutoRegen]);
 
   // 7 generators + retryAudio + fleshOutActivity moved to useChapterMaterials hook.
 
@@ -1064,6 +1092,27 @@ Teacher feedback: "${feedback}"`;
   useEffect(() => {
     generateAllOutputsRef.current = generateAllOutputs;
   }, [generateAllOutputs]);
+
+  // Run a refine's opted-in rebuild that was deferred because its chapter
+  // wasn't open when the new reading landed (see refineChapter).
+  useEffect(() => {
+    const pending = rebuildMaterialsFor;
+    if (!pending || pending.chapterNum !== selectedChapterNum || !currentChapter) return;
+    if (isGenerating || batchGenerating) return;
+    setRebuildMaterialsFor(null);
+    // The reading changed since (another refine, a new course): stale, drop it.
+    if (currentChapter.htmlContent !== pending.htmlContent) return;
+    // Give the materials hook a beat to rehydrate this chapter, so the
+    // refreshed generateAllOutputs only fills what's actually missing.
+    // No cleanup on purpose: clearing the marker re-runs this effect.
+    setTimeout(() => {
+      if (mountedRef.current && selectedChapterRef.current === pending.chapterNum) {
+        void generateAllOutputsRef.current();
+      } else {
+        useUiStore.getState().setRebuildMaterialsFor(pending);
+      }
+    }, 250);
+  }, [rebuildMaterialsFor, selectedChapterNum, currentChapter, isGenerating, batchGenerating, setRebuildMaterialsFor]);
 
   // ─── Batch generation ───
   //
@@ -1601,6 +1650,10 @@ Teacher feedback: "${feedback}"`;
                   ]
                     .filter(Boolean)
                     .join(' · ')
+                : readingDraft
+                ? `${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built · ${
+                    readingDraft.mode === 'refine' ? 'refining' : 'drafting'
+                  } chapter ${readingDraft.chapterNum}…`
                 : generatedCount === totalChapters && totalChapters > 0
                 ? `— ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`
                 : `${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`}
@@ -1782,6 +1835,10 @@ Teacher feedback: "${feedback}"`;
                 <Button
                   size="sm"
                   variant="secondary"
+                  // Same gate as "Draft remaining chapters": a batch must not
+                  // start under a running draft or material job.
+                  disabled={anyBusy}
+                  title={anyBusy ? 'Wait for the current generation to finish.' : undefined}
                   onClick={() => {
                     const mode = batchSummary.mode;
                     setBatchSummary(null);
@@ -1821,6 +1878,7 @@ Teacher feedback: "${feedback}"`;
 
       {error && (
         <div
+          role="alert"
           style={{
             marginBottom: 20,
             padding: '12px 14px',
@@ -1829,9 +1887,36 @@ Teacher feedback: "${feedback}"`;
             fontSize: 14,
             lineHeight: 1.55,
             color: 'var(--cb-text-default)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            gap: 16,
           }}
         >
-          {error}
+          <span>{error}</span>
+          {/* It otherwise stayed up until you left the page. */}
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="cb-focus"
+            style={{
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontStyle: 'italic',
+              color: 'var(--cb-accent-link)',
+              textDecoration: 'underline',
+              textDecorationThickness: '0.5px',
+              textUnderlineOffset: 3,
+              whiteSpace: 'nowrap',
+              fontFamily: 'inherit',
+              flexShrink: 0,
+            }}
+          >
+            dismiss
+          </button>
         </div>
       )}
 
@@ -1853,6 +1938,7 @@ Teacher feedback: "${feedback}"`;
           onSelectChapter={setSelectedChapterNum}
           disabled={batchGenerating}
           batchCurrentChapter={batchCurrentChapter}
+          readingDraft={readingDraft}
         />
 
         {/* Right: Content area */}
@@ -1995,11 +2081,34 @@ Teacher feedback: "${feedback}"`;
             );
           })()}
 
-          {/* Generate chapter button when chapter not yet generated */}
-          {!batchGenerating && !currentChapter && !isGenerating && (() => {
+          {/* Generate chapter button when chapter not yet generated. Shown on
+              every undrafted chapter except the one drafting; while another
+              reading holds the one-at-a-time slot the buttons are disabled
+              and the note names that chapter. */}
+          {!batchGenerating && !currentChapter && !draftingThisChapter && (() => {
             const hasResearch = researchDossiers.some(d => d.chapterNumber === selectedChapterNum && d.sources.length > 0);
             const romanIdx = selectedChapterNum - 1;
             const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX'][romanIdx] ?? String(selectedChapterNum);
+            const startDraft = () => {
+              // Land on the Reading tab, where the draft's progress shows.
+              setActiveTab('chapter');
+              void generateChapter(selectedChapterNum);
+            };
+            const blockedNote = readingBlockedNote && (
+              <p
+                className="cb-italic"
+                role="status"
+                style={{
+                  margin: '0 0 14px',
+                  fontSize: 13.5,
+                  color: 'var(--cb-text-muted)',
+                  lineHeight: 1.55,
+                  maxWidth: '72ch',
+                }}
+              >
+                {readingBlockedNote}
+              </p>
+            );
             return (
               <section
                 style={{
@@ -2085,7 +2194,8 @@ Teacher feedback: "${feedback}"`;
                         />
                       </div>
                     )}
-                    <Button onClick={() => generateChapter(selectedChapterNum)}>
+                    {blockedNote}
+                    <Button onClick={startDraft} disabled={!!readingBlockedNote}>
                       Draft this chapter →
                     </Button>
                   </>
@@ -2115,11 +2225,12 @@ Teacher feedback: "${feedback}"`;
                       Drafting without research may include unverified references. Better
                       to go back and research first; or proceed anyway and verify by hand.
                     </p>
+                    {blockedNote}
                     <div style={{ display: 'flex', gap: 10 }}>
                       <Button onClick={() => navigate('/research')}>
                         Go to Research
                       </Button>
-                      <Button variant="ghost" onClick={() => generateChapter(selectedChapterNum)}>
+                      <Button variant="ghost" onClick={startDraft} disabled={!!readingBlockedNote}>
                         Draft anyway
                       </Button>
                     </div>
@@ -2129,8 +2240,8 @@ Teacher feedback: "${feedback}"`;
             );
           })()}
 
-          {/* Tabs — only show when chapter exists or is generating */}
-          {!batchGenerating && (currentChapter || isGenerating) && (
+          {/* Tabs — only show when the chapter exists or is the one drafting */}
+          {!batchGenerating && (currentChapter || draftingThisChapter) && (
             <>
               <div
                 role="tablist"
@@ -2313,12 +2424,15 @@ Teacher feedback: "${feedback}"`;
                     chapterNum={selectedChapterNum}
                     chapterTitle={syllabusChapter?.title ?? ''}
                     themeId={setup.themeId}
-                    isGenerating={isGenerating && chapterDraftingFor === selectedChapterNum}
-                    isRefining={isRefining}
-                    streamingText={streamingText}
-                    thinkingText={thinkingText}
+                    // The in-progress UI (stream, trace, timer, Stop) only on
+                    // the chapter actually drafting or refining.
+                    isGenerating={draftingThisChapter}
+                    isRefining={draftingThisChapter && readingDraft?.mode === 'refine'}
+                    streamingText={draftingThisChapter ? streamingText : ''}
+                    thinkingText={draftingThisChapter ? thinkingText : ''}
                     elapsedSec={elapsedSec}
                     onStop={() => abortInFlight(materialAbortKey('reading', selectedChapterNum))}
+                    refineBlockedNote={readingBlockedNote}
                     showImageHint={showChapterImageHint}
                     onDismissImageHint={dismissChapterImageHint}
                     refineFeedback={refineFeedback}

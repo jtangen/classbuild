@@ -44,6 +44,9 @@ export interface ReadingTabProps {
   onRefineAutoRegenChange: (v: boolean) => void;
   onRefine: (feedback: string) => void;
   dependents: string[];
+  /** Set while another chapter's reading holds the one-at-a-time slot: the
+   *  refine controls are disabled and this note (naming it) is shown. */
+  refineBlockedNote?: string | null;
 }
 
 export function ReadingTab(props: ReadingTabProps) {
@@ -69,6 +72,7 @@ export function ReadingTab(props: ReadingTabProps) {
     onRefineAutoRegenChange,
     onRefine,
     dependents,
+    refineBlockedNote,
   } = props;
 
   // Memoized: the page re-renders on every streamed token, and themed chapter
@@ -125,7 +129,11 @@ export function ReadingTab(props: ReadingTabProps) {
               type="button"
               onClick={onStop}
               className="cb-mono"
-              title="Stop drafting — nothing is saved from a stopped draft"
+              title={
+                isRefining
+                  ? 'Stop refining — the current reading is kept'
+                  : 'Stop drafting — nothing is saved from a stopped draft'
+              }
               style={{
                 marginLeft: 'auto',
                 flexShrink: 0,
@@ -313,12 +321,27 @@ export function ReadingTab(props: ReadingTabProps) {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={!refineFeedback.trim()}
+                  disabled={!refineFeedback.trim() || !!refineBlockedNote}
                   onClick={() => onShowRefineConfirm(true)}
                 >
                   Refine
                 </Button>
               </div>
+              {refineBlockedNote && (
+                <p
+                  className="cb-italic"
+                  role="status"
+                  style={{
+                    margin: '10px 0 0',
+                    fontSize: 13,
+                    color: 'var(--cb-text-muted)',
+                    lineHeight: 1.55,
+                    maxWidth: '72ch',
+                  }}
+                >
+                  {refineBlockedNote}
+                </p>
+              )}
 
               <AnimatePresence>
                 {showRefineConfirm && (
@@ -400,7 +423,11 @@ export function ReadingTab(props: ReadingTabProps) {
                       </label>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <Button size="sm" onClick={() => onRefine(refineFeedback)}>
+                      <Button
+                        size="sm"
+                        disabled={!!refineBlockedNote}
+                        onClick={() => onRefine(refineFeedback)}
+                      >
                         Refine reading
                       </Button>
                       <Button

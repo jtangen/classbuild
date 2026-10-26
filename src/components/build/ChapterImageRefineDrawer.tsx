@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../codex';
 
@@ -28,6 +29,18 @@ export function ChapterImageRefineDrawer({
   error: string | null;
   onAddKey: () => void;
 }) {
+  // Esc closes it, as the shortcuts overlay promises. Safe mid-render: the
+  // render keeps going and the image swaps in when done.
+  const open = state !== null;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   return (
     <AnimatePresence>
       {state && (
