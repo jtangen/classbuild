@@ -1,6 +1,7 @@
 import type { Syllabus, GeneratedChapter, WeeklyChallengeData } from '../../types/course';
 import { renderChapterHtml, getTheme } from '../../themes';
 import { isSafeMediaUrl } from '../../utils/url';
+import { readChapterAudio } from './chapterAudio';
 import {
   buildCodexViewerHtml,
   type CodexChapterData,
@@ -122,18 +123,13 @@ export async function assemblePublishSite(
       if (wroteAny) data.slides = ch.slidesJson.map((s) => ({ title: s.title }));
     }
 
-    // Audio — the in-session blob URL if there is one, else the durable data
-    // URI (survives reload). fetch() accepts both; anything else (e.g. a URL
-    // smuggled in through an imported project file) is ignored. Skip on failure.
-    const chapterAudio = [ch.audioUrl, ch.audioDataUri].find((u) => isSafeMediaUrl(u, 'audio'));
-    if (chapterAudio) {
-      try {
-        const audioBlob = await fetch(chapterAudio).then((r) => r.blob());
-        zip.file(`audio/${nn}.mp3`, audioBlob);
-        data.audioPath = `audio/${nn}.mp3`;
-      } catch {
-        /* audio source no longer valid — omit audio */
-      }
+    // Audio — the in-session blob URL, falling back to the durable data URI
+    // when the blob URL is dead. Only app-produced audio URLs are read; if
+    // neither source is readable the Audio tab is simply omitted.
+    const audioBlob = await readChapterAudio(ch);
+    if (audioBlob) {
+      zip.file(`audio/${nn}.mp3`, audioBlob);
+      data.audioPath = `audio/${nn}.mp3`;
     }
     if (ch.audioTranscript) data.transcript = ch.audioTranscript;
 
