@@ -71,8 +71,10 @@ Six **chapter themes** — Press, Notebook, Almanac, Storybook, Studio, and Term
 
 The ClassBuild CLI generates complete courses from the command line — no browser required. Ideal for batch-building entire programs or course catalogues.
 
+Put your keys in `.env.local` (copy `.env.example`; it's gitignored), then:
+
 ```bash
-ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
+npm run course -- \
   --topic "The Psychology of Prejudice" \
   --chapters 12 \
   --level advanced-undergrad \
@@ -82,7 +84,7 @@ ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
   --output ./output/prejudice
 ```
 
-Set `OPENAI_API_KEY` to render slide images and chapter figures, and `ELEVENLABS_API_KEY` to narrate the audiobooks. Text-only generation needs just `ANTHROPIC_API_KEY`.
+`npm run course` is shorthand for `npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts`. `ANTHROPIC_API_KEY` is all text-only generation needs; add `OPENAI_API_KEY` to render slide images and chapter figures, and `ELEVENLABS_API_KEY` to narrate the audiobooks. Keep keys in the env file rather than typing them on the command line, where they end up in shell history.
 
 ## What does each CLI flag do?
 
@@ -160,7 +162,7 @@ The syllabus stage annotates every chapter with the specific principles it empha
 
 ## Built with
 
-React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 4.8 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
+React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 5.5 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
 
 Built with Claude for [Code with Claude · Tokyo](https://claude.com/code-with-claude/tokyo) (Feb 2026).
 

@@ -35,33 +35,37 @@ Open http://localhost:5173 and enter your API key on the Setup page.
 ## What API keys are needed
 
 Anthropic Claude — required — powers all course generation
-Google Gemini — optional — voice narration (TTS) and AI-generated infographics
+OpenAI — optional — chapter figures, 4K slide images and infographics (gpt-image-2)
+ElevenLabs — optional — audiobook narration
 
-Keys are stored in the browser only (localStorage). They are never sent to any ClassBuild server.
+Keys are stored in the browser only (localStorage) and go only to their own provider. They are never sent to any ClassBuild server.
 
 ## How to generate a course from the command line
 
-  ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
+Put keys in .env.local (copy .env.example; it is gitignored), then:
+
+  npm run course -- \
     --topic "The Psychology of Prejudice" \
     --chapters 12 \
     --level advanced-undergrad \
-    --theme midnight \
+    --theme terminal \
     --output ./output/prejudice
 
-Set GEMINI_API_KEY as an environment variable if you want audio narration and infographics. Install ffmpeg to have the CLI transcode WAV output to MP3.
+npm run course is shorthand for: npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts
+ANTHROPIC_API_KEY is required. Add OPENAI_API_KEY for figures and slide images, and ELEVENLABS_API_KEY for narration.
 
 ## CLI flags
 
 --topic (required) Course topic
 --chapters (default: 12) Number of chapters
 --level (default: advanced-undergrad) One of: general-public, professional, advanced-undergrad
---theme (default: midnight) One of: midnight, classic, ocean, warm
+--theme (default: press) One of: press, notebook, almanac, storybook, studio, terminal
 --length (default: standard) One of: concise, standard, comprehensive
 --widgets (default: 3) Interactive widgets per chapter
 --cohort (default: 60) Expected class size
 --environment (default: lecture-theatre) One of: lecture-theatre, collaborative, flat-classroom, online-hybrid
 --notes Additional context for the AI (audience, tone, region, specific topics)
---voice-id Gemini TTS voice name for audiobook narration (e.g. Kore, Puck, Charon)
+--voice-id ElevenLabs voice ID for audiobook narration (defaults to a neutral narrator)
 --syllabus Path to existing syllabus.json to skip regeneration
 --stop-after One of: syllabus, research — stop early for review
 --no-publish Skip course viewer assembly
@@ -75,9 +79,9 @@ Set GEMINI_API_KEY as an environment variable if you want audio narration and in
 - Interactive HTML chapter with embedded visualizations and callout boxes
 - Gamified practice quiz with confidence calibration, streaks, and achievements
 - In-class quiz (5 shuffled versions + answer keys) as DOCX
-- PowerPoint slides with speaker notes
-- AI-narrated audiobook (MP3 via ffmpeg, or WAV; requires Gemini key)
-- AI-generated infographic (requires Gemini key)
+- PowerPoint slides with speaker notes (full-bleed 4K images; requires OpenAI key)
+- AI-narrated audiobook as MP3 (requires ElevenLabs key)
+- AI-generated infographic (requires OpenAI key)
 - Weekly mastery challenge with 6 question types, parameterised variants, and SCORM 2004 for Blackboard
 - Teaching pack: discussion starters, activities, and current events hooks (DOCX)
 - Research dossier with sources and synthesis notes (DOCX)
@@ -87,7 +91,7 @@ Additionally, at the course level:
 - course.json — complete course data
 - Standalone course viewer website (HTML/CSS/JS, self-contained)
 
-## The six-stage pipeline
+## The five-stage pipeline
 
 1. Setup — define topic, audience level, chapter count, theme, and preferences
 2. Syllabus — Claude designs the full course arc with learning science annotations
@@ -105,7 +109,7 @@ Elaboration — learners connect new material to prior knowledge
 
 ## Prompt library
 
-ClassBuild includes 11 prompt builders in src/prompts/ that can be imported and reused:
+ClassBuild includes 12 prompt builders in src/prompts/ that can be imported and reused (the eleven below plus weeklyChallenge.ts):
 
 src/prompts/syllabus.ts — buildSyllabusPrompt() — course architecture with learning science
 src/prompts/chapter.ts — buildChapterPrompt() — interactive HTML chapter content
@@ -126,17 +130,19 @@ Each prompt builder takes course setup and chapter context as arguments and retu
 React 19, Vite 7, TypeScript 5.9, Tailwind CSS 4, Zustand 5
 Anthropic SDK 0.74.0 (dangerouslyAllowBrowser for BYOK)
 pptxgenjs for PowerPoint, docx for DOCX, jszip + file-saver for ZIP
-Google Gemini TTS (optional) for voice narration, Google Gemini image generation (optional) for infographics
+OpenAI gpt-image-2 (optional) for figures, slide images and infographics; ElevenLabs (optional) for narration
 Framer Motion for animations, DOMPurify for HTML sanitization
 
-## Four visual themes
+## Six chapter themes
 
-midnight — dark purple/gold (default)
-classic — light cream/navy traditional
-ocean — dark cyan/blue aquatic
-warm — light warm/orange earthy
+press — Sunday broadsheet (default); humanities, history, journalism
+notebook — engineer's graph paper; STEM, maths, problem sets
+almanac — naturalist's field guide; biology, geography, food, crafts
+storybook — bold and friendly; languages, intros, K-12
+studio — modernist monograph; art, architecture, design
+terminal — dark dev docs; programming, CS, sysadmin, ML
 
-Themes propagate to chapters, quizzes, slides, and the published course viewer.
+Themes carry through the reading, practice quiz, slides and weekly challenge.
 
 ## Example courses
 
