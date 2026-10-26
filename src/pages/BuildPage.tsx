@@ -11,7 +11,12 @@ import { ActivitiesTab } from '../components/build/tabs/ActivitiesTab';
 import { AudioTab } from '../components/build/tabs/AudioTab';
 import { ReadingTab } from '../components/build/tabs/ReadingTab';
 import { SlidesTab } from '../components/build/tabs/SlidesTab';
-import { useChapterMaterials } from '../components/build/useChapterMaterials';
+import {
+  useChapterMaterials,
+  wellFormedInClassQuiz,
+  wellFormedRows,
+  revokeNarrationUrl,
+} from '../components/build/useChapterMaterials';
 import { ChapterImageRefineDrawer } from '../components/build/ChapterImageRefineDrawer';
 import { ShortcutsHelpOverlay } from '../components/build/ShortcutsHelpOverlay';
 import { TransientToast } from '../components/build/TransientToast';
@@ -25,7 +30,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
-import { useUiStore } from '../store/uiStore';
+import { useUiStore, MATERIAL_KINDS } from '../store/uiStore';
 import { streamMessage, streamWithRetry } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
 import { buildChapterPrompt, buildChapterUserPrompt } from '../prompts/chapter';
@@ -64,9 +69,9 @@ interface Activity {
 // formatElapsed moved to ReadingTab (only place it was used).
 // slugify, extractHtml, parseJson moved to src/utils/format.ts
 
-async function replaceAiPlaceholders(html: string, apiKey: string): Promise<string> {
+async function replaceAiPlaceholders(html: string, apiKey: string, signal?: AbortSignal): Promise<string> {
   const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
-  return replaceAiImagePlaceholders(html, apiKey);
+  return replaceAiImagePlaceholders(html, apiKey, { signal });
 }
 
 // Chapter image helpers moved to src/components/build/chapterImageHelpers.ts
@@ -142,11 +147,16 @@ export function BuildPage() {
    *  callback recreates after updateChapter fires). */
   const generateAllOutputsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Per-slide image refine state. Edited prompts live here until the user
-  // either regenerates (commits) or hits Reset. `refiningSlideIdx` is the
-  // index currently being rendered through gpt-image-2.
+  // either regenerates (commits) or hits Reset; they belong to the chapter in
+  // view and are dropped on a chapter switch. `refiningSlide` is the slide
+  // currently being rendered through gpt-image-2. It and the error carry their
+  // chapter: a render outlives a chapter switch, and a slide index only means
+  // something within one deck.
   const [editedSlidePrompts, setEditedSlidePrompts] = useState<Record<number, string>>({});
-  const [refiningSlideIdx, setRefiningSlideIdx] = useState<number | null>(null);
-  const [slideRefineError, setSlideRefineError] = useState<string | null>(null);
+  const [refiningSlide, setRefiningSlide] = useState<{ chapterNum: number; idx: number } | null>(null);
+  const [slideRefineError, setSlideRefineError] = useState<
+    { chapterNum: number; idx: number; message: string } | null
+  >(null);
 
   // Per-image chapter refine. When the user clicks an image inside the chapter
   // iframe, the shim postMessages here and we open a drawer with the original
@@ -157,6 +167,8 @@ export function BuildPage() {
   const [chapterImageDraft, setChapterImageDraft] = useState('');
   const [chapterImageRefining, setChapterImageRefining] = useState(false);
   const [chapterImageRefineError, setChapterImageRefineError] = useState<string | null>(null);
+  /** The reading iframe — the only window allowed to post image clicks. */
+  const readingIframeRef = useRef<HTMLIFrameElement>(null);
   // One-time discoverability hints — surfaced inline until the user dismisses
   // or auto-dismissed after 12s once the relevant artifact has rendered.
   const [showChapterImageHint, setShowChapterImageHint] = useState<boolean>(() => !readHintSeen('chapter-image-refine'));
@@ -268,11 +280,11 @@ export function BuildPage() {
 
   // Dismiss the slide-image hint as soon as the user starts a refine.
   useEffect(() => {
-    if (refiningSlideIdx !== null && showSlideImageHint) {
+    if (refiningSlide !== null && showSlideImageHint) {
       setShowSlideImageHint(false);
       writeHintSeen('slide-image-refine');
     }
-  }, [refiningSlideIdx, showSlideImageHint]);
+  }, [refiningSlide, showSlideImageHint]);
 
   const dismissChapterImageHint = useCallback(() => {
     setShowChapterImageHint(false);
@@ -293,7 +305,9 @@ export function BuildPage() {
   const [transientToast, setTransientToast] = useState<string | null>(null);
   useEffect(() => {
     if (!transientToast) return;
-    const id = setTimeout(() => setTransientToast(null), 2400);
+    // Longer notices (a refine that couldn't auto-rebuild, slides that fell
+    // back to text) stay up long enough to read.
+    const id = setTimeout(() => setTransientToast(null), Math.max(2400, transientToast.length * 60));
     return () => clearTimeout(id);
   }, [transientToast]);
 
@@ -358,9 +372,15 @@ export function BuildPage() {
         }
         return;
       }
-      // G → generate all materials for the current chapter.
+      // G → generate all materials for the current chapter. Gated like the
+      // "Generate all" button (hidden while drafting, disabled while any
+      // material is in flight): a second press, or key auto-repeat, used to
+      // abort and re-issue every in-flight call.
       if (e.key === 'g' || e.key === 'G') {
         e.preventDefault();
+        if (e.repeat) return;
+        const ui = useUiStore.getState();
+        if (ui.isGenerating || Object.values(ui.inFlight).some((n) => n != null)) return;
         void generateAllOutputsRef.current();
         return;
       }
@@ -417,7 +437,13 @@ export function BuildPage() {
   // setTabError + clearTabError moved into useChapterMaterials.
 
   const copyToClipboard = useCallback(async (text: string, label: string) => {
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Unfocused tab, denied permission, or no clipboard API (insecure context).
+      setTransientToast("Couldn't copy: the browser blocked clipboard access.");
+      return;
+    }
     setCopiedLabel(label);
     setTimeout(() => setCopiedLabel(''), 2000);
   }, []);
@@ -481,24 +507,35 @@ export function BuildPage() {
     return lines.join('\n');
   }, [activities, expandedActivities, syllabusChapter]);
 
-  // Reset BuildPage-owned local state on chapter switch, then hydrate
-  // chapterHtml from the courseStore-persisted chapter (if any). All material
-  // state (quiz/discussion/audio/slides/etc.) is managed inside
-  // useChapterMaterials; its own effect handles reset + rehydrate.
+  // Reset BuildPage-owned per-chapter UI state on a chapter switch only. It
+  // used to depend on `chapters` too, so any store write (a material landing in
+  // any chapter, each slide image render) wiped a half-typed refine note. All
+  // material state (quiz/discussion/audio/slides/etc.) is managed inside
+  // useChapterMaterials; its own effects handle reset + rehydrate.
   useEffect(() => {
-    setChapterHtml('');
     setThinkingText('');
     setRefineFeedback('');
     setShowRefineConfirm(false);
-    const ch = chapters.find((c) => c.number === selectedChapterNum);
-    if (ch) setChapterHtml(ch.htmlContent);
-  }, [selectedChapterNum, chapters]);
+    setEditedSlidePrompts({});
+    setSlideRefineError(null);
+    setChapterImageRefine(null);
+    setChapterImageRefineError(null);
+  }, [selectedChapterNum]);
+
+  // Mirror the selected chapter's persisted HTML into chapterHtml.
+  const selectedChapterHtml = chapters.find((c) => c.number === selectedChapterNum)?.htmlContent ?? '';
+  useEffect(() => {
+    setChapterHtml(selectedChapterHtml);
+  }, [selectedChapterHtml]);
 
   // Auto-generate chapter 1 on first mount if not already generated and has research
   useEffect(() => {
     const ch1 = chapters.find(c => c.number === 1);
     const hasResearch = researchDossiers.some(d => d.chapterNumber === 1 && d.sources.length > 0);
-    if (!ch1 && syllabus && !isGenerating && !autoGenStarted.current && hasResearch) {
+    // A running batch drafts chapter 1 itself without setting isGenerating; a
+    // second draft racing it would later replace the chapter (addChapter) and
+    // wipe the materials the batch built on top of its own draft.
+    if (!ch1 && syllabus && !isGenerating && !batchGenerating && !autoGenStarted.current && hasResearch) {
       autoGenStarted.current = true;
       generateChapter(1);
     }
@@ -557,8 +594,10 @@ export function BuildPage() {
 
       let html = extractHtml(fullText);
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey);
+        html = await replaceAiPlaceholders(html, openaiApiKey, controller.signal);
       }
+      // A Stop during figure rendering still discards the draft.
+      controller.signal.throwIfAborted();
 
       if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
       addChapter({
@@ -575,36 +614,57 @@ export function BuildPage() {
       setChapterDraftingFor(null);
       setThinkingText('');
     }
-  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
 
   const refineChapter = useCallback(async (feedback: string) => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
+    // Captured: a refine runs for minutes and the UI invites clicking away.
+    const chapterNum = selectedChapterNum;
+    // Only rebuild what this refine clears ("only the reading will change"
+    // when nothing else had been generated yet).
+    const hadDependents = !!(
+      currentChapter.practiceQuizData ||
+      currentChapter.inClassQuizData?.length ||
+      currentChapter.weeklyChallengeData ||
+      currentChapter.discussionData?.length ||
+      currentChapter.activityData?.length ||
+      currentChapter.audioTranscript ||
+      currentChapter.slidesJson?.length
+    );
 
-    updateChapter(selectedChapterNum, {
+    // Cancel this chapter's in-flight material jobs first: they were drafted
+    // from the reading being replaced and would otherwise land after the clear.
+    for (const kind of MATERIAL_KINDS) abortInFlight(materialAbortKey(kind, chapterNum));
+    const staleAudioUrl = currentChapter.audioUrl;
+    updateChapter(chapterNum, {
       practiceQuizData: undefined,
       inClassQuizData: undefined,
+      weeklyChallengeData: undefined,
       discussionData: undefined,
       activityData: undefined,
       activityDetails: undefined,
       audioTranscript: undefined,
       audioUrl: undefined,
+      audioDataUri: undefined,
       slidesJson: undefined,
     });
+    revokeNarrationUrl(staleAudioUrl);
     // updateChapter above cleared dependent materials in courseStore;
-    // useChapterMaterials' reset effect will wipe the local mirrors.
+    // useChapterMaterials' rehydrate effect will wipe the local mirrors.
     setRefineFeedback('');
     setShowRefineConfirm(false);
+    setEditedSlidePrompts({});
 
-    const abortKey = materialAbortKey('reading', selectedChapterNum);
+    const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
     setIsRefining(true);
     setIsGenerating(true);
-    setChapterDraftingFor(selectedChapterNum);
+    setChapterDraftingFor(chapterNum);
     setStreamingText('');
     setThinkingText('');
 
     try {
-      const dossier = researchDossiers.find(d => d.chapterNumber === selectedChapterNum);
+      const dossier = researchDossiers.find(d => d.chapterNumber === chapterNum);
       const researchSources = dossier?.sources.map(s => ({
         title: s.title, authors: s.authors, year: s.year,
         summary: s.summary, url: s.url, doi: s.doi,
@@ -662,18 +722,28 @@ Teacher feedback: "${feedback}"`;
 
       let html = extractHtml(fullText);
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey);
+        html = await replaceAiPlaceholders(html, openaiApiKey, controller.signal);
       }
-      setChapterHtml(html);
-      updateChapter(selectedChapterNum, { htmlContent: html });
+      // A Stop during figure rendering keeps the original reading.
+      controller.signal.throwIfAborted();
+      if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
+      updateChapter(chapterNum, { htmlContent: html });
 
       // If the user opted in, automatically rebuild quizzes/discussion/etc.
       // against the new reading. The setTimeout lets React flush the chapter
       // state update so the refreshed generateAllOutputs callback reads from
-      // the new content, not the pre-refine snapshot.
-      if (refineAutoRegen) {
+      // the new content, not the pre-refine snapshot. generateAllOutputs
+      // works on the *selected* chapter, so it only runs if this one is still
+      // in view; otherwise building would land on whichever chapter is open.
+      if (refineAutoRegen && hadDependents) {
         setTimeout(() => {
-          void generateAllOutputsRef.current();
+          if (selectedChapterRef.current === chapterNum) {
+            void generateAllOutputsRef.current();
+          } else {
+            setTransientToast(
+              `Chapter ${chapterNum} is refined and its materials were cleared. Open it and use "Generate all materials" to rebuild them.`,
+            );
+          }
         }, 250);
       }
     } catch (err) {
@@ -698,7 +768,9 @@ Teacher feedback: "${feedback}"`;
       setChapterDraftingFor(null);
       setThinkingText('');
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+    // refineAutoRegen is listed: without it, unticking "Rebuild automatically"
+    // was ignored (the callback kept the value from when it was last built).
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError, refineAutoRegen]);
 
   // 7 generators + retryAudio + fleshOutActivity moved to useChapterMaterials hook.
 
@@ -713,16 +785,18 @@ Teacher feedback: "${feedback}"`;
   // download pick up the new render.
   const refineSlideImage = useCallback(
     async (idx: number) => {
-      if (!openaiApiKey || refiningSlideIdx !== null) return;
+      if (!openaiApiKey || refiningSlide !== null) return;
       const slide = slidesData[idx];
       if (!slide) return;
+      // Captured: a 4K render takes 30–60s and the user may switch chapters.
+      const chapterNum = selectedChapterNum;
       const draft = editedSlidePrompts[idx];
       const newPrompt = (draft ?? slide.imagePrompt ?? '').trim();
       if (!newPrompt) {
-        setSlideRefineError('Image prompt is empty.');
+        setSlideRefineError({ chapterNum, idx, message: 'Image prompt is empty.' });
         return;
       }
-      setRefiningSlideIdx(idx);
+      setRefiningSlide({ chapterNum, idx });
       setSlideRefineError(null);
       try {
         const [{ generateImageWithRetry }, { withSafetyClause }] = await Promise.all([
@@ -734,37 +808,46 @@ Teacher feedback: "${feedback}"`;
           openaiApiKey,
           { size: '3840x2160', quality: 'high', compression: 88 },
         );
-        // Mirror to local state so the row immediately reflects the new render.
-        setSlidesData((prev) =>
-          prev.map((s, i) =>
-            i === idx ? { ...s, imagePrompt: newPrompt, imageDataUri: dataUri } : s,
-          ),
-        );
+        // Mirror to local state so the row immediately reflects the new render
+        // — but only while this chapter's deck is the one in view; otherwise
+        // the image would land on another chapter's slide at the same index.
+        if (selectedChapterRef.current === chapterNum) {
+          setSlidesData((prev) =>
+            prev.map((s, i) =>
+              i === idx ? { ...s, imagePrompt: newPrompt, imageDataUri: dataUri } : s,
+            ),
+          );
+          // Clear this slide's draft now that it's committed.
+          setEditedSlidePrompts((prev) => {
+            const next = { ...prev };
+            delete next[idx];
+            return next;
+          });
+        }
         // Persist atomically — both prompt and image — so a tab-switch /
         // refresh never loses the edited prompt.
-        updateSlide(selectedChapterNum, idx, {
+        updateSlide(chapterNum, idx, {
           imagePrompt: newPrompt,
           imageDataUri: dataUri,
         });
-        // Clear this slide's draft now that it's committed.
-        setEditedSlidePrompts((prev) => {
-          const next = { ...prev };
-          delete next[idx];
-          return next;
-        });
       } catch (err) {
-        setSlideRefineError(friendlyError(err, 'Slide image regeneration failed.'));
+        setSlideRefineError({
+          chapterNum,
+          idx,
+          message: friendlyError(err, 'Slide image regeneration failed.'),
+        });
       } finally {
-        setRefiningSlideIdx(null);
+        setRefiningSlide(null);
       }
     },
     [
       openaiApiKey,
-      refiningSlideIdx,
+      refiningSlide,
       slidesData,
       editedSlidePrompts,
       updateSlide,
       selectedChapterNum,
+      setSlidesData,
     ],
   );
 
@@ -779,16 +862,19 @@ Teacher feedback: "${feedback}"`;
       return;
     }
     if (!syllabus || !syllabusChapter) return;
+    // Captured: the render takes minutes and the user may switch chapters,
+    // after which the local slides mirror holds a different chapter's deck.
+    const chapterNum = selectedChapterNum;
 
     setSlidesRender({
-      chapterNum: selectedChapterNum,
+      chapterNum,
       current: 0,
       total: slidesData.length,
       phase: 'rendering',
     });
     try {
       const { generatePptx } = await import('../services/export/pptxExporter');
-      const { blob } = await generatePptx(
+      const result = await generatePptx(
         slidesData,
         syllabus.courseTitle,
         syllabusChapter.title,
@@ -799,18 +885,22 @@ Teacher feedback: "${feedback}"`;
           imageSize: '3840x2160',
           onProgress: (current, total, phase) =>
             setSlidesRender({
-              chapterNum: selectedChapterNum,
+              chapterNum,
               current,
               total,
               phase,
             }),
           onSlideRendered: (i, dataUri) => {
             // Atomic write to courseStore — safe even with parallel workers.
-            setSlideImage(selectedChapterNum, i, dataUri);
-            // Mirror to local state so the "rendered" chip updates live.
-            setSlidesData((prev) =>
-              prev.map((s, idx) => (idx === i ? { ...s, imageDataUri: dataUri } : s)),
-            );
+            setSlideImage(chapterNum, i, dataUri);
+            // Mirror to local state so the "rendered" chip updates live, only
+            // while this chapter is still in view (else another chapter's
+            // deck would pick the image up as pre-rendered).
+            if (selectedChapterRef.current === chapterNum) {
+              setSlidesData((prev) =>
+                prev.map((s, idx) => (idx === i ? { ...s, imageDataUri: dataUri } : s)),
+              );
+            }
           },
           preRendered: Object.fromEntries(
             slidesData
@@ -822,9 +912,16 @@ Teacher feedback: "${feedback}"`;
         },
       );
       downloadFile(
-        blob,
-        `slides-${selectedChapterNum}-${slugify(syllabusChapter.title || 'chapter')}.pptx`,
+        result.blob,
+        `slides-${chapterNum}-${slugify(syllabusChapter.title || 'chapter')}.pptx`,
       );
+      // Read tolerantly: exporters that predate per-slide reporting omit it.
+      const failedCount = (result as { failedSlides?: number[] }).failedSlides?.length ?? 0;
+      if (failedCount > 0) {
+        setTransientToast(
+          `Deck downloaded, but ${failedCount} slide ${failedCount === 1 ? 'image' : 'images'} couldn't render, so ${failedCount === 1 ? 'that slide is' : 'those slides are'} text-only. Download again to retry.`,
+        );
+      }
     } catch (err) {
       setError(friendlyError(err, 'Slides export failed.'));
     } finally {
@@ -837,6 +934,7 @@ Teacher feedback: "${feedback}"`;
     syllabusChapter,
     selectedChapterNum,
     slidesData,
+    setSlidesData,
     setup.themeId,
     setSlidesRender,
     setSlideImage,
@@ -850,18 +948,32 @@ Teacher feedback: "${feedback}"`;
   // parent (this page) opens an ImageRefineDrawer with the original prompt.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
-      const data = e?.data as { __cbImageClick?: number; idx?: number; prompt?: string; aspect?: string } | undefined;
+      // Only the reading iframe's own click shim may open the drawer: not the
+      // quiz/challenge previews, a nested frame, or another window holding a
+      // reference to this one. Its payload is still model-adjacent, so check
+      // the shape too (a non-string prompt used to crash the drawer render).
+      const frame = readingIframeRef.current?.contentWindow;
+      if (!frame || e.source !== frame) return;
+      const data = e.data as
+        | { __cbImageClick?: unknown; idx?: unknown; prompt?: unknown; aspect?: unknown }
+        | null
+        | undefined;
       if (!data || data.__cbImageClick !== 1) return;
-      if (typeof data.idx !== 'number') return;
-      const src = getChapterImageSrc(chapterHtml, data.idx);
+      const { idx, prompt, aspect } = data;
+      if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) return;
+      const src = getChapterImageSrc(chapterHtml, idx);
       if (!src) return;
+      const promptText = typeof prompt === 'string' ? prompt : '';
       setChapterImageRefine({
-        idx: data.idx,
-        prompt: data.prompt ?? '',
-        aspect: data.aspect ?? 'landscape',
+        idx,
+        prompt: promptText,
+        aspect:
+          typeof aspect === 'string' && Object.hasOwn(CHAPTER_ASPECT_TO_SIZE, aspect)
+            ? aspect
+            : 'landscape',
         src,
       });
-      setChapterImageDraft(data.prompt ?? '');
+      setChapterImageDraft(promptText);
       setChapterImageRefineError(null);
     }
     window.addEventListener('message', onMessage);
@@ -883,6 +995,8 @@ Teacher feedback: "${feedback}"`;
       setChapterImageRefineError('Image prompt is empty.');
       return;
     }
+    // Captured: the drawer can be closed and the chapter switched mid-render.
+    const chapterNum = selectedChapterNum;
     setChapterImageRefining(true);
     setChapterImageRefineError(null);
     try {
@@ -903,9 +1017,9 @@ Teacher feedback: "${feedback}"`;
         newPrompt,
         newDataUri,
       );
-      setChapterHtml(updatedHtml);
+      if (selectedChapterRef.current === chapterNum) setChapterHtml(updatedHtml);
       if (currentChapter) {
-        updateChapter(selectedChapterNum, { htmlContent: updatedHtml });
+        updateChapter(chapterNum, { htmlContent: updatedHtml });
       }
       setChapterImageRefine(null);
     } catch (err) {
@@ -1036,8 +1150,9 @@ Teacher feedback: "${feedback}"`;
             let html = extractHtml(fullText);
             if (hasImageGen) {
               setBatchPhase('writing');
-              html = await replaceAiPlaceholders(html, openaiApiKey);
+              html = await replaceAiPlaceholders(html, openaiApiKey, signal);
             }
+            signal.throwIfAborted();
             addChapter({ number: ch.number, title: ch.title, htmlContent: html });
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
@@ -1072,7 +1187,8 @@ Teacher feedback: "${feedback}"`;
               {}
             );
             const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-            const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+            const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey, signal);
+            signal.throwIfAborted();
             updateChapter(ch.number, { practiceQuizData: balancedQuiz });
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
@@ -1101,13 +1217,21 @@ Teacher feedback: "${feedback}"`;
               },
               {}
             );
+            let parsed: InClassQuizQuestion[] = [];
             try {
-              const parsed = parseJson(inClassText) as InClassQuizQuestion[];
-              const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-              const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-              if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
+              parsed = wellFormedInClassQuiz(parseJson(inClassText));
             } catch {
+              /* reported below */
+            }
+            if (parsed.length === 0) {
               failures.push({ chapter: ch.number, material: 'In-class quiz', message: 'The model returned unparseable quiz data — a retry usually fixes this.' });
+            } else {
+              // Outside the parse guard: an abort while balancing must break the
+              // run (outer catch), not be reported as unparseable data.
+              const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
+              const balanced = await balanceInClassQuiz(parsed, claudeApiKey, signal);
+              signal.throwIfAborted();
+              updateChapter(ch.number, { inClassQuizData: balanced });
             }
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
@@ -1180,7 +1304,8 @@ Teacher feedback: "${feedback}"`;
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as DiscussionPrompt[];
+                const parsed = wellFormedRows<DiscussionPrompt>(parseJson(fullText), ['prompt']);
+                if (parsed.length === 0) throw new Error('Malformed discussion JSON.');
                 updateChapter(ch.number, { discussionData: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Discussion', message: friendlyError(err, 'Generation failed.') });
@@ -1206,7 +1331,8 @@ Teacher feedback: "${feedback}"`;
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as Activity[];
+                const parsed = wellFormedRows<Activity>(parseJson(fullText), ['title']);
+                if (parsed.length === 0) throw new Error('Malformed activities JSON.');
                 updateChapter(ch.number, { activityData: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Activities', message: friendlyError(err, 'Generation failed.') });
@@ -1239,9 +1365,12 @@ Teacher feedback: "${feedback}"`;
                     const { generateAudiobook } = await import('../services/elevenLabs/tts');
                     const batchVoice = getVoiceOption(setup.voiceId);
                     const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: batchVoice.id, signal });
-                    const url = URL.createObjectURL(blob);
                     const audioDataUri = await persistableAudioDataUri(blob);
+                    signal.throwIfAborted();
+                    const url = URL.createObjectURL(blob);
+                    const prevUrl = useCourseStore.getState().chapters.find(c => c.number === ch.number)?.audioUrl;
                     updateChapter(ch.number, { audioUrl: url, audioDataUri });
+                    if (prevUrl !== url) revokeNarrationUrl(prevUrl);
                   } catch (err) {
                     // The transcript is saved either way.
                     if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Audio narration', message: friendlyError(err, 'Synthesis failed — the transcript is saved.') });
@@ -1267,11 +1396,14 @@ Teacher feedback: "${feedback}"`;
                       content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, html),
                     }],
                     thinkingBudget: 'medium',
-                    maxTokens: 4000,
+                    // 12–14 slides with long imagePrompts need ~5–7k output
+                    // tokens beside up to 8k of thinking; 4000 truncated them.
+                    maxTokens: 12000,
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as SlideData[];
+                const parsed = wellFormedRows<SlideData>(parseJson(fullText), ['title']);
+                if (parsed.length === 0) throw new Error('Malformed slides JSON.');
                 updateChapter(ch.number, { slidesJson: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Slides', message: friendlyError(err, 'Generation failed.') });
@@ -1748,13 +1880,14 @@ Teacher feedback: "${feedback}"`;
                   {syllabus.chapters.map((ch) => {
                     const generated = chapters.find(c => c.number === ch.number);
                     const isCurrent = batchCurrentChapter === ch.number;
-                    // Count completed materials for this chapter
+                    // Count completed materials for this chapter (the same eight the sidebar counts)
                     let matCount = 0;
-                    const maxMat = 7;
+                    const maxMat = 8;
                     if (generated) {
                       if (generated.htmlContent) matCount++;
                       if (generated.practiceQuizData) matCount++;
                       if (generated.inClassQuizData && generated.inClassQuizData.length > 0) matCount++;
+                      if (generated.weeklyChallengeData) matCount++;
                       if (generated.discussionData && generated.discussionData.length > 0) matCount++;
                       if (generated.activityData && generated.activityData.length > 0) matCount++;
                       if (generated.audioTranscript) matCount++;
@@ -2175,6 +2308,7 @@ Teacher feedback: "${feedback}"`;
               <AnimatePresence mode="wait">
                 {activeTab === 'chapter' && (
                   <ReadingTab
+                    iframeRef={readingIframeRef}
                     chapterHtml={chapterHtml}
                     chapterNum={selectedChapterNum}
                     chapterTitle={syllabusChapter?.title ?? ''}
@@ -2319,6 +2453,9 @@ Teacher feedback: "${feedback}"`;
                     exit={{ opacity: 0 }}
                   >
                     <AudioTab
+                      // Remount per chapter so an open transcript editor (and
+                      // its draft) can't be saved into the next chapter.
+                      key={selectedChapterNum}
                       audioTranscript={audioTranscript}
                       audioUrl={audioUrl}
                       audioError={audioError}
@@ -2372,8 +2509,15 @@ Teacher feedback: "${feedback}"`;
                           return next;
                         })
                       }
-                      refiningSlideIdx={refiningSlideIdx}
-                      slideRefineError={slideRefineError}
+                      refiningSlideIdx={
+                        refiningSlide?.chapterNum === selectedChapterNum ? refiningSlide.idx : null
+                      }
+                      slideRefineBusyElsewhere={
+                        !!refiningSlide && refiningSlide.chapterNum !== selectedChapterNum
+                      }
+                      slideRefineError={
+                        slideRefineError?.chapterNum === selectedChapterNum ? slideRefineError : null
+                      }
                       onRefineSlide={refineSlideImage}
                     />
                   </motion.div>

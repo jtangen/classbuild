@@ -1,3 +1,4 @@
+import { useMemo, type Ref } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { downloadFile } from '../../../utils/download';
@@ -17,6 +18,8 @@ function formatElapsed(sec: number): string {
 }
 
 export interface ReadingTabProps {
+  /** BuildPage only accepts image-click messages from this iframe's window. */
+  iframeRef?: Ref<HTMLIFrameElement>;
   chapterHtml: string;
   chapterNum: number;
   chapterTitle: string;
@@ -45,6 +48,7 @@ export interface ReadingTabProps {
 
 export function ReadingTab(props: ReadingTabProps) {
   const {
+    iframeRef,
     chapterHtml,
     chapterNum,
     chapterTitle,
@@ -66,6 +70,13 @@ export function ReadingTab(props: ReadingTabProps) {
     onRefine,
     dependents,
   } = props;
+
+  // Memoized: the page re-renders on every streamed token, and themed chapter
+  // HTML with inline base64 figures runs to megabytes.
+  const srcDoc = useMemo(
+    () => (chapterHtml ? withImageClickShim(renderChapterHtml(chapterHtml, themeId, chapterTitle)) : ''),
+    [chapterHtml, themeId, chapterTitle],
+  );
 
   return (
     <div
@@ -240,9 +251,8 @@ export function ReadingTab(props: ReadingTabProps) {
             />
           )}
           <iframe
-            srcDoc={withImageClickShim(
-              renderChapterHtml(chapterHtml, themeId, chapterTitle),
-            )}
+            ref={iframeRef}
+            srcDoc={srcDoc}
             style={{
               width: '100%',
               height: '70vh',

@@ -31,8 +31,12 @@ export interface SlidesTabProps {
   editedSlidePrompts: Record<number, string>;
   onSlidePromptDraftChange: (slideIndex: number, text: string) => void;
   onSlidePromptDraftReset: (slideIndex: number) => void;
+  /** Slide of *this* deck currently rendering, if any. */
   refiningSlideIdx: number | null;
-  slideRefineError: string | null;
+  /** A slide in another chapter's deck is rendering (single render at a time). */
+  slideRefineBusyElsewhere?: boolean;
+  /** Last refine failure in this deck, tied to its slide. */
+  slideRefineError: { idx: number; message: string } | null;
   onRefineSlide: (slideIndex: number) => void;
 }
 
@@ -54,6 +58,7 @@ export function SlidesTab(props: SlidesTabProps) {
     onSlidePromptDraftChange,
     onSlidePromptDraftReset,
     refiningSlideIdx,
+    slideRefineBusyElsewhere,
     slideRefineError,
     onRefineSlide,
   } = props;
@@ -282,9 +287,11 @@ export function SlidesTab(props: SlidesTabProps) {
                           onResetDraft={() => onSlidePromptDraftReset(i)}
                           onRefine={() => onRefineSlide(i)}
                           isRefining={refiningSlideIdx === i}
-                          anyRefining={refiningSlideIdx !== null}
+                          anyRefining={refiningSlideIdx !== null || !!slideRefineBusyElsewhere}
                           hasOpenAiKey={hasOpenAiKey}
-                          error={refiningSlideIdx === i ? slideRefineError : null}
+                          // Keyed by slide, not by "is rendering": the render
+                          // has finished by the time its error exists.
+                          error={slideRefineError?.idx === i ? slideRefineError.message : null}
                           onAddKey={onAddKey}
                         />
                       </div>
@@ -329,7 +336,8 @@ function SlideImageRefine({
   error: string | null;
   onAddKey: () => void;
 }) {
-  const currentPrompt = slide.imagePrompt ?? '';
+  // Guarded: a malformed reply can carry a non-string here, and .trim() below would throw.
+  const currentPrompt = typeof slide.imagePrompt === 'string' ? slide.imagePrompt : '';
   const value = draft ?? currentPrompt;
   const hasEdit = draft !== undefined && draft !== currentPrompt;
   const trimmed = value.trim();

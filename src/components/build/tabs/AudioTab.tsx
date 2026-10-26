@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { slugify } from '../../../utils/format';
+import { downloadFile } from '../../../utils/download';
+import { isSafeMediaUrl } from '../../../utils/url';
 import {
   ArtifactStatusLine,
   ArtifactEmpty,
@@ -65,7 +67,12 @@ export function AudioTab({
               </div>
               <Button
                 size="sm"
+                // audioUrl can come from an imported project file; only an
+                // app-made blob:/data:audio URL may reach this imperative href
+                // (a javascript: URL would run on click).
+                disabled={!isSafeMediaUrl(audioUrl, 'audio')}
                 onClick={() => {
+                  if (!isSafeMediaUrl(audioUrl, 'audio')) return;
                   const a = document.createElement('a');
                   a.href = audioUrl;
                   a.download = `audio-${chapterNum}-${slugify(chapterTitle || 'chapter')}.mp3`;
@@ -95,7 +102,9 @@ export function AudioTab({
             <p className="text-cb-status-warning text-sm mb-1">
               Audio synthesis failed: {audioError}
             </p>
-            <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating}>
+            {/* !canGenerate: another chapter's narration is in flight — the
+                in-flight slot (spinner/Stop) is single per material kind. */}
+            <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating || !canGenerate}>
               Retry Audio
             </Button>
           </div>
@@ -136,7 +145,7 @@ export function AudioTab({
             ) : (
               <>
                 <p className="text-cb-text-default text-sm mb-1">Transcript ready — click below to generate audio.</p>
-                <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating}>
+                <Button size="sm" variant="secondary" className="mt-2" onClick={onRetry} disabled={isGenerating || !canGenerate}>
                   Generate Audio
                 </Button>
               </>
@@ -253,12 +262,15 @@ function TranscriptPanel({
           <Button
             size="sm"
             variant="ghost"
-            onClick={() => {
-              const a = document.createElement('a');
-              a.href = URL.createObjectURL(new Blob([transcript], { type: 'text/plain' }));
-              a.download = `transcript-${chapterNum}-${slugify(chapterTitle || 'chapter')}.txt`;
-              a.click();
-            }}
+            onClick={() =>
+              // downloadFile revokes its object URL after the click (this
+              // used to leak one per download).
+              downloadFile(
+                transcript,
+                `transcript-${chapterNum}-${slugify(chapterTitle || 'chapter')}.txt`,
+                'text/plain',
+              )
+            }
           >
             Download .txt
           </Button>

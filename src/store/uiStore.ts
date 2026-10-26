@@ -25,6 +25,17 @@ export type MaterialKind =
   | 'audio'
   | 'slides';
 
+/** Every MaterialKind — e.g. to cancel all of a chapter's material jobs. */
+export const MATERIAL_KINDS: readonly MaterialKind[] = [
+  'quiz',
+  'inclassquiz',
+  'weeklychallenge',
+  'discussion',
+  'activities',
+  'audio',
+  'slides',
+];
+
 /** One failed step from a batch run, kept so the user can see and retry it. */
 export interface BatchFailure {
   chapter: number;

@@ -39,17 +39,20 @@ export function swapChapterImage(
   const m = html.match(figureRe);
   if (!m) return html;
   const escapedPrompt = newPrompt.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  // Replacer functions throughout: a replacement *string* would expand `$&`,
+  // `$'`, `` $` `` and `$$` inside the user's prompt (e.g. "US$'000") and
+  // splice chunks of the chapter into the attribute.
   let block = m[1];
   if (/data-prompt="[^"]*"/i.test(block)) {
-    block = block.replace(/data-prompt="[^"]*"/i, `data-prompt="${escapedPrompt}"`);
+    block = block.replace(/data-prompt="[^"]*"/i, () => `data-prompt="${escapedPrompt}"`);
   } else {
     block = block.replace(
       /(<figure[^>]*?)>/i,
-      `$1 data-prompt="${escapedPrompt}">`,
+      (_, open: string) => `${open} data-prompt="${escapedPrompt}">`,
     );
   }
-  block = block.replace(/(<img[^>]*?\bsrc=)"[^"]*"/i, `$1"${newDataUri}"`);
-  return html.replace(m[1], block);
+  block = block.replace(/(<img[^>]*?\bsrc=)"[^"]*"/i, (_, pre: string) => `${pre}"${newDataUri}"`);
+  return html.replace(m[1], () => block);
 }
 
 /** Tiny script appended to the chapter iframe srcdoc on BuildPage so that
@@ -83,7 +86,7 @@ export const CHAPTER_IMAGE_CLICK_SHIM = `<script>(function(){
 
 export function withImageClickShim(html: string): string {
   if (html.includes('</body>')) {
-    return html.replace('</body>', `${CHAPTER_IMAGE_CLICK_SHIM}</body>`);
+    return html.replace('</body>', () => `${CHAPTER_IMAGE_CLICK_SHIM}</body>`);
   }
   return html + CHAPTER_IMAGE_CLICK_SHIM;
 }

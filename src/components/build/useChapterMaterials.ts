@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
+import { useCourseStore } from '../../store/courseStore';
 import { streamWithRetry } from '../../services/claude/streaming';
 import { MODELS } from '../../services/claude/client';
 import { buildPracticeQuizPrompt, buildPracticeQuizUserPrompt } from '../../prompts/practiceQuiz';
@@ -124,13 +125,41 @@ export interface UseChapterMaterialsResult {
 }
 
 /**
+ * Which run owns each kind's single uiStore in-flight slot. A run that was
+ * superseded (a re-generate aborts it via beginAbortable, or the same kind was
+ * started on another chapter) must not clear the slot, i.e. the spinner, Stop
+ * button and disabled CTAs, out from under the run that replaced it.
+ */
+const inFlightOwner = new Map<string, AbortController>();
+
+function claimInFlight(
+  kind: string,
+  controller: AbortController,
+  chapterNum: number,
+  setGenerating: (n: number | null) => void,
+): void {
+  inFlightOwner.set(kind, controller);
+  setGenerating(chapterNum);
+}
+
+function releaseInFlight(
+  kind: string,
+  controller: AbortController,
+  setGenerating: (n: number | null) => void,
+): void {
+  if (inFlightOwner.get(kind) !== controller) return;
+  inFlightOwner.delete(kind);
+  setGenerating(null);
+}
+
+/**
  * Wrap the common begin/end pattern shared by all seven generators:
  *
- *   setGenerating(chapterNum)
- *   clearTabError(kind)
+ *   claim the in-flight slot (setGenerating(chapterNum))
+ *   clearTabError(kind, chapterNum)
  *   try { await run() }
- *   catch (err) { setTabError(kind, friendlyError(...)) }
- *   finally { setGenerating(null) }
+ *   catch (err) { setTabError(kind, chapterNum, friendlyError(...)) }
+ *   finally { release the slot if this run still owns it }
  *
  * Each generator just provides its own `run` with the prompt + side effects.
  */
@@ -146,8 +175,8 @@ async function runGenerationLifecycle({
   kind: string;
   chapterNum: number;
   setGenerating: (n: number | null) => void;
-  setTabError: (kind: string, msg: string) => void;
-  clearTabError: (kind: string) => void;
+  setTabError: (kind: string, chapterNum: number, msg: string) => void;
+  clearTabError: (kind: string, chapterNum: number) => void;
   errorPrefix: string;
   run: (signal: AbortSignal) => Promise<void>;
 }): Promise<void> {
@@ -155,18 +184,18 @@ async function runGenerationLifecycle({
   // cancel this generation (abortInFlight(materialAbortKey(kind, chapter))).
   const abortKey = materialAbortKey(kind, chapterNum);
   const controller = beginAbortable(abortKey);
-  setGenerating(chapterNum);
-  clearTabError(kind);
+  claimInFlight(kind, controller, chapterNum, setGenerating);
+  clearTabError(kind, chapterNum);
   try {
     await run(controller.signal);
   } catch (err) {
     // A user-initiated Stop is a silent cancel, never an error banner.
     if (!isAbortError(err) && !controller.signal.aborted) {
-      setTabError(kind, friendlyError(err, errorPrefix));
+      setTabError(kind, chapterNum, friendlyError(err, errorPrefix));
     }
   } finally {
     endAbortable(abortKey, controller);
-    setGenerating(null);
+    releaseInFlight(kind, controller, setGenerating);
   }
 }
 
@@ -191,6 +220,58 @@ function ttsErrorMessage(err: unknown): string {
   }
   return friendlyError(err, 'Audio synthesis failed.');
 }
+
+/**
+ * Keep only well-formed in-class quiz questions, with the text fields the tab
+ * and the DOCX export read coerced to strings. A schema-drifted reply (say, an
+ * entry without `distractors`) would otherwise persist and crash the tab.
+ */
+export function wellFormedInClassQuiz(raw: unknown): InClassQuizQuestion[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (q) =>
+        !!q &&
+        typeof q.question === 'string' &&
+        typeof q.correctAnswer === 'string' &&
+        Array.isArray(q.distractors) &&
+        q.distractors.every((d: unknown) => typeof (d as { text?: unknown } | null)?.text === 'string'),
+    )
+    .map((q) => ({
+      question: q.question,
+      correctAnswer: q.correctAnswer,
+      correctFeedback: String(q.correctFeedback ?? ''),
+      distractors: q.distractors.map((d: { text: string; feedback?: unknown }) => ({
+        text: d.text,
+        feedback: String(d.feedback ?? ''),
+      })),
+    }));
+}
+
+/**
+ * Parsed rows whose `required` fields are strings (the tabs render them as
+ * text, and an object there throws). Filter before persisting only, never on
+ * rehydrate: slides and activities are addressed by index.
+ */
+export function wellFormedRows<T>(raw: unknown, required: readonly string[]): T[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (r) => !!r && typeof r === 'object' && required.every((f) => typeof r[f] === 'string'),
+  ) as T[];
+}
+
+/**
+ * A narration's blob: URL is held only by its chapter's store entry and this
+ * hook's mirror of the chapter in view, so once a new narration replaces it (or
+ * a refine clears it) nothing can still play it. Revoke it so the MP3 bytes
+ * aren't pinned in memory for the rest of the session.
+ */
+export function revokeNarrationUrl(url: string | undefined): void {
+  if (url?.startsWith('blob:')) URL.revokeObjectURL(url);
+}
+
+const storedAudioUrl = (chapterNum: number): string | undefined =>
+  useCourseStore.getState().chapters.find((c) => c.number === chapterNum)?.audioUrl;
 
 export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapterMaterialsResult {
   const {
@@ -228,60 +309,88 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
   const [slidesData, setSlidesData] = useState<SlideData[]>([]);
   const [expandedActivities, setExpandedActivities] = useState<Record<number, ActivityDetail>>({});
   const [expandingActivity, setExpandingActivity] = useState<number | null>(null);
-  const [tabErrors, setTabErrors] = useState<Record<string, string>>({});
+  // Keyed `${kind}:${chapter}`: a background run that fails after the user
+  // switched chapters reports on its own chapter, not the one in view.
+  const [tabErrorsByKey, setTabErrorsByKey] = useState<Record<string, string>>({});
 
   // ── Tab error helpers ──────────────────────────────────────────────
-  const setTabError = useCallback((tab: string, msg: string) => {
-    setTabErrors((prev) => ({ ...prev, [tab]: msg }));
+  const setChapterTabError = useCallback((tab: string, chapterNum: number, msg: string) => {
+    setTabErrorsByKey((prev) => ({ ...prev, [materialAbortKey(tab, chapterNum)]: msg }));
   }, []);
 
-  const clearTabError = useCallback((tab: string) => {
-    setTabErrors((prev) => {
-      if (!prev[tab]) return prev;
+  const clearChapterTabError = useCallback((tab: string, chapterNum: number) => {
+    const key = materialAbortKey(tab, chapterNum);
+    setTabErrorsByKey((prev) => {
+      if (!prev[key]) return prev;
       const next = { ...prev };
-      delete next[tab];
+      delete next[key];
       return next;
     });
   }, []);
 
-  // ── Chapter-switch reset + rehydrate ───────────────────────────────
-  // When the user switches chapters (or the persisted chapter appears
-  // from courseStore), reset all per-material state and re-hydrate from
-  // the new chapter if it has prior data.
+  // The selected chapter's errors, keyed by tab — the shape BuildPage reads.
+  const tabErrors = useMemo(() => {
+    const suffix = materialAbortKey('', selectedChapterNum);
+    const out: Record<string, string> = {};
+    for (const [key, msg] of Object.entries(tabErrorsByKey)) {
+      if (key.endsWith(suffix)) out[key.slice(0, -suffix.length)] = msg;
+    }
+    return out;
+  }, [tabErrorsByKey, selectedChapterNum]);
+
+  const setTabError = useCallback(
+    (tab: string, msg: string) => setChapterTabError(tab, selectedChapterNum, msg),
+    [setChapterTabError, selectedChapterNum],
+  );
+
+  const clearTabError = useCallback(
+    (tab: string) => clearChapterTabError(tab, selectedChapterNum),
+    [clearChapterTabError, selectedChapterNum],
+  );
+
+  // ── Chapter switch: reset ──────────────────────────────────────────
+  // Per-run UI state (an activity expansion, audio progress and errors)
+  // belongs to the chapter it started on. The two async-built previews are
+  // cleared here so the old chapter's quiz never shows under the new one;
+  // everything else is re-derived by the rehydrate effect below.
   useEffect(() => {
     setQuizHtml('');
-    setInClassQuizData([]);
-    setDiscussions([]);
-    setActivities([]);
-    setAudioTranscript('');
-    setAudioUrl('');
-    setSlidesData([]);
     setWeeklyChallengeHtml('');
-    setExpandedActivities({});
     setExpandingActivity(null);
     setAudioChunkProgress(null);
     setAudioError('');
     setAudioPersistNote('');
-    setTabErrors({});
+  }, [selectedChapterNum]);
 
-    if (!currentChapter) return;
+  // ── Rehydrate from the store ───────────────────────────────────────
+  // Runs on a chapter switch and whenever the selected chapter's store entry
+  // changes (a material landing, a slide image rendering). It only mirrors
+  // data, so a sibling material landing no longer wipes tab errors, an
+  // in-progress activity expansion or audio progress.
+  useEffect(() => {
     const ch = currentChapter;
-    if (ch.inClassQuizData && ch.inClassQuizData.length > 0) setInClassQuizData(ch.inClassQuizData);
-    if (ch.discussionData && ch.discussionData.length > 0) setDiscussions(ch.discussionData);
-    if (ch.activityData && ch.activityData.length > 0) setActivities(ch.activityData);
-    if (ch.activityDetails) setExpandedActivities(ch.activityDetails);
-    if (ch.audioTranscript) setAudioTranscript(ch.audioTranscript);
-    const audioSrc = ch.audioUrl ?? ch.audioDataUri;
-    if (audioSrc) setAudioUrl(audioSrc);
-    if (ch.slidesJson && ch.slidesJson.length > 0) setSlidesData(ch.slidesJson);
-    if (ch.practiceQuizData && syllabus) {
-      const syllCh = syllabus.chapters.find((sc) => sc.number === selectedChapterNum);
+    setInClassQuizData(wellFormedInClassQuiz(ch?.inClassQuizData));
+    setDiscussions(ch?.discussionData ?? []);
+    setActivities(ch?.activityData ?? []);
+    setExpandedActivities(ch?.activityDetails ?? {});
+    setAudioTranscript(ch?.audioTranscript ?? '');
+    setAudioUrl(ch?.audioUrl ?? ch?.audioDataUri ?? '');
+    setSlidesData(ch?.slidesJson ?? []);
+
+    // The template builds are async (code-split chunks). A newer run of this
+    // effect (another chapter, or fresher data) cancels a stale one, which
+    // could otherwise land the previous chapter's quiz under this chapter.
+    let cancelled = false;
+    const syllCh = syllabus?.chapters.find((sc) => sc.number === selectedChapterNum);
+    const practiceQuizData = ch?.practiceQuizData;
+    if (ch && practiceQuizData && syllabus) {
       (async () => {
         try {
           const { buildQuizHtml } = await import('../../templates/quizTemplate');
+          if (cancelled) return;
           const html = buildQuizHtml(
             `${syllCh?.title || ch.title} — Practice Quiz`,
-            ch.practiceQuizData!,
+            practiceQuizData,
             syllabus.courseTitle,
             setup.themeId,
           );
@@ -290,15 +399,18 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
           /* template failed */
         }
       })();
+    } else {
+      setQuizHtml('');
     }
-    if (ch.weeklyChallengeData && syllabus) {
-      const syllCh = syllabus.chapters.find((sc) => sc.number === selectedChapterNum);
+    const weeklyChallengeData = ch?.weeklyChallengeData;
+    if (ch && weeklyChallengeData && syllabus) {
       (async () => {
         try {
           const { buildWeeklyChallengeHtml } = await import('../../templates/weeklyChallengeTemplate');
+          if (cancelled) return;
           const html = buildWeeklyChallengeHtml(
             `Week ${selectedChapterNum} Challenge — ${syllCh?.title || ch.title}`,
-            ch.weeklyChallengeData!,
+            weeklyChallengeData,
             syllabus.courseTitle,
             setup.themeId,
           );
@@ -307,7 +419,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
           /* template failed */
         }
       })();
+    } else {
+      setWeeklyChallengeHtml('');
     }
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedChapterNum, currentChapter]);
 
@@ -320,8 +437,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'quiz',
       chapterNum,
       setGenerating: setGeneratingQuiz,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Quiz generation failed.',
       run: async (signal) => {
         const fullText = await streamWithRetry(
@@ -348,7 +465,9 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
         );
 
         const { balancePracticeQuiz } = await import('../../services/quiz/answerBalancer');
-        const balancedText = await balancePracticeQuiz(fullText, claudeApiKey);
+        const balancedText = await balancePracticeQuiz(fullText, claudeApiKey, signal);
+        // A Stop after the stream (during balancing) still means "discard".
+        signal.throwIfAborted();
         updateChapter(chapterNum, { practiceQuizData: balancedText });
 
         if (selectedChapterRef.current === chapterNum) {
@@ -382,8 +501,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.themeId,
     updateChapter,
     setGeneratingQuiz,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const generateInClassQuiz = useCallback(async () => {
@@ -393,8 +512,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'inclassquiz',
       chapterNum,
       setGenerating: setGeneratingInClassQuiz,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'In-class quiz generation failed.',
       run: async (signal) => {
         const fullText = await streamWithRetry(
@@ -420,15 +539,20 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
           {},
         );
 
+        let parsed: InClassQuizQuestion[];
         try {
-          const parsed = parseJson(fullText) as InClassQuizQuestion[];
-          const { balanceInClassQuiz } = await import('../../services/quiz/answerBalancer');
-          const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-          if (selectedChapterRef.current === chapterNum) setInClassQuizData(balanced);
-          updateChapter(chapterNum, { inClassQuizData: balanced });
+          parsed = wellFormedInClassQuiz(parseJson(fullText));
+          if (parsed.length === 0) throw new Error('No usable in-class quiz questions.');
         } catch {
-          setTabError('inclassquiz', 'Failed to parse in-class quiz data');
+          setChapterTabError('inclassquiz', chapterNum, 'Failed to parse in-class quiz data');
+          return;
         }
+        // Outside the parse guard: an abort during balancing must stay an abort.
+        const { balanceInClassQuiz } = await import('../../services/quiz/answerBalancer');
+        const balanced = await balanceInClassQuiz(parsed, claudeApiKey, signal);
+        signal.throwIfAborted();
+        if (selectedChapterRef.current === chapterNum) setInClassQuizData(balanced);
+        updateChapter(chapterNum, { inClassQuizData: balanced });
       },
     });
   }, [
@@ -440,8 +564,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     claudeApiKey,
     updateChapter,
     setGeneratingInClassQuiz,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const generateWeeklyChallenge = useCallback(async () => {
@@ -451,8 +575,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'weeklychallenge',
       chapterNum,
       setGenerating: setGeneratingWeeklyChallenge,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Weekly challenge generation failed.',
       run: async (signal) => {
         const priorChapters = (syllabusChapter.spacingConnections || [])
@@ -506,8 +630,9 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             } catch (templateErr) {
               // Surface (don't swallow) — a swallowed throw here is exactly why
               // the challenge silently reverted to the button for so long.
-              setTabError(
+              setChapterTabError(
                 'weeklychallenge',
+                chapterNum,
                 `Challenge generated, but rendering the preview failed: ${
                   templateErr instanceof Error ? templateErr.message : String(templateErr)
                 }`,
@@ -515,7 +640,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             }
           }
         } catch {
-          setTabError('weeklychallenge', 'Failed to parse weekly challenge data');
+          setChapterTabError('weeklychallenge', chapterNum, 'Failed to parse weekly challenge data');
         }
       },
     });
@@ -529,8 +654,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.themeId,
     updateChapter,
     setGeneratingWeeklyChallenge,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const generateDiscussion = useCallback(async () => {
@@ -540,8 +665,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'discussion',
       chapterNum,
       setGenerating: setGeneratingDiscussion,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Discussion generation failed.',
       run: async (signal) => {
         const fullText = await streamWithRetry(
@@ -567,11 +692,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
         );
 
         try {
-          const parsed = parseJson(fullText) as DiscussionPrompt[];
+          const parsed = wellFormedRows<DiscussionPrompt>(parseJson(fullText), ['prompt']);
+          if (parsed.length === 0) throw new Error('No usable discussion prompts.');
           if (selectedChapterRef.current === chapterNum) setDiscussions(parsed);
           updateChapter(chapterNum, { discussionData: parsed });
         } catch {
-          setTabError('discussion', 'Failed to parse discussion prompts');
+          setChapterTabError('discussion', chapterNum, 'Failed to parse discussion prompts');
         }
       },
     });
@@ -585,8 +711,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.teachingEnvironment,
     updateChapter,
     setGeneratingDiscussion,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const generateActivities = useCallback(async () => {
@@ -596,8 +722,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'activities',
       chapterNum,
       setGenerating: setGeneratingActivities,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Activities generation failed.',
       run: async (signal) => {
         const fullText = await streamWithRetry(
@@ -624,11 +750,12 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
         );
 
         try {
-          const parsed = parseJson(fullText) as Activity[];
+          const parsed = wellFormedRows<Activity>(parseJson(fullText), ['title']);
+          if (parsed.length === 0) throw new Error('No usable activities.');
           if (selectedChapterRef.current === chapterNum) setActivities(parsed);
           updateChapter(chapterNum, { activityData: parsed });
         } catch {
-          setTabError('activities', 'Failed to parse activities');
+          setChapterTabError('activities', chapterNum, 'Failed to parse activities');
         }
       },
     });
@@ -643,8 +770,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.environmentNotes,
     updateChapter,
     setGeneratingActivities,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const fleshOutActivity = useCallback(
@@ -652,6 +779,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       if (!syllabusChapter || expandingActivity !== null) return;
       const activity = activities[index];
       if (!activity) return;
+      // Captured: the user may switch chapters while the guide is written.
+      const chapterNum = selectedChapterNum;
 
       setExpandingActivity(index);
       try {
@@ -683,11 +812,15 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
             parseJson(fullText, '{') as Partial<ActivityDetail>,
           );
           if (parsed) {
-            setExpandedActivities((prev) => {
-              const updated = { ...prev, [index]: parsed };
-              updateChapter(selectedChapterNum, { activityDetails: updated });
-              return updated;
-            });
+            // Merge into the store's copy for *this* chapter. The local map may
+            // already hold another chapter's details by now.
+            const stored = useCourseStore
+              .getState()
+              .chapters.find((c) => c.number === chapterNum)?.activityDetails;
+            updateChapter(chapterNum, { activityDetails: { ...stored, [index]: parsed } });
+            if (selectedChapterRef.current === chapterNum) {
+              setExpandedActivities((prev) => ({ ...prev, [index]: parsed }));
+            }
           }
         } catch (parseErr) {
           setError(
@@ -699,7 +832,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       } catch (err) {
         setError(friendlyError(err, 'Activity detail generation failed.'));
       } finally {
-        setExpandingActivity(null);
+        // A chapter switch already reset this; don't clear a newer expansion.
+        if (selectedChapterRef.current === chapterNum) setExpandingActivity(null);
       }
     },
     [
@@ -712,6 +846,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       expandingActivity,
       setError,
       selectedChapterNum,
+      selectedChapterRef,
       updateChapter,
     ],
   );
@@ -723,8 +858,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'audio',
       chapterNum,
       setGenerating: setGeneratingAudio,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Audio transcript generation failed.',
       run: async (signal) => {
         setAudioPhase('transcript');
@@ -764,15 +899,18 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
                 signal,
                 onProgress: (current, total) => setAudioChunkProgress({ current, total }),
               });
-              const url = URL.createObjectURL(blob);
-              if (selectedChapterRef.current === chapterNum) setAudioUrl(url);
-              // Persist a (size-capped) data URI too — the blob URL above is
+              // Persist a (size-capped) data URI too — the blob URL below is
               // stripped on save and dies on reload; the data URI survives.
               const audioDataUri = await persistableAudioDataUri(blob);
+              signal.throwIfAborted();
+              const url = URL.createObjectURL(blob);
               if (selectedChapterRef.current === chapterNum) {
+                setAudioUrl(url);
                 setAudioPersistNote(audioDataUri ? '' : AUDIO_OVER_CAP_NOTE);
               }
+              const prevUrl = storedAudioUrl(chapterNum);
               updateChapter(chapterNum, { audioUrl: url, audioDataUri });
+              if (prevUrl !== url) revokeNarrationUrl(prevUrl);
             } catch (err) {
               if (isAbortError(err)) throw err;
               const msg = ttsErrorMessage(err);
@@ -796,15 +934,19 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.voiceId,
     updateChapter,
     setGeneratingAudio,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   const retryAudio = useCallback(async () => {
     if (!audioTranscript || !elevenLabsApiKey) return;
-    const abortKey = materialAbortKey('audio', selectedChapterNum);
+    // Captured: a multi-chunk synthesis can outlast a chapter switch, and the
+    // local player/notice/error must not land on the chapter now in view.
+    const chapterNum = selectedChapterNum;
+    const transcript = audioTranscript;
+    const abortKey = materialAbortKey('audio', chapterNum);
     const controller = beginAbortable(abortKey);
-    setGeneratingAudio(selectedChapterNum);
+    claimInFlight('audio', controller, chapterNum, setGeneratingAudio);
     setAudioPhase('synthesizing');
     setAudioError('');
     setAudioChunkProgress(null);
@@ -812,25 +954,30 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     try {
       const { generateAudiobook } = await import('../../services/elevenLabs/tts');
       const voice = getVoiceOption(setup.voiceId);
-      const blob = await generateAudiobook(audioTranscript, elevenLabsApiKey, {
+      const blob = await generateAudiobook(transcript, elevenLabsApiKey, {
         voiceId: voice.id,
         signal: controller.signal,
         onProgress: (current, total) => setAudioChunkProgress({ current, total }),
       });
-      const url = URL.createObjectURL(blob);
-      setAudioUrl(url);
       const audioDataUri = await persistableAudioDataUri(blob);
-      setAudioPersistNote(audioDataUri ? '' : AUDIO_OVER_CAP_NOTE);
-      updateChapter(selectedChapterNum, { audioUrl: url, audioDataUri });
+      controller.signal.throwIfAborted();
+      const url = URL.createObjectURL(blob);
+      if (selectedChapterRef.current === chapterNum) {
+        setAudioUrl(url);
+        setAudioPersistNote(audioDataUri ? '' : AUDIO_OVER_CAP_NOTE);
+      }
+      const prevUrl = storedAudioUrl(chapterNum);
+      updateChapter(chapterNum, { audioUrl: url, audioDataUri });
+      if (prevUrl !== url) revokeNarrationUrl(prevUrl);
     } catch (err) {
       if (!isAbortError(err)) {
         const msg = ttsErrorMessage(err);
         console.error('ElevenLabs TTS retry failed:', err);
-        setAudioError(msg);
+        if (selectedChapterRef.current === chapterNum) setAudioError(msg);
       }
     } finally {
       endAbortable(abortKey, controller);
-      setGeneratingAudio(null);
+      releaseInFlight('audio', controller, setGeneratingAudio);
       setAudioPhase(null);
       setAudioChunkProgress(null);
     }
@@ -838,6 +985,7 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     audioTranscript,
     elevenLabsApiKey,
     selectedChapterNum,
+    selectedChapterRef,
     setup.voiceId,
     updateChapter,
     setGeneratingAudio,
@@ -850,8 +998,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
       kind: 'slides',
       chapterNum,
       setGenerating: setGeneratingSlides,
-      setTabError,
-      clearTabError,
+      setTabError: setChapterTabError,
+      clearTabError: clearChapterTabError,
       errorPrefix: 'Slides generation failed.',
       run: async (signal) => {
         const fullText = await streamWithRetry(
@@ -870,17 +1018,20 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
               },
             ],
             thinkingBudget: 'medium',
-            maxTokens: 4000,
+            // 12–14 slides × 180–300-word imagePrompts is ~5–7k output tokens,
+            // on top of up to 8k of thinking — 4000 truncated the JSON.
+            maxTokens: 12000,
           },
           {},
         );
 
         try {
-          const parsed = parseJson(fullText) as SlideData[];
+          const parsed = wellFormedRows<SlideData>(parseJson(fullText), ['title']);
+          if (parsed.length === 0) throw new Error('No usable slides.');
           if (selectedChapterRef.current === chapterNum) setSlidesData(parsed);
           updateChapter(chapterNum, { slidesJson: parsed });
         } catch {
-          setTabError('slides', 'Failed to parse slide data from response');
+          setChapterTabError('slides', chapterNum, 'Failed to parse slide data from response');
         }
       },
     });
@@ -894,8 +1045,8 @@ export function useChapterMaterials(params: UseChapterMaterialsParams): UseChapt
     setup.themeId,
     updateChapter,
     setGeneratingSlides,
-    setTabError,
-    clearTabError,
+    setChapterTabError,
+    clearChapterTabError,
   ]);
 
   return {
