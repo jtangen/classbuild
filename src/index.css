@@ -31,6 +31,7 @@
   --color-cb-accent-gilt:        #a8854a;
   --color-cb-status-success:     #3d5c33;
   --color-cb-status-warning:     #b07a1f;
+  --color-cb-status-warning-text: #7d5410;
   --color-cb-status-danger:      #a8332b;
   --color-cb-status-info:        #1f2e4a;
   --color-cb-focus-ring:         #1f2e4a;
@@ -129,6 +130,8 @@
   --cb-status-success:    #3d5c33;
   --cb-status-success-bg: rgba(61,92,51,0.10);
   --cb-status-warning:    #b07a1f;
+  /* Amber for TEXT: #b07a1f is ~3:1 on parchment; this one is 5.6:1+. */
+  --cb-status-warning-text: #7d5410;
   --cb-status-warning-bg: rgba(176,122,31,0.12);
   --cb-status-danger:     #a8332b;
   --cb-status-danger-bg:  rgba(168,51,43,0.10);
@@ -182,6 +185,7 @@
   --cb-status-success:    #86a574;
   --cb-status-success-bg: rgba(134,165,116,0.14);
   --cb-status-warning:    #d4a04e;
+  --cb-status-warning-text: #d4a04e;
   --cb-status-warning-bg: rgba(212,160,78,0.14);
   --cb-status-danger:     #d97070;
   --cb-status-danger-bg:  rgba(217,112,112,0.14);

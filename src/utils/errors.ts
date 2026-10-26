@@ -39,6 +39,11 @@ export function friendlyError(err: unknown, fallback = 'Something went wrong. Tr
   const message = err instanceof Error ? err.message : String(err);
   const status = getStatus(err);
 
+  // No key at all (the SDK refuses before sending anything) — not a rejection.
+  if (/could not resolve authentication method|apiKey or authToken|api key is required/i.test(message)) {
+    return 'No API key yet. Add your key in Setup.';
+  }
+
   // Auth / billing
   if (status === 401 || /invalid[_\s-]?api[_\s-]?key|unauthori[sz]ed|authentication/i.test(message)) {
     return 'API key rejected. Check your key in Setup.';
