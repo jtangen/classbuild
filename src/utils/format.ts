@@ -60,13 +60,47 @@ export function extractHtml(text: string): string {
 }
 
 /**
+ * Drop trailing commas before `}` / `]` — outside string literals only, so a
+ * value such as "Arrays like [a, ] here" is left untouched. Valid JSON has no
+ * trailing commas, so it comes back unchanged.
+ */
+function stripTrailingCommas(json: string): string {
+  if (!/,\s*[}\]]/.test(json)) return json;
+  let out = '';
+  let inString = false;
+  for (let i = 0; i < json.length; i++) {
+    const ch = json[i];
+    if (inString) {
+      if (ch === '\\') {
+        out += ch + (json[i + 1] ?? '');
+        i++;
+        continue;
+      }
+      if (ch === '"') inString = false;
+      out += ch;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+    } else if (ch === ',') {
+      let j = i + 1;
+      while (j < json.length && /\s/.test(json[j])) j++;
+      if (json[j] === '}' || json[j] === ']') continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/**
  * Parse JSON from a Claude response. Tolerates:
  *  - ```json fences
  *  - leading / trailing prose around the object or array
- *  - trailing commas
+ *  - trailing commas (outside strings)
  *  - occasional unescaped quotes inside strings (up to 10 repair attempts)
  *
  * `wrapType` selects whether we expect an array ('[') or object ('{').
+ * Input that is already valid JSON parses exactly as JSON.parse would.
  */
 export function parseJson(text: string, wrapType: '[' | '{' = '['): unknown {
   let jsonStr = text;
@@ -77,18 +111,24 @@ export function parseJson(text: string, wrapType: '[' | '{' = '['): unknown {
   const first = jsonStr.indexOf(open);
   const last = jsonStr.lastIndexOf(close);
   if (first !== -1 && last !== -1) jsonStr = jsonStr.slice(first, last + 1);
-  jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+  jsonStr = stripTrailingCommas(jsonStr);
 
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
       return JSON.parse(jsonStr);
     } catch (e) {
+      // An unescaped quote inside a string ("He said "hi" to me") closes the
+      // string early, so the parser fails on the character *after* that quote.
+      // V8 reports the position; escape the quote just before it (skipping
+      // whitespace) and retry. Other engines' messages carry no position, and
+      // other syntax errors don't sit right after a quote — those rethrow.
       if (e instanceof SyntaxError) {
         const posMatch = e.message.match(/position (\d+)/);
         if (posMatch) {
-          const pos = parseInt(posMatch[1]);
-          if (pos > 0 && pos < jsonStr.length && jsonStr[pos] === '"') {
-            jsonStr = jsonStr.slice(0, pos) + '\\"' + jsonStr.slice(pos + 1);
+          let q = parseInt(posMatch[1], 10) - 1;
+          while (q > 0 && /\s/.test(jsonStr[q])) q--;
+          if (q > 0 && jsonStr[q] === '"' && jsonStr[q - 1] !== '\\') {
+            jsonStr = jsonStr.slice(0, q) + '\\"' + jsonStr.slice(q + 1);
             continue;
           }
         }

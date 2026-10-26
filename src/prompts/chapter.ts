@@ -151,7 +151,7 @@ When a concept feels like it wants a picture, do one of:
 - Describe it concretely in prose (a vivid sentence beats a missing figure).
 - Build an interactive \`<div class="ch-widget">\` if the concept is dynamic.
 - Pull in a \`<blockquote class="ch-quote">\` if a quoted line lands the idea better.
-` : `When an image would genuinely aid understanding, include 2–3 image placeholders. Each placeholder is a single self-closing \`<figure>\` element with \`class="ai-image"\` plus \`data-prompt\` and \`data-aspect\` attributes — they replace the normal \`<figure class="ch-figure">\` block in the reading.
+` : `When an image would genuinely aid understanding, include 2–3 image placeholders. Each placeholder is a single \`<figure>\` element, always closed with \`</figure>\`, with \`class="ai-image"\` plus \`data-prompt\` and \`data-aspect\` attributes — they replace the normal \`<figure class="ch-figure">\` block in the reading.
 
 \`\`\`html
 <figure class="ai-image" data-prompt="…full prompt…" data-aspect="landscape">

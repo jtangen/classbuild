@@ -16,6 +16,8 @@ export interface GenerateImageOptions {
   quality?: ImageQuality;
   /** JPEG compression 0-100. Defaults to 90. */
   compression?: number;
+  /** Cancels the request (and any pending retry). */
+  signal?: AbortSignal;
 }
 
 const DEFAULT_QUALITY: ImageQuality = 'high';
@@ -26,12 +28,37 @@ const MODEL = 'gpt-image-2';
 
 export class OpenAIImageError extends Error {
   readonly status: number | undefined;
+  /** Server-requested wait before retrying (Retry-After), when it sent one. */
+  readonly retryAfterMs: number | undefined;
 
-  constructor(message: string, status?: number) {
+  constructor(message: string, status?: number, retryAfterMs?: number) {
     super(message);
     this.name = 'OpenAIImageError';
     this.status = status;
+    this.retryAfterMs = retryAfterMs;
   }
+}
+
+/**
+ * True for failures a retry can fix: rate limits and 5xx. A 429 that reports
+ * exhausted quota / billing is permanent, so it isn't retried.
+ */
+export function isTransientImageError(err: unknown): boolean {
+  if (!(err instanceof OpenAIImageError) || err.status === undefined) return false;
+  if (err.status === 429) return !/quota|billing/i.test(err.message);
+  return err.status >= 500;
+}
+
+/** Retry-After / retry-after-ms → milliseconds, if the response carries one. */
+function readRetryAfterMs(res: Response): number | undefined {
+  const ms = Number(res.headers.get('retry-after-ms'));
+  if (Number.isFinite(ms) && ms > 0) return ms;
+  const header = res.headers.get('retry-after');
+  if (!header) return undefined;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds)) return Math.max(0, seconds * 1000);
+  const date = Date.parse(header);
+  return Number.isNaN(date) ? undefined : Math.max(0, date - Date.now());
 }
 
 interface GenerateResponse {
@@ -68,19 +95,23 @@ export async function generateImage(
       Authorization: `Bearer ${apiKey.trim()}`,
     },
     body: JSON.stringify(body),
+    signal: options.signal,
   });
 
   if (!res.ok) {
-    let detail = '';
+    // Read the body once as text, then try JSON — a body can't be read twice,
+    // so a json()-then-text() fallback never sees non-JSON error pages.
+    const raw = await res.text().catch(() => '');
+    let detail = raw;
     try {
-      const errBody = (await res.json()) as GenerateResponse;
-      detail = errBody.error?.message ?? '';
+      detail = (JSON.parse(raw) as GenerateResponse).error?.message ?? '';
     } catch {
-      detail = await res.text().catch(() => '');
+      /* not JSON (e.g. a gateway error page) — keep the raw body */
     }
     throw new OpenAIImageError(
       `OpenAI image generation failed (${res.status}): ${detail.slice(0, 300) || res.statusText}`,
       res.status,
+      readRetryAfterMs(res),
     );
   }
 
@@ -94,7 +125,9 @@ export async function generateImage(
 
 /**
  * Generate an image with exponential backoff on rate-limit / transient errors.
- * 5xx and 429 retry; everything else fails fast.
+ * 5xx and 429 retry; everything else fails fast. A 429 waits for the server's
+ * Retry-After when it sends one, otherwise 20 s then 40 s — image limits are
+ * per minute, so a few seconds of backoff just collects more 429s.
  */
 export async function generateImageWithRetry(
   prompt: string,
@@ -108,11 +141,31 @@ export async function generateImageWithRetry(
       return await generateImage(prompt, apiKey, options);
     } catch (err) {
       lastErr = err;
-      const status = err instanceof OpenAIImageError ? err.status : undefined;
-      const transient = status === 429 || (status !== undefined && status >= 500);
-      if (!transient || attempt === maxRetries) throw err;
-      await new Promise((r) => setTimeout(r, 4000 * Math.pow(2, attempt)));
+      if (options.signal?.aborted) throw err;
+      if (!isTransientImageError(err) || attempt === maxRetries) throw err;
+      const { status, retryAfterMs } = err as OpenAIImageError;
+      const delay =
+        status === 429
+          ? Math.min(retryAfterMs ?? 20000 * Math.pow(2, attempt), 120000)
+          : 4000 * Math.pow(2, attempt);
+      await abortableDelay(delay, options.signal);
     }
   }
   throw lastErr;
+}
+
+/** setTimeout that rejects as soon as `signal` aborts. */
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(signal.reason);
+    const id = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    function onAbort() {
+      clearTimeout(id);
+      reject(signal!.reason);
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }

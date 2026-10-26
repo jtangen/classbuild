@@ -16,7 +16,11 @@ import {
 import type { InClassQuizQuestion } from '../../types/course';
 
 const VERSION_LABELS = ['A', 'B', 'C', 'D', 'E'] as const;
-const OPTION_LETTERS = ['a', 'b', 'c', 'd'] as const;
+
+/** a, b, c, d, e, … — a question may carry more than three distractors. */
+function optionLetter(index: number): string {
+  return String.fromCharCode(97 + index);
+}
 
 /** Simple seeded PRNG (mulberry32) for deterministic shuffling */
 function seededRng(seed: number) {
@@ -43,7 +47,7 @@ interface ShuffledQuestion {
   originalIndex: number;
   question: string;
   options: Array<{ text: string; isCorrect: boolean }>;
-  correctLetterIndex: number; // which position (0-3) the correct answer landed in
+  correctLetterIndex: number; // which position (0-based) the correct answer landed in
 }
 
 interface QuizVersion {
@@ -148,7 +152,7 @@ function buildQuizVersionDoc(
           spacing: { after: 60 },
           indent: { left: 480 },
           children: [
-            new TextRun({ text: `${OPTION_LETTERS[j]})  `, size: 22, font: 'Calibri' }),
+            new TextRun({ text: `${optionLetter(j)})  `, size: 22, font: 'Calibri' }),
             new TextRun({ text: opt.text, size: 22, font: 'Calibri' }),
           ],
         }),
@@ -231,7 +235,7 @@ function buildAnswerKeyDoc(
       ...versions.map((v) => {
         // Find where original question qIdx appears in this version
         const versionQ = v.questions.find((q) => q.originalIndex === qIdx);
-        const correctLetter = versionQ ? OPTION_LETTERS[versionQ.correctLetterIndex] : '?';
+        const correctLetter = versionQ ? optionLetter(versionQ.correctLetterIndex) : '?';
         // Also show which question number it is in this version
         const versionQNum = versionQ ? v.questions.indexOf(versionQ) + 1 : '?';
         return new TableCell({
@@ -346,18 +350,23 @@ export async function generateQuizDocPackage(
   const { default: JSZip } = await import('jszip');
   const zip = new JSZip();
 
-  const folderName = `quiz-${chapterTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40)}`;
+  const slug = chapterTitle
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, '');
+  const folderName = `quiz-${slug || 'class'}`;
   const folder = zip.folder(folderName)!;
 
   // Generate each version .docx
-  // Use toBuffer() in Node.js, toBlob() in browser — JSZip accepts both
-  const packDoc = async (doc: Document): Promise<Buffer | Blob> => {
-    try {
-      return await Packer.toBuffer(doc);
-    } catch {
-      return await Packer.toBlob(doc);
-    }
-  };
+  // toBuffer() in Node.js (CLI), toBlob() in the browser — JSZip accepts both.
+  // Pick by environment rather than try/catch: in the browser toBuffer always
+  // fails *after* compiling, and compiling a Document twice duplicates its
+  // fontTable relationship.
+  const packDoc = (doc: Document): Promise<Buffer | Blob> =>
+    typeof Buffer === 'undefined' ? Packer.toBlob(doc) : Packer.toBuffer(doc);
 
   for (const version of versions) {
     const doc = buildQuizVersionDoc(version, courseTitle, chapterTitle);

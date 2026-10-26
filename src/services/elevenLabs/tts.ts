@@ -80,7 +80,10 @@ function chunkText(text: string): string[] {
         chunks.push(current.trim());
         current = '';
       }
-      const sentences = trimmed.match(/[^.!?]+[.!?]+[\s]*/g) || [trimmed];
+      // Each piece is "text + closing punctuation + spaces", plus a final
+      // piece for any trailing text with no closing punctuation — together
+      // they cover the whole paragraph, so nothing is dropped from the audio.
+      const sentences = trimmed.match(/[^.!?]*[.!?]+\s*|[^.!?]+$/g) || [trimmed];
       let sentenceChunk = '';
       for (const sentence of sentences) {
         if (sentenceChunk && sentenceChunk.length + sentence.length > MAX_CHUNK_CHARS) {

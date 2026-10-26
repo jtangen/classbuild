@@ -163,7 +163,7 @@ export function buildCodexViewerHtml(course: CodexCourseMeta, chapters: CodexCha
 
       const downloads =
         ch.downloadLinks && ch.downloadLinks.length > 0
-          ? `<div class="downloads">${ch.downloadLinks.map((d) => `<a class="pill" href="${d.path}" download>${esc(d.label)}</a>`).join('')}</div>`
+          ? `<div class="downloads">${ch.downloadLinks.map((d) => `<a class="pill" href="${esc(d.path)}" download>${esc(d.label)}</a>`).join('')}</div>`
           : '';
 
       const tabBar =

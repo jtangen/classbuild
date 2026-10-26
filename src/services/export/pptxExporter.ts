@@ -1,7 +1,17 @@
 import PptxGenJS from 'pptxgenjs';
 import type { SlideData } from '../../types/course';
-import { generateImageWithRetry } from '../openai/imageGen';
+import { generateImageWithRetry, isTransientImageError, OpenAIImageError } from '../openai/imageGen';
 import { withSafetyClause } from '../openai/safetyClause';
+
+/** An account-level failure no retry or other slide will fix (bad key, no
+ *  access, exhausted quota): stop the deck instead of shipping title-only
+ *  slides. A 400 is left out on purpose — it's usually one prompt being
+ *  rejected (e.g. moderation), and that slide alone falls back to text. */
+function isPermanentImageError(err: unknown): boolean {
+  if (!(err instanceof OpenAIImageError) || err.status === undefined) return false;
+  if (err.status === 429) return !isTransientImageError(err);
+  return err.status === 401 || err.status === 402 || err.status === 403 || err.status === 404;
+}
 
 /**
  * Slide generation now renders each slide as a single 4K (3840×2160)
@@ -49,6 +59,11 @@ interface GeneratePptxOptions {
  * Render every slide image via gpt-image-2 (or reuse cached ones), then pack
  * everything into a .pptx where each slide is a full-bleed 16:9 image with
  * the AI-written notes attached.
+ *
+ * `failedSlides` lists the (0-based) slides whose image could not be rendered
+ * after retries and fell back to a plain title slide — callers should tell the
+ * user. Throws instead of returning a deck on an account-level failure (bad
+ * key, no access, exhausted quota), or when no slide ends up with an image.
  */
 export async function generatePptx(
   slides: SlideData[],
@@ -57,7 +72,7 @@ export async function generatePptx(
   _themeId: string | undefined,
   apiKey: string,
   options: GeneratePptxOptions = {},
-): Promise<{ blob: Blob; renderedImages: Record<number, string> }> {
+): Promise<{ blob: Blob; renderedImages: Record<number, string>; failedSlides: number[] }> {
   if (!slides || slides.length === 0) {
     throw new Error('Cannot build a deck from zero slides.');
   }
@@ -81,10 +96,15 @@ export async function generatePptx(
   let completed = 0;
   const concurrency = Math.min(options.concurrency ?? 6, todo.length);
   let cursor = 0;
+  const failedSlides: number[] = [];
+  let lastError: unknown = null;
+  let permanentError: unknown = null;
   options.onProgress?.(0, slides.length, 'rendering');
 
   async function worker() {
-    while (true) {
+    // A permanent error stops new requests; in-flight ones still finish (and
+    // persist via onSlideRendered) so a retry doesn't pay for them again.
+    while (permanentError === null) {
       const next = cursor++;
       if (next >= todo.length) return;
       const i = todo[next];
@@ -99,9 +119,12 @@ export async function generatePptx(
         // Persist immediately so a tab-switch or refresh doesn't lose work.
         options.onSlideRendered?.(i, dataUri);
       } catch (err) {
-        // Surface failure but keep going — packing logic falls back to a
-        // text-only slide so the deck still ships.
+        // Transient failures (rate limits after retries, 5xx, network) fall
+        // back to a text-only slide and are reported via failedSlides.
         console.error(`Slide ${i + 1} image gen failed:`, err);
+        failedSlides.push(i);
+        lastError = err;
+        if (isPermanentImageError(err)) permanentError ??= err;
       }
       completed++;
       options.onProgress?.(completed, slides.length, 'rendering');
@@ -109,6 +132,14 @@ export async function generatePptx(
   }
 
   await Promise.all(Array.from({ length: concurrency }, worker));
+
+  if (permanentError !== null) throw permanentError;
+  // Every slide that needed an image failed and none was cached: the deck
+  // would be nothing but title slides, so fail loudly instead.
+  if (failedSlides.length > 0 && Object.keys(renderedImages).length === 0) {
+    throw lastError ?? new Error('No slide images could be rendered.');
+  }
+  failedSlides.sort((a, b) => a - b);
 
   options.onProgress?.(slides.length, slides.length, 'packing');
 
@@ -171,5 +202,5 @@ export async function generatePptx(
   });
 
   const blob = (await pptx.write({ outputType: 'blob' })) as Blob;
-  return { blob, renderedImages };
+  return { blob, renderedImages, failedSlides };
 }
