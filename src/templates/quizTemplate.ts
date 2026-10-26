@@ -64,7 +64,9 @@ export function buildQuizHtml(
             --blue: #3b82f6;
             --aqua: #06b6d4;
             --light-grey: ${t.isDark ? '#334155' : '#cbd5e1'};
-            --dark-grey: ${t.isDark ? '#64748b' : '#94a3b8'};
+            /* Secondary text: the theme's own secondary colour keeps labels
+               readable on every surface (the old slate greys were ~2:1). */
+            --dark-grey: ${t.textSecondary};
             --white: ${t.textPrimary};
             --black: ${t.textPrimary};
             --on-accent: ${t.isDark ? '#1a1a2e' : '#ffffff'};
@@ -980,7 +982,7 @@ export function buildQuizHtml(
             position: absolute;
             left: 10%;
             right: 10%;
-            border-top: 2px dashed rgba(255, 255, 255, 0.25);
+            border-top: 2px dashed ${t.isDark ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.25)'};
             pointer-events: none;
         }
 
@@ -1555,6 +1557,8 @@ export function buildQuizHtml(
                 medium: { correct: 0, total: 0 },
                 high: { correct: 0, total: 0 }
             };
+            // How sure each confidence button says you are (used by calibrationStats)
+            const CONFIDENCE_PROBABILITY = { low: 1 / 3, medium: 2 / 3, high: 1 };
 
             // DOM elements
             const loadingScreen = document.getElementById('loading-screen');
@@ -1615,16 +1619,20 @@ export function buildQuizHtml(
             });
 
             // Hide powerup info after 5 seconds on first question
-            setTimeout(() => {
-                if (powerupInfo && !showedPowerupInfo) {
-                    powerupInfo.style.opacity = "0";
-                    powerupInfo.style.transition = "opacity 1s";
-                    setTimeout(() => {
-                        powerupInfo.style.display = "none";
-                    }, 1000);
-                    showedPowerupInfo = true;
-                }
-            }, 5000);
+            // (re-armed by "Take Quiz Again", which shows the info box again)
+            function scheduleHidePowerupInfo() {
+                setTimeout(() => {
+                    if (powerupInfo && !showedPowerupInfo) {
+                        powerupInfo.style.opacity = "0";
+                        powerupInfo.style.transition = "opacity 1s";
+                        setTimeout(() => {
+                            powerupInfo.style.display = "none";
+                        }, 1000);
+                        showedPowerupInfo = true;
+                    }
+                }, 5000);
+            }
+            scheduleHidePowerupInfo();
 
             // Load quiz with inline data
             loadQuizData();
@@ -2095,42 +2103,28 @@ export function buildQuizHtml(
                 const count = calibrationData.low.total + calibrationData.medium.total + calibrationData.high.total;
 
                 if (count > 0) {
-                    const avgCalibration = calculateOverallCalibration() / 100;
-                    const calibrationPercentage = Math.round(avgCalibration * 100);
+                    const stats = calibrationStats();
+                    const avgCalibration = stats.score / 100;
+                    const calibrationPercentage = Math.round(stats.score);
 
                     // Update score display
                     calibrationScoreDisplay.textContent = calibrationPercentage + '%';
                     calibrationPointer.textContent = calibrationPercentage + '%';
 
-                    // Position pointer based on calibration
-                    // Map calibration score to position on the meter
-                    let position;
+                    // Pointer: centre zone when well calibrated, drifting toward the
+                    // Overconfident (left) or Underconfident (right) end as the score
+                    // drops. The side comes from whether confidence ran ahead of
+                    // accuracy or behind it.
+                    const direction = stats.bias > 0.001 ? -1 : (stats.bias < -0.001 ? 1 : 0);
+                    let offset;
                     if (avgCalibration >= 0.8) {
-                        // Well-calibrated zone (center)
-                        position = 40 + (avgCalibration - 0.8) * 100;
-                    } else if (avgCalibration >= 0.5) {
-                        // Transitioning to well-calibrated
-                        position = 20 + (avgCalibration - 0.5) * 80;
+                        offset = (1 - avgCalibration) / 0.2 * 8; // inside the centre zone
+                    } else if (avgCalibration >= 0.6) {
+                        offset = 8 + (0.8 - avgCalibration) / 0.2 * 12; // edge of the centre zone
                     } else {
-                        // Poor calibration (could be over or under confident)
-                        // Check tendency
-                        let overconfidentCount = 0;
-                        let underconfidentCount = 0;
-
-                        userAnswers.forEach(answer => {
-                            if (answer.isCorrect && answer.confidence === 'low') {
-                                underconfidentCount++;
-                            } else if (!answer.isCorrect && answer.confidence === 'high') {
-                                overconfidentCount++;
-                            }
-                        });
-
-                        if (overconfidentCount > underconfidentCount) {
-                            position = avgCalibration * 40; // Left side
-                        } else {
-                            position = 60 + avgCalibration * 40; // Right side
-                        }
+                        offset = 20 + (0.6 - avgCalibration) / 0.6 * 27; // outer zones
                     }
+                    const position = 50 + direction * offset;
 
                     calibrationPointer.style.left = position + '%';
 
@@ -2146,7 +2140,7 @@ export function buildQuizHtml(
                     } else {
                         calibrationStatusText.textContent = 'Needs Improvement';
                         calibrationStatusText.style.color = 'var(--orange)';
-                        if (position < 50) {
+                        if (stats.bias > 0) {
                             calibrationStatusDescription.textContent = 'You tend to be overconfident. Try being more cautious when unsure.';
                         } else {
                             calibrationStatusDescription.textContent = 'You tend to underestimate your knowledge. Trust yourself more when you know the answer!';
@@ -2354,8 +2348,12 @@ export function buildQuizHtml(
                     feedbackScreen.classList.add('hidden');
                     questionScreen.classList.remove('hidden');
                     displayQuestion();
+                    // After a long feedback screen on a phone, the next question
+                    // can start above the fold
+                    questionText.scrollIntoView({ block: 'nearest' });
                 } else {
                     showResults();
+                    document.getElementById('final-score').scrollIntoView({ block: 'nearest' });
                 }
             }
 
@@ -2397,9 +2395,6 @@ export function buildQuizHtml(
                 // Update calibration chart
                 updateCalibrationChart();
 
-                // Update trophies
-                updateTrophyCase();
-
                 // Check for perfect score achievement
                 if (userAnswers.length === quizQuestions.length &&
                     quizQuestions.length > 0 &&
@@ -2417,6 +2412,10 @@ export function buildQuizHtml(
                     achievements.calibrationMaster = true;
                     showAchievement('Calibration Master', '\\u2696\\uFE0F', 'Outstanding metacognitive awareness!');
                 }
+
+                // Update trophies (after the end-of-quiz achievements above, so
+                // Perfect Score and Calibration Master can light up)
+                updateTrophyCase();
 
                 // Create review of all questions
                 reviewContainer.innerHTML = '';
@@ -2455,38 +2454,33 @@ export function buildQuizHtml(
                 });
             }
 
-            // Function to calculate overall calibration score
-            function calculateOverallCalibration() {
-                let totalScore = 0;
-                let weightedCount = 0;
+            // Calibration, one formula for the live meter and the results:
+            // 100 x (1 - mean squared gap between the confidence given and the
+            // outcome, 1 for right and 0 for wrong), i.e. a Brier score. Very
+            // Confident and right earns full credit, Very Confident and wrong earns
+            // none, and Not Sure keeps most of the credit when the answer is wrong.
+            // bias > 0 means confidence ran ahead of accuracy (overconfident).
+            function calibrationStats() {
+                let total = 0;
+                let squaredGap = 0;
+                let bias = 0;
 
                 Object.keys(calibrationData).forEach(level => {
                     const data = calibrationData[level];
-                    if (data.total > 0) {
-                        const accuracy = data.correct / data.total;
-                        let expectedAccuracy;
-                        let weight;
-
-                        if (level === 'low') {
-                            expectedAccuracy = 0.25;
-                            weight = data.total;
-                        } else if (level === 'medium') {
-                            expectedAccuracy = 0.60;
-                            weight = data.total;
-                        } else {
-                            expectedAccuracy = 0.85;
-                            weight = data.total;
-                        }
-
-                        const calibrationError = Math.abs(accuracy - expectedAccuracy);
-                        const calibrationScore = Math.max(0, 1 - (calibrationError * 2)) * 100;
-
-                        totalScore += calibrationScore * weight;
-                        weightedCount += weight;
-                    }
+                    const p = CONFIDENCE_PROBABILITY[level];
+                    const wrong = data.total - data.correct;
+                    squaredGap += data.correct * (1 - p) * (1 - p) + wrong * p * p;
+                    bias += data.correct * (p - 1) + wrong * p;
+                    total += data.total;
                 });
 
-                return weightedCount > 0 ? totalScore / weightedCount : 0;
+                if (total === 0) return { score: 0, bias: 0 };
+                return { score: 100 * (1 - squaredGap / total), bias: bias / total };
+            }
+
+            // Function to calculate overall calibration score (0-100)
+            function calculateOverallCalibration() {
+                return calibrationStats().score;
             }
 
             // Function to update calibration chart
@@ -2588,6 +2582,9 @@ export function buildQuizHtml(
 
                 // Load questions fresh with inline data
                 loadQuizData();
+                scheduleHidePowerupInfo();
+                // The results page is long: bring the new attempt into view
+                document.querySelector('.header').scrollIntoView({ block: 'nearest' });
             }
 
             // Helper function to update the progress display

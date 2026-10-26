@@ -10,9 +10,17 @@
  * - Game-like animations, confetti, and polish
  * - Theme integration via CSS variables
  */
-import { getTheme } from '../themes';
+import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
 import type { WeeklyChallengeData } from '../types/course';
 import { toScriptJson } from './htmlEscape';
+
+/** Blend two #rrggbb colours: w = 0 gives a, w = 1 gives b. */
+function mixHex(a: string, b: string, w: number): string {
+  const parse = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  const [ca, cb] = [parse(a), parse(b)];
+  if ([...ca, ...cb].some((n) => Number.isNaN(n))) return a;
+  return '#' + ca.map((v, i) => Math.round(v * (1 - w) + cb[i] * w).toString(16).padStart(2, '0')).join('');
+}
 
 /** Decimal places in a numeric value (0.25 -> 2, 65 -> 0). */
 function decimalPlaces(n: unknown): number {
@@ -36,6 +44,11 @@ export function buildWeeklyChallengeHtml(
   themeId?: string,
 ): string {
   const t = getTheme(themeId);
+  const ct = getChapterTheme(themeId);
+  // Raised surfaces (slider track, progress segments, tier bars, option
+  // letters) need to stand off the card. The theme palette uses one colour for
+  // both, so tint the card toward the text colour when they match.
+  const elevated = t.elevated !== t.cardBg ? t.elevated : mixHex(t.cardBg, t.textPrimary, t.isDark ? 0.1 : 0.07);
 
   // ── Build-time answer obfuscation ──
   // Strip answer fields from questions and encode them so they don't appear
@@ -107,6 +120,9 @@ export function buildWeeklyChallengeHtml(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${challengeTitle}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="${FONTS_URL}">
     <style>
         /* ─── Timing Constants (CSS) ─── */
         :root {
@@ -122,7 +138,7 @@ export function buildWeeklyChallengeHtml(
             --warm-accent: ${t.warmAccent};
             --bg-page: ${t.pageBg};
             --bg-card: ${t.cardBg};
-            --bg-elevated: ${t.elevated};
+            --bg-elevated: ${elevated};
             --text-primary: ${t.textPrimary};
             --text-secondary: ${t.textSecondary};
             --text-muted: ${t.textMuted};
@@ -134,8 +150,9 @@ export function buildWeeklyChallengeHtml(
             --shadow: 0 4px 12px rgba(0, 0, 0, ${t.isDark ? '0.4' : '0.15'});
             --shadow-lg: 0 8px 24px rgba(0, 0, 0, ${t.isDark ? '0.5' : '0.18'});
 
-            --font-heading: ${t.headingFont};
-            --font-body: ${t.bodyFont};
+            /* Full stacks with fallbacks, loaded via FONTS_URL like the quiz */
+            --font-heading: ${ct.displayFont};
+            --font-body: ${ct.bodyFont};
 
             /* Tier colors */
             --tier-warmup: var(--blue);
@@ -1532,11 +1549,20 @@ export function buildWeeklyChallengeHtml(
             .confidence-btn { max-width: 100%; }
         }
 
+        /* The stem takes focus programmatically so screen readers announce the
+           new question. It is not a control, so it gets no focus ring. */
+        .question-stem:focus { outline: none; }
+
         @media (max-width: 480px) {
             .question-stem { font-size: 16px; }
             .option-card { padding: 12px 14px; font-size: 14px; }
             .mastery-score { font-size: 36px; }
             .matrix-table { font-size: 13px; }
+            /* Keep all three answer columns on screen at phone width */
+            .matrix-table thead th { padding: 6px 2px; font-size: 10px; letter-spacing: 0.02em; }
+            .matrix-table thead th:first-child { width: 40%; }
+            .matrix-table tbody td { padding: 10px 4px; }
+            .matrix-table tbody td:first-child { padding-left: 12px; }
         }
     </style>
 </head>
@@ -1623,11 +1649,11 @@ export function buildWeeklyChallengeHtml(
                 <div class="reflection-question">
                     <label>How confident do you feel about this week's material overall?</label>
                     <div class="confidence-scale" id="reflection-confidence">
-                        <button class="confidence-scale-btn" data-val="1">1</button>
-                        <button class="confidence-scale-btn" data-val="2">2</button>
-                        <button class="confidence-scale-btn" data-val="3">3</button>
-                        <button class="confidence-scale-btn" data-val="4">4</button>
-                        <button class="confidence-scale-btn" data-val="5">5</button>
+                        <button class="confidence-scale-btn" data-val="1" aria-pressed="false">1</button>
+                        <button class="confidence-scale-btn" data-val="2" aria-pressed="false">2</button>
+                        <button class="confidence-scale-btn" data-val="3" aria-pressed="false">3</button>
+                        <button class="confidence-scale-btn" data-val="4" aria-pressed="false">4</button>
+                        <button class="confidence-scale-btn" data-val="5" aria-pressed="false">5</button>
                     </div>
                 </div>
                 <div class="reflection-actions">
@@ -2575,7 +2601,13 @@ export function buildWeeklyChallengeHtml(
             const continueBtn = document.getElementById('btn-continue');
             const newBtn = continueBtn.cloneNode(true);
             continueBtn.parentNode.replaceChild(newBtn, continueBtn);
+            // One advance per feedback screen. The boss intro keeps this screen
+            // (and the focused button) up for 2 s, so a second Enter used to
+            // skip the boss question.
+            let advanced = false;
             newBtn.addEventListener('click', () => {
+                if (advanced) return;
+                advanced = true;
                 state.currentIndex++;
                 if (state.currentIndex >= state.questions.length) {
                     showReflection();
@@ -2592,6 +2624,7 @@ export function buildWeeklyChallengeHtml(
             // Confidence scale buttons (their click listeners are wired once, at startup)
             document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(btn => {
                 btn.classList.remove('selected');
+                btn.setAttribute('aria-pressed', 'false');
             });
 
             const toResultsBtn = document.getElementById('btn-to-results');
@@ -2688,6 +2721,8 @@ export function buildWeeklyChallengeHtml(
             newRetake.addEventListener('click', () => {
                 init();
                 showScreen('welcome-screen');
+                // The results page is long: bring the new attempt into view
+                welcomeScreen.scrollIntoView({ block: 'nearest' });
             });
 
             // Fire confetti on mastery!
@@ -2884,8 +2919,12 @@ export function buildWeeklyChallengeHtml(
         // Reflection confidence scale: wired once so retakes don't stack listeners
         document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(btn => {
             btn.addEventListener('click', function() {
-                document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(b => b.classList.remove('selected'));
+                document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(b => {
+                    b.classList.remove('selected');
+                    b.setAttribute('aria-pressed', 'false');
+                });
                 this.classList.add('selected');
+                this.setAttribute('aria-pressed', 'true');
                 state.reflectionData.confidence = parseInt(this.dataset.val, 10);
             });
         });
