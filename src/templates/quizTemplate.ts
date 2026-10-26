@@ -8,6 +8,7 @@
  * Based on the PSYC2371 practice quiz design.
  */
 import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
+import { escapeHtml, toScriptJson } from './htmlEscape';
 
 /** Each chapter theme implies a different chrome aesthetic — modernist hard
  *  corners for Studio, friendly rounded blocks for Storybook, hairline serifs
@@ -34,7 +35,9 @@ export function buildQuizHtml(
   courseTitle: string,
   themeId?: string,
 ): string {
-  const escapedQuizData = JSON.stringify(quizData);
+  const quizDataJson = toScriptJson(quizData);
+  const safeQuizTitle = escapeHtml(quizTitle);
+  const safeCourseTitle = escapeHtml(courseTitle);
   const t = getTheme(themeId);
   const ct = getChapterTheme(themeId);
   const chrome = themeChrome(ct.id);
@@ -45,7 +48,7 @@ export function buildQuizHtml(
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>${quizTitle}</title>
+    <title>${safeQuizTitle}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="${FONTS_URL}">
@@ -70,9 +73,9 @@ export function buildQuizHtml(
             /* Theme-driven typography and chrome — mirror the chapter aesthetic
                so the quiz feels like a continuation of the reading, not a
                separate app. */
-            --qz-font-display: ${ct.displayFont}, Georgia, serif;
-            --qz-font-body: ${ct.bodyFont}, system-ui, sans-serif;
-            --qz-font-mono: ${ct.monoFont}, ui-monospace, monospace;
+            --qz-font-display: ${ct.displayFont};
+            --qz-font-body: ${ct.bodyFont};
+            --qz-font-mono: ${ct.monoFont};
             --qz-card-radius: ${chrome.cardRadius}px;
             --qz-pill-radius: ${chrome.pillRadius}px;
         }
@@ -367,7 +370,7 @@ export function buildQuizHtml(
             align-items: center;
             font-weight: bold;
             box-shadow: var(--shadow);
-            border: 3px solid \${t.elevated};
+            border: 3px solid ${t.elevated};
             transition: all 0.3s ease;
             z-index: 10;
             overflow: hidden;
@@ -503,7 +506,7 @@ export function buildQuizHtml(
         }
 
         .confidence-btn {
-            background-color: \${t.cardBg};
+            background-color: ${t.cardBg};
             border: 3px solid var(--light-grey);
             border-radius: 12px;
             padding: 20px;
@@ -700,6 +703,17 @@ export function buildQuizHtml(
             text-decoration: line-through;
         }
 
+        .option:focus-visible {
+            outline: 3px solid var(--light-purple);
+            outline-offset: 2px;
+        }
+
+        .submit-message {
+            margin-top: 10px;
+            color: var(--red);
+            font-size: 0.95rem;
+        }
+
         .option-marker {
             position: absolute;
             left: 15px;
@@ -713,7 +727,7 @@ export function buildQuizHtml(
             align-items: center;
             justify-content: center;
             font-weight: bold;
-            background-color: \${t.cardBg};
+            background-color: ${t.cardBg};
         }
 
         .option.selected .option-marker {
@@ -802,7 +816,7 @@ export function buildQuizHtml(
         .trophy {
             width: 60px;
             height: 60px;
-            background-color: \${t.elevated};
+            background-color: ${t.elevated};
             border-radius: 50%;
             display: flex;
             align-items: center;
@@ -885,7 +899,7 @@ export function buildQuizHtml(
         }
 
         .stat-item {
-            background-color: \${t.elevated};
+            background-color: ${t.elevated};
             border-radius: 8px;
             padding: 10px 15px;
             text-align: center;
@@ -907,7 +921,7 @@ export function buildQuizHtml(
         .calibration-chart {
             margin: 30px auto;
             max-width: 500px;
-            background-color: \${t.elevated};
+            background-color: ${t.elevated};
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
@@ -1105,7 +1119,7 @@ export function buildQuizHtml(
 
         /* Achievement notification */
         .achievement {
-            background-color: \${t.elevated};
+            background-color: ${t.elevated};
             color: var(--white);
             padding: 15px;
             border-radius: 8px;
@@ -1261,8 +1275,8 @@ export function buildQuizHtml(
     <canvas id="confetti-canvas" class="hidden"></canvas>
     <div class="quiz-container">
         <div class="header">
-            <h1>${quizTitle}</h1>
-            <div class="header-subtitle">${courseTitle}</div>
+            <h1>${safeQuizTitle}</h1>
+            <div class="header-subtitle">${safeCourseTitle}</div>
             <div class="score-display" id="score-display">
                 <div class="score-value" id="score-value">0</div>
                 <div class="score-label">Score</div>
@@ -1355,6 +1369,7 @@ export function buildQuizHtml(
             <div id="hint-container"></div>
             <div id="options-container" class="options-container"></div>
             <button id="submit-btn" class="btn">Submit Answer</button>
+            <div id="submit-message" class="submit-message hidden" role="alert">Please select an answer before submitting.</div>
         </div>
 
         <div id="confidence-screen" class="quiz-section hidden">
@@ -1495,7 +1510,7 @@ export function buildQuizHtml(
         </div>
 
         <div class="footnote">
-            ${courseTitle}
+            ${safeCourseTitle}
         </div>
     </div>
 
@@ -1587,6 +1602,7 @@ export function buildQuizHtml(
             const trophyCase = document.getElementById('trophy-case');
             const reviewContainer = document.getElementById('review-container');
             const achievementContainer = document.getElementById('achievement-container');
+            const submitMessage = document.getElementById('submit-message');
 
             // Event listeners
             submitBtn.addEventListener('click', submitAnswer);
@@ -1616,7 +1632,7 @@ export function buildQuizHtml(
             // Function to load the inline quiz data
             function loadQuizData() {
                 try {
-                    const quizMarkdown = ${escapedQuizData};
+                    const quizMarkdown = ${quizDataJson};
                     startQuiz(quizMarkdown);
                 } catch (error) {
                     console.error('Error loading quiz data:', error);
@@ -1649,32 +1665,36 @@ export function buildQuizHtml(
 
                         const questionText = questionMatch[1].trim();
 
+                        // Options are the "a." to "d." lines between the bold stem and
+                        // **Answer**. Match them line by line so an abbreviation such as
+                        // "c. 1440" inside the stem or an option is not read as a new option.
+                        const afterStem = trimmedSection.slice(questionMatch.index + questionMatch[0].length);
+                        const answerAt = afterStem.search(/\\*\\*Answer\\*\\*/);
+                        const optionBlock = answerAt >= 0 ? afterStem.slice(0, answerAt) : afterStem;
                         const options = [];
-                        const optionRegex = /\\s+([a-d])\\.\\s+(.*?)(?=\\s+[a-d]\\.\\s+|\\s+\\*\\*Answer|\\s*$)/gs;
-                        let optionMatch;
 
-                        while ((optionMatch = optionRegex.exec(trimmedSection)) !== null) {
-                            if (['a', 'b', 'c', 'd'].includes(optionMatch[1])) {
-                                options.push({
-                                    id: optionMatch[1],
-                                    text: optionMatch[2].trim()
-                                });
+                        optionBlock.split('\\n').forEach(line => {
+                            const optionMatch = line.match(/^\\s*(?:[-*]\\s+)?([a-d])\\.\\s+(.*)$/);
+                            if (optionMatch) {
+                                if (options.length < 4) {
+                                    options.push({
+                                        id: optionMatch[1],
+                                        text: optionMatch[2].trim()
+                                    });
+                                }
+                            } else if (options.length > 0 && line.trim() && !/^\\s*[a-z]\\.\\s/i.test(line)) {
+                                // An option that wraps onto the next line
+                                options[options.length - 1].text += ' ' + line.trim();
                             }
-                            if (options.length >= 4) {
-                                break;
-                            }
-                        }
+                        });
 
                         if (options.length === 0) {
                             return;
                         }
 
-                        const answerMatch = trimmedSection.match(/\\*\\*Answer\\*\\*:\\s*(.*?)(?=\\s*\\*\\*Feedback|\\s*$)/s);
-                        if (!answerMatch) {
+                        if (!/\\*\\*Answer\\*\\*:/.test(trimmedSection)) {
                             return;
                         }
-
-                        const answerText = answerMatch[1].trim();
 
                         const feedbackMatch = trimmedSection.match(/\\*\\*Feedback\\*\\*:\\s*([\\s\\S]*?)(?=\\s*$)/);
                         if (!feedbackMatch) {
@@ -1804,6 +1824,7 @@ export function buildQuizHtml(
                 toDisable.forEach(option => {
                     option.classList.add('disabled');
                     option.style.pointerEvents = 'none';
+                    option.tabIndex = -1;
                 });
 
                 powerups.fiftyFifty--;
@@ -1820,7 +1841,7 @@ export function buildQuizHtml(
 
                 const hintMsg = document.createElement('div');
                 hintMsg.className = 'hint-message';
-                hintMsg.innerHTML = '<strong>Hint:</strong> Look for an answer that mentions ' + getHintText(question) + '.';
+                hintMsg.innerHTML = '<strong>Hint:</strong> Look for an answer that mentions ' + escapeHtml(getHintText(question)) + '.';
 
                 hintContainer.innerHTML = '';
                 hintContainer.appendChild(hintMsg);
@@ -1886,10 +1907,19 @@ export function buildQuizHtml(
 
                     optionElement.innerHTML = '<span class="option-marker">' + option.id.toUpperCase() + '</span>' + escapeHtml(option.text);
 
+                    // Keyboard support: focusable, Enter/Space selects
+                    optionElement.tabIndex = 0;
                     optionElement.addEventListener('click', selectOption);
+                    optionElement.addEventListener('keydown', event => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            selectOption(event);
+                        }
+                    });
                     optionsContainer.appendChild(optionElement);
                 });
 
+                submitMessage.classList.add('hidden');
                 updatePowerupDisplay();
                 updateProgressDisplay();
             }
@@ -1905,13 +1935,15 @@ export function buildQuizHtml(
                 options.forEach(option => option.classList.remove('selected'));
 
                 selectedOption.classList.add('selected');
+                submitMessage.classList.add('hidden');
             }
 
             // Function to submit an answer
             function submitAnswer() {
                 const selectedOption = optionsContainer.querySelector('.option.selected');
                 if (!selectedOption) {
-                    alert('Please select an answer before submitting.');
+                    // alert() is blocked in sandboxed iframes without allow-modals
+                    submitMessage.classList.remove('hidden');
                     return;
                 }
 
@@ -2058,28 +2090,12 @@ export function buildQuizHtml(
 
                 calibrationDisplay.classList.remove('hidden');
 
-                // Calculate calibration score
-                let totalCalibrationScore = 0;
-                let count = 0;
-
-                Object.keys(calibrationData).forEach(level => {
-                    const data = calibrationData[level];
-                    if (data.total > 0) {
-                        const accuracy = data.correct / data.total;
-                        let expectedAccuracy;
-
-                        if (level === 'low') expectedAccuracy = 0.33;
-                        else if (level === 'medium') expectedAccuracy = 0.66;
-                        else expectedAccuracy = 0.90;
-
-                        const calibrationError = Math.abs(accuracy - expectedAccuracy);
-                        totalCalibrationScore += (1 - calibrationError);
-                        count++;
-                    }
-                });
+                // Same formula as the end-of-quiz Calibration Score, so the live
+                // meter and the results screen never disagree.
+                const count = calibrationData.low.total + calibrationData.medium.total + calibrationData.high.total;
 
                 if (count > 0) {
-                    const avgCalibration = totalCalibrationScore / count;
+                    const avgCalibration = calculateOverallCalibration() / 100;
                     const calibrationPercentage = Math.round(avgCalibration * 100);
 
                     // Update score display
@@ -2425,15 +2441,15 @@ export function buildQuizHtml(
                         'high': 'Very Confident'
                     }[answer.confidence];
 
-                    reviewItem.innerHTML = '<div class="review-question">' + (loopIndex + 1) + '. ' + question.text + '</div>' +
-                        '<div class="review-answer">Your answer: ' + answer.selectedId.toUpperCase() + '. ' + (selectedOption ? selectedOption.text : 'N/A') + '</div>' +
+                    reviewItem.innerHTML = '<div class="review-question">' + (loopIndex + 1) + '. ' + escapeHtml(question.text) + '</div>' +
+                        '<div class="review-answer">Your answer: ' + answer.selectedId.toUpperCase() + '. ' + (selectedOption ? escapeHtml(selectedOption.text) : 'N/A') + '</div>' +
                         '<div class="review-answer ' + (answer.isCorrect ? 'correct' : 'incorrect') + '">' +
-                        'Correct answer: ' + question.answer.toUpperCase() + '. ' + (correctOption ? correctOption.text : 'N/A') +
+                        'Correct answer: ' + question.answer.toUpperCase() + '. ' + (correctOption ? escapeHtml(correctOption.text) : 'N/A') +
                         '</div>' +
                         '<div class="review-confidence">' +
                         confidenceEmoji + ' Confidence: ' + confidenceText + ' | Points: ' + (answer.pointsEarned > 0 ? '+' : '') + answer.pointsEarned +
                         '</div>' +
-                        '<div class="review-feedback">' + question.feedback + '</div>';
+                        '<div class="review-feedback">' + escapeHtml(question.feedback) + '</div>';
 
                     reviewContainer.appendChild(reviewItem);
                 });
