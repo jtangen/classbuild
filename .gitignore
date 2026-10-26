@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Secrets: keep every env file out of git except the template
+.env
+.env.*
+!.env.example
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
@@ -32,6 +37,8 @@ vision/
 # Generated course output + deploy artifacts
 output/
 deploy-courses/
+tmp/
+.wrangler/
 
 # Design scratch + internal references (not for the public repo)
 ClassBuild Redesign/
