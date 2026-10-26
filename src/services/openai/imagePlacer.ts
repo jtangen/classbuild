@@ -9,6 +9,7 @@
  * placeholder so the reading still flows.
  */
 
+import { FIGURE_UNAVAILABLE_BOX, figureImageBox } from './figureMarkup';
 import { generateImageWithRetry } from './imageGen';
 import { withSafetyClause } from './safetyClause';
 
@@ -109,6 +110,9 @@ export async function replaceAiImagePlaceholders(
     quality?: 'low' | 'medium' | 'high' | 'auto';
     /** Cancels every in-flight render; the call then rejects with the abort. */
     signal?: AbortSignal;
+    /** Called once per figure that falls back to "image unavailable", with
+     *  the reason, so the caller can tell the user why. */
+    onFigureError?: (err: unknown) => void;
   },
 ): Promise<string> {
   const matches = findPlaceholders(html);
@@ -132,6 +136,8 @@ export async function replaceAiImagePlaceholders(
       } catch (err) {
         // A Stop isn't a failed render — don't paper over it with a fallback.
         if (options?.signal?.aborted) throw err;
+        console.warn('Figure render failed:', err);
+        options?.onFigureError?.(err);
         return null;
       }
     }),
@@ -160,32 +166,23 @@ export async function replaceAiImagePlaceholders(
     // tweak the prompt, and regenerate just this one image.
     // m.prompt / m.aspect are decoded text, so they're encoded exactly once.
     const figureAttrs = `class="ch-figure" data-image-idx="${i}" data-prompt="${escapeAttr(m.prompt)}" data-aspect="${escapeAttr(m.aspect)}"`;
-    let replacement: string;
-    if (dataUri) {
-      // Theme CSS sets a fixed height (170–280px) on .ch-figbox for the
-      // empty-state cream placeholder. With a real image inside, we need to
-      // un-fix the height so the image renders at its natural aspect ratio,
-      // capped by max-height so portrait crops don't dominate the scroll.
-      // The caption is HTML; alt wants its plain text.
-      const altText = decodeEntities(rawCaption.replace(/<[^>]*>/g, ''));
-      replacement = `<figure ${figureAttrs}><div class="ch-figbox" style="height:auto;overflow:visible;"><img src="${dataUri}" alt="${escapeAttr(altText)}" data-image-idx="${i}" style="display:block;max-width:100%;max-height:75vh;height:auto;width:auto;margin:0 auto;cursor:pointer;"></div>${
-        rawCaption
-          ? `<figcaption><span class="ch-fig-num">Fig. ${figNum}</span> ${rawCaption}</figcaption>`
-          : ''
-      }</figure>`;
-    } else {
-      replacement = `<figure ${figureAttrs}><div class="ch-figbox" style="display:flex;align-items:center;justify-content:center;"><span class="ch-figbox-tag">image unavailable</span></div>${
-        rawCaption ? `<figcaption><span class="ch-fig-num">Fig. ${figNum}</span> ${rawCaption}</figcaption>` : ''
-      }</figure>`;
-    }
+    // The caption is HTML; alt wants its plain text.
+    const box = dataUri
+      ? figureImageBox(dataUri, escapeAttr(decodeEntities(rawCaption.replace(/<[^>]*>/g, ''))), i)
+      : FIGURE_UNAVAILABLE_BOX;
+    const replacement = `<figure ${figureAttrs}>${box}${
+      rawCaption ? `<figcaption><span class="ch-fig-num">Fig. ${figNum}</span> ${rawCaption}</figcaption>` : ''
+    }</figure>`;
     out += html.slice(cursor, m.start) + replacement;
     cursor = m.end;
   }
   return out + html.slice(cursor);
 }
 
+/** Escapes '<' and '>' too, so a prompt like "ESTIMATE > v*" can't end the tag
+ *  early for the `<figure[^>]*>` patterns Build uses to find a figure again. */
 function escapeAttr(s: string): string {
-  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 const NAMED_ENTITIES: Record<string, string> = {

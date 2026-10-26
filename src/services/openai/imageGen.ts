@@ -41,11 +41,11 @@ export class OpenAIImageError extends Error {
 
 /**
  * True for failures a retry can fix: rate limits and 5xx. A 429 that reports
- * exhausted quota / billing is permanent, so it isn't retried.
+ * exhausted quota / billing / credit is permanent, so it isn't retried.
  */
 export function isTransientImageError(err: unknown): boolean {
   if (!(err instanceof OpenAIImageError) || err.status === undefined) return false;
-  if (err.status === 429) return !/quota|billing/i.test(err.message);
+  if (err.status === 429) return !/quota|billing|credit/i.test(err.message);
   return err.status >= 500;
 }
 

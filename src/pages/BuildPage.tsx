@@ -47,7 +47,7 @@ import { ArtifactShell } from '../components/build/ArtifactShell';
 import type { SlideData, InClassQuizQuestion, WeeklyChallengeData } from '../types/course';
 import { getVoiceOption } from '../themes';
 import { slugify, extractHtml, parseJson } from '../utils/format';
-import { friendlyError, isAbortError } from '../utils/errors';
+import { figureFailureMessage, friendlyError, friendlyImageError, isAbortError } from '../utils/errors';
 import { beginAbortable, endAbortable, abortInFlight, materialAbortKey } from '../services/abortRegistry';
 import type { BatchFailure } from '../store/uiStore';
 
@@ -70,9 +70,20 @@ interface Activity {
 // formatElapsed moved to ReadingTab (only place it was used).
 // slugify, extractHtml, parseJson moved to src/utils/format.ts
 
-async function replaceAiPlaceholders(html: string, apiKey: string, signal?: AbortSignal): Promise<string> {
+/** Render a reading's figures. Figures that fail keep an "image unavailable"
+ *  box (click it on Build to try again); `figureError` says how many and why. */
+async function replaceAiPlaceholders(
+  html: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<{ html: string; figureError: string | null }> {
   const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
-  return replaceAiImagePlaceholders(html, apiKey, { signal });
+  const errors: unknown[] = [];
+  const out = await replaceAiImagePlaceholders(html, apiKey, {
+    signal,
+    onFigureError: (err) => errors.push(err),
+  });
+  return { html: out, figureError: errors.length ? figureFailureMessage(errors) : null };
 }
 
 // Chapter image helpers moved to src/components/build/chapterImageHelpers.ts
@@ -161,9 +172,10 @@ export function BuildPage() {
 
   // Per-image chapter refine. When the user clicks an image inside the chapter
   // iframe, the shim postMessages here and we open a drawer with the original
-  // prompt + the rendered image. Edits commit only when Regenerate succeeds.
+  // prompt + the rendered image (src is null for a figure whose render
+  // failed). Edits commit only when Regenerate succeeds.
   const [chapterImageRefine, setChapterImageRefine] = useState<
-    { idx: number; prompt: string; aspect: string; src: string } | null
+    { idx: number; prompt: string; aspect: string; src: string | null } | null
   >(null);
   const [chapterImageDraft, setChapterImageDraft] = useState('');
   const [chapterImageRefining, setChapterImageRefining] = useState(false);
@@ -666,8 +678,9 @@ export function BuildPage() {
       );
 
       let html = extractHtml(fullText);
+      let figureError: string | null = null;
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey, controller.signal);
+        ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, controller.signal));
       }
       // A Stop during figure rendering still discards the draft.
       controller.signal.throwIfAborted();
@@ -678,6 +691,7 @@ export function BuildPage() {
         title: ch.title,
         htmlContent: html,
       });
+      if (figureError) setError(`Chapter ${chapterNum}: ${figureError} Click a failed figure to retry it.`);
     } catch (err) {
       // A user Stop is a silent cancel — the partial stream is discarded.
       if (!isAbortError(err)) setError(friendlyError(err, 'Chapter generation failed.'));
@@ -798,13 +812,15 @@ Teacher feedback: "${feedback}"`;
       );
 
       let html = extractHtml(fullText);
+      let figureError: string | null = null;
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey, controller.signal);
+        ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, controller.signal));
       }
       // A Stop during figure rendering keeps the original reading.
       controller.signal.throwIfAborted();
       if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
       updateChapter(chapterNum, { htmlContent: html });
+      if (figureError) setError(`Chapter ${chapterNum}: ${figureError} Click a failed figure to retry it.`);
 
       // If the user opted in, automatically rebuild quizzes/discussion/etc.
       // against the new reading. The setTimeout lets React flush the chapter
@@ -1041,8 +1057,9 @@ Teacher feedback: "${feedback}"`;
       if (!data || data.__cbImageClick !== 1) return;
       const { idx, prompt, aspect } = data;
       if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) return;
+      // Only figures that exist in this reading; a failed one has no src yet.
+      if (!new RegExp(`<figure[^>]*\\bdata-image-idx="${idx}"`, 'i').test(chapterHtml)) return;
       const src = getChapterImageSrc(chapterHtml, idx);
-      if (!src) return;
       const promptText = typeof prompt === 'string' ? prompt : '';
       setChapterImageRefine({
         idx,
@@ -1103,7 +1120,7 @@ Teacher feedback: "${feedback}"`;
       }
       setChapterImageRefine(null);
     } catch (err) {
-      setChapterImageRefineError(friendlyError(err, 'Chapter image regeneration failed.'));
+      setChapterImageRefineError(friendlyImageError(err));
     } finally {
       setChapterImageRefining(false);
     }
@@ -1250,12 +1267,18 @@ Teacher feedback: "${feedback}"`;
               }
             );
             let html = extractHtml(fullText);
+            let figureError: string | null = null;
             if (hasImageGen) {
               setBatchPhase('writing');
-              html = await replaceAiPlaceholders(html, openaiApiKey, signal);
+              ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, signal));
             }
             signal.throwIfAborted();
             addChapter({ number: ch.number, title: ch.title, htmlContent: html });
+            // Not a retryable batch step (the reading exists now): each figure
+            // is retried by clicking it.
+            if (figureError) {
+              failures.push({ chapter: ch.number, material: 'Figures', message: `${figureError} Click a failed figure in the reading to retry it.` });
+            }
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
             failures.push({ chapter: ch.number, material: 'Reading', message: friendlyError(err, 'Drafting failed.') });

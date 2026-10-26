@@ -21,7 +21,7 @@ import {
 } from '../templates/outcomesTableTemplate';
 import { CodexButton as Button } from '../components/codex';
 import type { GeneratedChapter, InClassQuizQuestion, SlideData } from '../types/course';
-import { friendlyError } from '../utils/errors';
+import { figureFailureMessage, friendlyError } from '../utils/errors';
 import { buildProjectFile } from '../utils/projectFile';
 import { ThemePicker } from '../components/export/ThemePicker';
 import type { ChapterThemeId } from '../themes';
@@ -682,6 +682,7 @@ export function ExportPage() {
       setStreamingText('');
       setThinkingText('');
       let html: string;
+      const figureErrors: unknown[] = [];
       try {
         const hasImageGen = !!openaiApiKey;
         const fullText = await streamMessage(
@@ -703,7 +704,10 @@ export function ExportPage() {
         html = extractHtml(fullText);
         if (hasImageGen) {
           const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
-          html = await replaceAiImagePlaceholders(html, openaiApiKey, { signal: readingCtl.signal });
+          html = await replaceAiImagePlaceholders(html, openaiApiKey, {
+            signal: readingCtl.signal,
+            onFigureError: (err) => figureErrors.push(err),
+          });
         }
         // A Stop during figure rendering still discards the draft.
         readingCtl.signal.throwIfAborted();
@@ -719,6 +723,9 @@ export function ExportPage() {
       //      a Build material job, so the Build tab shows it and its Stop
       //      cancels just that quiz.
       const problems: string[] = [];
+      if (figureErrors.length > 0) {
+        problems.push(`Class ${chapterNum}: ${figureFailureMessage(figureErrors)} Open it on Build and click a failed figure to retry it.`);
+      }
       if (!draftStopRef.current) {
         const err = await runDraftMaterial('quiz', chapterNum, async (signal) => {
           const quizText = await streamMessage(

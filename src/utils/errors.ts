@@ -96,6 +96,34 @@ export function friendlyError(err: unknown, fallback = 'Something went wrong. Tr
 }
 
 /**
+ * An OpenAI image error as one sentence that names OpenAI, so the user knows
+ * which key, account or console to look at. The image API answers both rate
+ * limits and an empty credit balance with 429; only the second needs the user.
+ */
+export function friendlyImageError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const status = getStatus(err);
+  if (/no credits|credit balance|insufficient_quota|exceeded your current quota|billing/i.test(message)) {
+    return 'Your OpenAI account is out of credit. Add credit at platform.openai.com (Settings → Billing).';
+  }
+  if (status === 401) return 'OpenAI rejected the key. Check your OpenAI key in Setup.';
+  if (status === 403 && /verif/i.test(message)) {
+    return 'OpenAI wants your organisation verified before it will use gpt-image-2 (platform.openai.com → Settings → Organization).';
+  }
+  if (status === 403) return "Your OpenAI account can't use gpt-image-2. Check its access in the OpenAI console.";
+  if (/moderation|safety system/i.test(message)) {
+    return "OpenAI's safety system declined this image prompt. Rewording it usually helps.";
+  }
+  return friendlyError(err, "OpenAI couldn't draw this image. Try again in a moment.");
+}
+
+/** "2 figures couldn't be drawn. <why>" for the figures one reading lost. */
+export function figureFailureMessage(errors: unknown[]): string {
+  const n = errors.length;
+  return `${n === 1 ? 'One figure' : `${n} figures`} couldn't be drawn. ${friendlyImageError(errors[0])}`;
+}
+
+/**
  * True when an error is the result of a user-initiated cancel (AbortController
  * fired). Call sites treat these as a silent no-op — never an error banner.
  * Covers DOM AbortError, the Anthropic SDK's APIUserAbortError, and the
