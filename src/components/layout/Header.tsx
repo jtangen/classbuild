@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
 import { useUiStore } from '../../store/uiStore';
 import type { MaterialKind } from '../../store/uiStore';
 import { useCourseStore } from '../../store/courseStore';
 import { isPersistenceBlocked } from '../../store/idbStorage';
 import { CodexButton } from '../codex/Button';
+import { CodexModal } from '../codex/Modal';
 import { Colophon } from '../codex/Colophon';
 import { useCourseBusy } from './useCourseBusy';
 
@@ -39,6 +39,7 @@ export function Header() {
   const isLanding = location.pathname === '/';
   const {
     isGenerating,
+    readingDraft,
     lastSavedAt,
     persistError,
     inFlight,
@@ -181,18 +182,45 @@ export function Header() {
 
           {/* Right side: a quiet "Saved · Xs ago" reassurance + nav. */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-            {isGenerating && (
-              <span
-                className="cb-sc cb-mono"
-                style={{
-                  fontSize: 12,
-                  letterSpacing: '0.14em',
-                  color: 'var(--cb-accent-emphasis)',
-                }}
-              >
-                drafting
-              </span>
-            )}
+            {isGenerating &&
+              (readingDraft ? (
+                // A Build reading draft: name its chapter and jump to it.
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedChapterNum(readingDraft.chapterNum);
+                    setActiveTab('chapter');
+                    if (location.pathname !== '/build') navigate('/build');
+                  }}
+                  className="cb-sc cb-mono cb-focus"
+                  title={`Class ${readingDraft.chapterNum} · ${readingDraft.mode === 'refine' ? 'revising' : 'drafting'} the reading (click to view)`}
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: '0.14em',
+                    color: 'var(--cb-accent-emphasis)',
+                    background: 'transparent',
+                    border: 0,
+                    padding: 0,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {readingDraft.mode === 'refine' ? 'revising' : 'drafting'}{' '}
+                  {ROMAN_LOWER[readingDraft.chapterNum - 1] ?? readingDraft.chapterNum}
+                </button>
+              ) : (
+                <span
+                  className="cb-sc cb-mono"
+                  style={{
+                    fontSize: 12,
+                    letterSpacing: '0.14em',
+                    color: 'var(--cb-accent-emphasis)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  drafting
+                </span>
+              ))}
 
             {!isLanding && !isGenerating && lastSavedAt !== null && !persistError && (
               <span
@@ -206,6 +234,7 @@ export function Header() {
                   color: 'var(--cb-text-muted)',
                   letterSpacing: '0.04em',
                   userSelect: 'none',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <span
@@ -214,12 +243,14 @@ export function Header() {
                     display: 'inline-block',
                     width: 6,
                     height: 6,
+                    flexShrink: 0,
                     borderRadius: '50%',
                     background: 'var(--cb-status-success, #3d5c33)',
                     opacity: 0.85,
                   }}
                 />
-                Saved · {formatSavedAgo(lastSavedAt, now)}
+                {/* Label hidden on phones (index.css); the dot + tooltip remain. */}
+                <span className="cb-wide-only">Saved · {formatSavedAgo(lastSavedAt, now)}</span>
               </span>
             )}
 
@@ -249,6 +280,7 @@ export function Header() {
                   borderRadius: 2,
                   padding: '3px 9px 4px',
                   cursor: savingOff ? 'help' : 'pointer',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <span
@@ -257,11 +289,15 @@ export function Header() {
                     display: 'inline-block',
                     width: 6,
                     height: 6,
+                    flexShrink: 0,
                     borderRadius: '50%',
                     background: 'var(--cb-status-danger, #a03535)',
                   }}
                 />
-                {savingOff ? 'Not saving in this tab' : 'Save failed — retry'}
+                <span className="cb-wide-only">
+                  {savingOff ? 'Not saving in this tab' : 'Save failed — retry'}
+                </span>
+                <span className="cb-narrow-only">{savingOff ? 'Not saving' : 'Not saved'}</span>
               </button>
             )}
 
@@ -274,113 +310,31 @@ export function Header() {
         </div>
       </header>
 
-      <AnimatePresence>
-        {showConfirm && (
-          <ResetConfirmDialog
-            onConfirm={confirmReset}
-            onCancel={() => setShowConfirm(false)}
-          />
-        )}
-      </AnimatePresence>
-    </>
-  );
-}
-
-function ResetConfirmDialog({
-  onConfirm,
-  onCancel,
-}: {
-  onConfirm: () => void;
-  onCancel: () => void;
-}) {
-  return (
-    <motion.div
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0 }}
-      transition={{ duration: 0.12 }}
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 100,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(26,24,20,0.42)',
-        padding: 16,
-      }}
-      onClick={onCancel}
-    >
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{ opacity: 0 }}
-        transition={{ duration: 0.16 }}
-        style={{
-          background: 'var(--cb-surface-raised)',
-          border: '1px solid var(--cb-border-default)',
-          borderRadius: 3,
-          padding: '28px 32px',
-          maxWidth: 440,
-          width: '100%',
-          boxShadow: 'var(--cb-shadow-modal)',
-          fontFamily: 'var(--font-cb-serif)',
-          color: 'var(--cb-text-default)',
-        }}
-        onClick={(e) => e.stopPropagation()}
+      <CodexModal
+        open={showConfirm}
+        onClose={() => setShowConfirm(false)}
+        kicker="confirm"
+        title={
+          <>
+            Start a <span className="cb-italic">new</span> course?
+          </>
+        }
+        sub="This will clear your current syllabus, research, and any generated classes. Local-only — nothing is sent anywhere. To keep a copy first, download a project file from the Export page."
+        width={440}
+        actions={
+          <>
+            <CodexButton variant="ghost" onClick={() => setShowConfirm(false)}>
+              Cancel
+            </CodexButton>
+            <CodexButton variant="destructive" onClick={confirmReset}>
+              Start new course
+            </CodexButton>
+          </>
+        }
       >
-        <div
-          className="cb-sc"
-          style={{
-            fontSize: 13,
-            letterSpacing: '0.16em',
-            color: 'var(--cb-accent-emphasis)',
-          }}
-        >
-          confirm
-        </div>
-        <h3
-          style={{
-            margin: '6px 0 10px',
-            fontSize: 24,
-            fontWeight: 500,
-            fontVariationSettings: '"opsz" 20',
-            letterSpacing: '-0.005em',
-            color: 'var(--cb-text-default)',
-          }}
-        >
-          Start a <span className="cb-italic">new</span> course?
-        </h3>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 15,
-            lineHeight: 1.55,
-            color: 'var(--cb-text-muted)',
-            fontStyle: 'italic',
-          }}
-        >
-          This will clear your current syllabus, research, and any generated classes.
-          Local-only — nothing is sent anywhere. To keep a copy first, download a
-          project file from the Export page.
-        </p>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 10,
-            marginTop: 22,
-          }}
-        >
-          <CodexButton variant="ghost" onClick={onCancel}>
-            Cancel
-          </CodexButton>
-          <CodexButton variant="destructive" onClick={onConfirm}>
-            Start new course
-          </CodexButton>
-        </div>
-      </motion.div>
-    </motion.div>
+        <></>
+      </CodexModal>
+    </>
   );
 }
 

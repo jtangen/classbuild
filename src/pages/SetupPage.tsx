@@ -471,6 +471,13 @@ export function SetupPage() {
               }}
             >
               ≈ one chapter per week of teaching.
+              {syllabus && (
+                <>
+                  {' '}Length applies when the syllabus is drafted again; the
+                  current one has {syllabus.chapters.length}{' '}
+                  {syllabus.chapters.length === 1 ? 'chapter' : 'chapters'}.
+                </>
+              )}
             </p>
           </div>
 

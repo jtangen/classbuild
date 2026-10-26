@@ -13,8 +13,7 @@
  * API keys are NEVER part of a project file.
  */
 
-import { defaultSetup, useCourseStore } from '../store/courseStore';
-import { abortAll } from '../services/abortRegistry';
+import { defaultSetup, leaveCourse, useCourseStore } from '../store/courseStore';
 import { normalizeSyllabus } from '../prompts/syllabus';
 import { isSafeMediaUrl } from './url';
 import type {
@@ -321,7 +320,7 @@ export function parseProjectFile(text: string): ProjectFileParseResult {
 export function applyProjectFile(state: ProjectFileState): void {
   // A stream still running for the course being replaced would otherwise
   // write its result into the restored one.
-  abortAll();
+  leaveCourse();
   useCourseStore.setState({
     currentStage: state.currentStage,
     completedStages: state.completedStages,

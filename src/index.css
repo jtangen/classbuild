@@ -481,3 +481,26 @@
   color: var(--cb-text-muted);
   font-variation-settings: "opsz" 12;
 }
+
+/* Header status chips: full label on wide screens, short (or none) on
+ * phones, where the "Saved · just now" label wrapped onto four lines and
+ * spilled out of the 64px header. The dot and its tooltip stay. */
+.cb-narrow-only {
+  display: none;
+}
+@media (max-width: 720px) {
+  .cb-wide-only {
+    display: none;
+  }
+  .cb-narrow-only {
+    display: inline;
+  }
+}
+
+/* Syllabus "✎ edit" is revealed on row hover; touch screens have no hover,
+ * so show it outright there or chapter editing can't be found. */
+@media (hover: none) {
+  .cb-syllabus-edit {
+    opacity: 1 !important;
+  }
+}

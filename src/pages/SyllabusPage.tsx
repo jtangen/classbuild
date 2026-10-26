@@ -202,7 +202,13 @@ export function SyllabusPage() {
   };
 
   // ─── Derived state ──────────────────────────────────────────────────
-  const totalChapters = Math.max(setup.numChapters || 12, partialChapters.length);
+  // A drafted syllabus counts its own chapters. Setup's Length only sets how
+  // many the NEXT draft asks for, so moving the slider afterwards (or Setup
+  // clamping an imported 2-chapter course to 3) must not add empty rows or
+  // hide real chapters here. While drafting, it sizes the skeleton.
+  const totalChapters = syllabus
+    ? syllabus.chapters.length
+    : Math.max(setup.numChapters || 12, partialChapters.length);
   const displayChapters: ChapterSyllabus[] = syllabus?.chapters ?? partialChapters;
   const displayTitle = syllabus?.courseTitle || partialTitle;
   const displayOverview = syllabus?.courseOverview || partialOverview;
@@ -1055,7 +1061,9 @@ function DraftedSlot({
             onClick={beginEdit}
             onFocus={() => setEditFocused(true)}
             onBlur={() => setEditFocused(false)}
-            className="cb-focus"
+            // cb-syllabus-edit: index.css shows it outright on touch screens,
+            // which have no hover to reveal it.
+            className="cb-focus cb-syllabus-edit"
             aria-label={`Edit “${title}”`}
             style={{
               background: 'transparent',

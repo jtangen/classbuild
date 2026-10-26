@@ -90,7 +90,13 @@ export function ResearchPage() {
     completeStage,
   } = useCourseStore();
   const { claudeApiKey } = useApiStore();
-  const { setActiveTab } = useUiStore();
+  const { setActiveTab, setOpenKeysOnNextSetupVisit } = useUiStore();
+  const hasKey = claudeApiKey.trim().length > 0;
+  // The keys modal lives on Setup; ask it to open on arrival.
+  const addKey = () => {
+    setOpenKeysOnNextSetupVisit(true);
+    navigate('/setup');
+  };
   const [currentChapter, setCurrentChapter] = useState(0);
   const [chapterStates, setChapterStates] = useState<
     Record<number, ChapterResearchState>
@@ -128,6 +134,9 @@ export function ResearchPage() {
   const researchChapter = useCallback(
     async (chapterIndex: number) => {
       if (!syllabus) return;
+      // No key, no call: without one the request can only fail (and used to
+      // report "API key rejected"). The panel offers "Add Anthropic key →".
+      if (!claudeApiKey.trim()) return;
       const chapter = syllabus.chapters[chapterIndex];
       if (!chapter) return;
       const chapterNum = chapter.number;
@@ -338,17 +347,10 @@ export function ResearchPage() {
     navigate('/build');
   };
 
+  // Selecting only shows the chapter. Research (a paid web search) starts
+  // from the panel's "Start research", never from a click in the list.
   const handleSelectChapter = (chapterIndex: number) => {
-    if (!syllabus) return;
     setCurrentChapter(chapterIndex);
-    const chapter = syllabus.chapters[chapterIndex];
-    const hasDossier = researchDossiers.some(
-      (d) => d.chapterNumber === chapter.number,
-    );
-    const isActive = researchingSet.has(chapter.number);
-    if (!hasDossier && !isActive) {
-      void researchChapter(chapterIndex);
-    }
   };
 
   if (!syllabus) {
@@ -399,6 +401,9 @@ export function ResearchPage() {
   const currentState =
     chapterStates[currentChapterNum] ?? emptyResearchState;
   const isCurrentResearching = researchingSet.has(currentChapterNum);
+  // While a "Research all" run is going, unresearched chapters are genuinely
+  // queued; otherwise they're simply not researched.
+  const researchAllActive = isInFlight(RESEARCH_ALL_KEY);
 
   return (
     <div
@@ -419,6 +424,8 @@ export function ResearchPage() {
           canProceed={completedCount > 0 || (!isResearching && remainingCount > 0)}
           showSkip={completedCount === 0 && !isResearching}
           showResearchAll={unresearchedCount > 1}
+          needsKey={!hasKey && unresearchedCount > 0}
+          onAddKey={addKey}
         />
 
         <div
@@ -441,6 +448,7 @@ export function ResearchPage() {
               isResearching: researchingSet.has(c.number),
             }))}
             currentIndex={currentChapter}
+            queued={researchAllActive}
             onSelect={handleSelectChapter}
           />
 
@@ -451,7 +459,10 @@ export function ResearchPage() {
             dossier={currentDossier}
             state={currentState}
             isResearching={isCurrentResearching}
+            queued={researchAllActive}
+            hasKey={hasKey}
             onStart={() => void researchChapter(currentChapter)}
+            onAddKey={addKey}
           />
         </div>
 
@@ -473,6 +484,8 @@ function PageHeader({
   canProceed,
   showSkip,
   showResearchAll,
+  needsKey,
+  onAddKey,
 }: {
   completed: number;
   total: number;
@@ -483,6 +496,9 @@ function PageHeader({
   canProceed: boolean;
   showSkip: boolean;
   showResearchAll: boolean;
+  /** Chapters are left to research but there's no Anthropic key. */
+  needsKey: boolean;
+  onAddKey: () => void;
 }) {
   const progress = isResearching
     ? `Researching · ${completed} of ${total} chapters complete.`
@@ -560,15 +576,21 @@ function PageHeader({
             Skip research
           </CodexButton>
         )}
-        {showResearchAll && (
-          <CodexButton
-            variant="secondary"
-            size="sm"
-            onClick={onResearchAll}
-            disabled={isResearching}
-          >
-            Research all remaining
+        {needsKey ? (
+          <CodexButton variant="secondary" size="sm" onClick={onAddKey}>
+            Add Anthropic key →
           </CodexButton>
+        ) : (
+          showResearchAll && (
+            <CodexButton
+              variant="secondary"
+              size="sm"
+              onClick={onResearchAll}
+              disabled={isResearching}
+            >
+              Research all remaining
+            </CodexButton>
+          )
         )}
         <CodexButton
           variant="primary"
@@ -600,10 +622,13 @@ interface DossierListItem {
 function DossierList({
   chapters,
   currentIndex,
+  queued,
   onSelect,
 }: {
   chapters: DossierListItem[];
   currentIndex: number;
+  /** A "Research all" run is going — unresearched chapters are queued. */
+  queued: boolean;
   onSelect: (i: number) => void;
 }) {
   return (
@@ -625,6 +650,7 @@ function DossierList({
             key={c.number}
             item={c}
             selected={c.index === currentIndex}
+            queued={queued}
             onClick={() => onSelect(c.index)}
           />
         ))}
@@ -636,10 +662,12 @@ function DossierList({
 function DossierCard({
   item,
   selected,
+  queued,
   onClick,
 }: {
   item: DossierListItem;
   selected: boolean;
+  queued: boolean;
   onClick: () => void;
 }) {
   const status: 'cited' | 'drafting' | 'queued' = item.dossier
@@ -659,7 +687,11 @@ function DossierCard({
         : `${cited} ${plural('source', cited)} cited`
       : status === 'drafting'
       ? phaseLabel(item.state.phase, evaluated, queries)
-      : 'awaiting';
+      : queued
+      ? 'up next'
+      : 'no dossier yet';
+  // Same words as the panel's badge, so list and panel agree.
+  const badge = status === 'queued' ? notResearchedLabel(queued) : status;
 
   return (
     <button
@@ -755,11 +787,16 @@ function DossierCard({
               : 'neutral'
           }
         >
-          {status}
+          {badge}
         </CodexBadge>
       </div>
     </button>
   );
+}
+
+/** Badge text for a chapter with no dossier and nothing running. */
+function notResearchedLabel(queued: boolean): string {
+  return queued ? 'queued' : 'not researched';
 }
 
 // ─── DossierPanel ────────────────────────────────────────────────────────
@@ -771,8 +808,14 @@ function DossierPanel({
   dossier,
   state,
   isResearching,
+  queued,
+  hasKey,
   onStart,
+  onAddKey,
 }: {
+  queued: boolean;
+  hasKey: boolean;
+  onAddKey: () => void;
   chapterNumber: number;
   chapterTitle: string;
   chapterNarrative: string;
@@ -787,7 +830,9 @@ function DossierPanel({
     ? 'drafting'
     : 'queued';
 
-  const showEmpty = !dossier && !isResearching;
+  // With an error on screen, its own retry is the one call to action — the
+  // empty state's "Start research" beside it doubled up.
+  const showEmpty = !dossier && !isResearching && !state.error;
   const hasQueries = state.searchQueries.length > 0;
   // Cited sources + synthesis render only from a parsed dossier — never from raw
   // streaming output. While the model is mid-stream, the JSON isn't valid yet.
@@ -877,7 +922,7 @@ function DossierPanel({
               ? 'cited · ready'
               : status === 'drafting'
               ? phaseLabel(state.phase, state.webResults.length, state.searchQueries.length)
-              : 'awaiting'}
+              : notResearchedLabel(queued)}
           </CodexBadge>
         </div>
 
@@ -900,7 +945,7 @@ function DossierPanel({
             {!dossier && (
               <button
                 type="button"
-                onClick={onStart}
+                onClick={hasKey ? onStart : onAddKey}
                 disabled={isResearching}
                 className="cb-mono cb-focus"
                 style={{
@@ -917,7 +962,11 @@ function DossierPanel({
                   opacity: isResearching ? 0.5 : 1,
                 }}
               >
-                {isResearching ? 'retrying…' : 'retry research ↻'}
+                {isResearching
+                  ? 'retrying…'
+                  : hasKey
+                  ? 'retry research ↻'
+                  : 'add anthropic key →'}
               </button>
             )}
           </div>
@@ -979,12 +1028,19 @@ function DossierPanel({
                 lineHeight: 1.55,
               }}
             >
-              No research yet for this chapter. ClassBuild will run web searches,
-              cite peer-reviewed sources, and verify DOIs — give it a minute or two.
+              {hasKey
+                ? 'No research yet for this chapter. ClassBuild will run web searches, cite peer-reviewed sources, and verify DOIs — give it a minute or two.'
+                : 'No research yet for this chapter. Research runs web searches with your Anthropic key, and this browser doesn’t have one yet.'}
             </p>
-            <CodexButton variant="primary" size="sm" onClick={onStart}>
-              Start research
-            </CodexButton>
+            {hasKey ? (
+              <CodexButton variant="primary" size="sm" onClick={onStart}>
+                Start research
+              </CodexButton>
+            ) : (
+              <CodexButton variant="primary" size="sm" onClick={onAddKey}>
+                Add Anthropic key →
+              </CodexButton>
+            )}
           </div>
         )}
 

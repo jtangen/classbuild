@@ -89,13 +89,15 @@ export function CodexButton({
     letterSpacing: '0.005em',
     borderRadius: 1.5,
     border: '1px solid transparent',
-    cursor: disabled || loading ? 'default' : 'pointer',
+    cursor: disabled ? 'not-allowed' : loading ? 'progress' : 'pointer',
     transition:
       'background-color var(--cb-duration-2) var(--cb-ease-paper), color var(--cb-duration-2), border-color var(--cb-duration-2)',
     userSelect: 'none',
     whiteSpace: 'nowrap',
     opacity: disabled ? 0.45 : 1,
-    pointerEvents: disabled ? 'none' : 'auto',
+    // No pointer-events:none — a disabled button must still take hover, or
+    // the title tooltips callers attach to explain WHY it's disabled never
+    // show. The native disabled attribute already blocks clicks.
   };
 
   return (

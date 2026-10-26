@@ -1,7 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { idbStorage } from './idbStorage';
+import { useUiStore } from './uiStore';
 import { abortAll } from '../services/abortRegistry';
+
+/**
+ * Everything that must stop or be forgotten when the course is cleared or
+ * replaced: in-flight streams (a stream for the old course would otherwise
+ * write its result into the next), and Build's queued "rebuild materials"
+ * marker, which points at the old course's chapter.
+ */
+export function leaveCourse(): void {
+  abortAll();
+  useUiStore.getState().setRebuildMaterialsFor(null);
+}
 import type {
   CourseSetup,
   Syllabus,
@@ -180,9 +192,7 @@ export const useCourseStore = create<CourseState>()(
         })),
 
       resetDownstream: () => {
-        // Stop in-flight generation first: a stream for the course being
-        // cleared would otherwise write its result into whatever comes next.
-        abortAll();
+        leaveCourse();
         set({
           completedStages: [],
           syllabus: null,
@@ -194,7 +204,7 @@ export const useCourseStore = create<CourseState>()(
       },
 
       reset: () => {
-        abortAll();
+        leaveCourse();
         set({
           currentStage: 'landing',
           completedStages: [],
