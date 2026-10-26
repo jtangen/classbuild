@@ -649,7 +649,7 @@ async function generateInfographic(
     {
       apiKey: ANTHROPIC_API_KEY!,
       model: MODELS.opus,
-      system: buildInfographicMetaPrompt(setup.themeId),
+      system: buildInfographicMetaPrompt(),
       messages: [{
         role: 'user',
         content: buildInfographicMetaUserPrompt(ch.title, ch.keyConcepts, chapterHtml),
