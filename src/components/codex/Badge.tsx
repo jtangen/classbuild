@@ -11,7 +11,7 @@ const TONE: Record<CodexBadgeTone, { fg: string; bg: string }> = {
   neutral: { fg: 'var(--cb-text-muted)', bg: 'transparent' },
   info: { fg: 'var(--cb-status-info)', bg: 'var(--cb-status-info-bg)' },
   success: { fg: 'var(--cb-status-success)', bg: 'var(--cb-status-success-bg)' },
-  warning: { fg: 'var(--cb-status-warning)', bg: 'var(--cb-status-warning-bg)' },
+  warning: { fg: 'var(--cb-status-warning-text)', bg: 'var(--cb-status-warning-bg)' },
   danger: { fg: 'var(--cb-status-danger)', bg: 'var(--cb-status-danger-bg)' },
   emphasis: { fg: 'var(--cb-accent-emphasis)', bg: 'var(--cb-accent-emphasis-quiet)' },
 };

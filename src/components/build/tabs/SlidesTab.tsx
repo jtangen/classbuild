@@ -10,6 +10,7 @@ import {
   KeyRequiredEmpty,
   DiscoveryHint,
 } from '../artifactHelpers';
+import { ArtifactShell } from '../ArtifactShell';
 
 export interface SlidesTabProps {
   slides: SlideData[];
@@ -31,8 +32,12 @@ export interface SlidesTabProps {
   editedSlidePrompts: Record<number, string>;
   onSlidePromptDraftChange: (slideIndex: number, text: string) => void;
   onSlidePromptDraftReset: (slideIndex: number) => void;
+  /** Slide of *this* deck currently rendering, if any. */
   refiningSlideIdx: number | null;
-  slideRefineError: string | null;
+  /** A slide in another chapter's deck is rendering (single render at a time). */
+  slideRefineBusyElsewhere?: boolean;
+  /** Last refine failure in this deck, tied to its slide. */
+  slideRefineError: { idx: number; message: string } | null;
   onRefineSlide: (slideIndex: number) => void;
 }
 
@@ -54,6 +59,7 @@ export function SlidesTab(props: SlidesTabProps) {
     onSlidePromptDraftChange,
     onSlidePromptDraftReset,
     refiningSlideIdx,
+    slideRefineBusyElsewhere,
     slideRefineError,
     onRefineSlide,
   } = props;
@@ -99,8 +105,11 @@ export function SlidesTab(props: SlidesTabProps) {
   const renderedCount = slides.filter((s) => s.imageDataUri).length;
   const allRendered = renderedCount > 0 && renderedCount === slides.length;
 
+  const showSessionNote = hasOpenAiKey && !slidesRender && renderedCount < slides.length;
+  const showRenderProgress = isMyRender && slidesRender!.phase === 'rendering';
+
   return (
-    <div className="space-y-4">
+    <div style={{ display: 'grid', gap: 16 }}>
       {!hasOpenAiKey && (
         <KeyMissingBanner
           tone="recommended"
@@ -121,114 +130,115 @@ export function SlidesTab(props: SlidesTabProps) {
           onDismiss={onDismissImageHint}
         />
       )}
-      <div className="bg-cb-ground-page border border-cb-border-default rounded-xl p-6 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-cb-accent-emphasis-quiet flex items-center justify-center">
-            <svg className="w-6 h-6 text-cb-accent-emphasis" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="3" width="20" height="14" rx="2" ry="2" />
-              <line x1="8" y1="21" x2="16" y2="21" />
-              <line x1="12" y1="17" x2="12" y2="21" />
-            </svg>
-          </div>
-          <div>
-            <p className="text-sm font-semibold">{slides.length} slides with speaker notes</p>
-            <p className="text-xs text-cb-text-muted mt-0.5">Each slide rendered as a 4K editorial image via gpt-image-2</p>
-          </div>
-        </div>
-        <Button
-          disabled={!hasOpenAiKey || slidesRender !== null}
-          title={
-            !hasOpenAiKey
-              ? 'Add an OpenAI API key in Setup to render slides.'
+      <ArtifactShell
+        kicker="Slides"
+        title={`${slides.length} slides with speaker notes`}
+        meta="Each slide renders as a 4K editorial image through gpt-image-2."
+        actions={
+          <Button
+            size="sm"
+            disabled={!hasOpenAiKey || slidesRender !== null}
+            title={
+              !hasOpenAiKey
+                ? 'Add an OpenAI API key in Setup to render slides.'
+                : someoneElseRendering
+                ? `Another deck (Class ${slidesRender!.chapterNum}) is rendering. Please wait.`
+                : undefined
+            }
+            onClick={onDownloadDeck}
+          >
+            {isMyRender
+              ? slidesRender!.phase === 'packing'
+                ? 'Packing deck…'
+                : `Rendering ${slidesRender!.current} / ${slidesRender!.total} …`
               : someoneElseRendering
-              ? `Another deck (Class ${slidesRender!.chapterNum}) is rendering. Please wait.`
-              : undefined
-          }
-          onClick={onDownloadDeck}
-        >
-          {isMyRender ? (
-            slidesRender!.phase === 'packing'
-              ? 'Packing deck…'
-              : `Rendering ${slidesRender!.current} / ${slidesRender!.total} …`
-          ) : someoneElseRendering ? (
-            `Class ${slidesRender!.chapterNum} rendering · ${slidesRender!.current}/${slidesRender!.total}`
-          ) : (
-            <>
-              <svg
-                className="mr-1.5 w-4 h-4"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              ? `Class ${slidesRender!.chapterNum} rendering · ${slidesRender!.current}/${slidesRender!.total}`
+              : allRendered
+              ? 'Re-download .pptx ↓'
+              : 'Download .pptx ↓'}
+          </Button>
+        }
+        bodyless
+      >
+        {(showSessionNote || showRenderProgress) && (
+          <div style={{ padding: '14px 20px 0' }}>
+            {showSessionNote && (
+              <p
+                className="cb-italic"
+                style={{ margin: 0, fontSize: 12.5, lineHeight: 1.55, color: 'var(--cb-text-muted)' }}
               >
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="7 10 12 15 17 10" />
-                <line x1="12" y1="15" x2="12" y2="3" />
-              </svg>
-              {allRendered ? 'Re-download .pptx' : 'Download .pptx'}
-            </>
-          )}
-        </Button>
-      </div>
+                {renderedCount === 0
+                  ? `No slide images in this session — rendered images aren't kept across reloads (titles, notes, and image prompts are). Downloading the deck renders all ${slides.length} images on your OpenAI key, ≈ 30–60s each.`
+                  : `${renderedCount} of ${slides.length} slide images are rendered in this session — downloading the deck renders the rest on your OpenAI key.`}
+              </p>
+            )}
+            {showRenderProgress && (
+              <div
+                style={{
+                  padding: '12px 16px',
+                  border: '0.5px solid var(--cb-border-default)',
+                  background: 'var(--cb-ground-canvas)',
+                  borderRadius: 2,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                }}
+              >
+                <div
+                  className="cb-mono"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'baseline',
+                    gap: 12,
+                    fontSize: 11.5,
+                    color: 'var(--cb-text-muted)',
+                    letterSpacing: '0.06em',
+                  }}
+                >
+                  <span>rendering slide images · gpt-image-2 · 4K</span>
+                  <span>{slidesRender!.current} of {slidesRender!.total}</span>
+                </div>
+                <div style={{ height: 2, background: 'var(--cb-border-default)', overflow: 'hidden' }}>
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${(slidesRender!.current / Math.max(1, slidesRender!.total)) * 100}%`,
+                      background: 'var(--cb-accent-emphasis)',
+                      transition: 'width 320ms cubic-bezier(0.32,0.04,0.32,1)',
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-      {hasOpenAiKey && !slidesRender && renderedCount < slides.length && (
-        <p className="m-0 text-[12.5px] italic text-cb-text-muted leading-relaxed">
-          {renderedCount === 0
-            ? `No slide images in this session — rendered images aren't kept across reloads (titles, notes, and image prompts are). Downloading the deck renders all ${slides.length} images on your OpenAI key, ≈ 30–60s each.`
-            : `${renderedCount} of ${slides.length} slide images are rendered in this session — downloading the deck renders the rest on your OpenAI key.`}
-        </p>
-      )}
-
-      {isMyRender && slidesRender!.phase === 'rendering' && (
-        <div
-          style={{
-            padding: '12px 16px',
-            border: '0.5px solid var(--cb-border-default)',
-            background: 'var(--cb-ground-canvas)',
-            borderRadius: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 8,
-          }}
-        >
+        <div style={{ padding: '14px 20px 18px' }}>
           <div
+            className="cb-sc"
+            style={{ fontSize: 11.5, letterSpacing: '0.12em', color: 'var(--cb-text-muted)', marginBottom: 8 }}
+          >
+            Speaker notes
+          </div>
+          <ol
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'baseline',
-              fontFamily: 'var(--font-cb-mono)',
-              fontSize: 11.5,
-              color: 'var(--cb-text-muted)',
-              letterSpacing: '0.06em',
+              listStyle: 'none',
+              margin: 0,
+              padding: 0,
+              border: '0.5px solid var(--cb-border-default)',
+              borderRadius: 2,
             }}
           >
-            <span>rendering slide images · gpt-image-2 · 4K</span>
-            <span>{slidesRender!.current} of {slidesRender!.total}</span>
-          </div>
-          <div style={{ height: 2, background: 'var(--cb-border-default)', overflow: 'hidden' }}>
-            <div
-              style={{
-                height: '100%',
-                width: `${(slidesRender!.current / Math.max(1, slidesRender!.total)) * 100}%`,
-                background: 'var(--cb-accent-emphasis)',
-                transition: 'width 320ms cubic-bezier(0.32,0.04,0.32,1)',
-              }}
-            />
-          </div>
-        </div>
-      )}
-
-      <div>
-        <h3 className="text-xs font-medium text-cb-text-muted uppercase tracking-wider mb-3">Speaker Notes</h3>
-        <div className="space-y-1">
           {slides.map((slide, i) => {
             const isExpanded = expandedSlideNotes.has(i);
             const hasNotes = !!slide.speakerNotes;
             return (
-              <div key={i} className="border border-cb-border-default rounded-lg overflow-hidden">
+              <li key={i} style={{ borderTop: i === 0 ? 'none' : '0.5px solid var(--cb-border-default)' }}>
                 <button
+                  type="button"
+                  disabled={!hasNotes}
+                  aria-expanded={hasNotes ? isExpanded : undefined}
                   onClick={() => {
                     if (!hasNotes) return;
                     setExpandedSlideNotes((prev) => {
@@ -238,26 +248,85 @@ export function SlidesTab(props: SlidesTabProps) {
                       return next;
                     });
                   }}
-                  className={`w-full flex items-center gap-3 px-4 py-3 text-left bg-transparent border-0 transition-colors ${
-                    hasNotes ? 'cursor-pointer hover:bg-cb-accent-emphasis-quiet' : 'cursor-default opacity-60'
-                  }`}
+                  className="cb-focus"
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '10px 14px',
+                    textAlign: 'left',
+                    background: 'transparent',
+                    border: 0,
+                    fontFamily: 'inherit',
+                    color: 'var(--cb-text-default)',
+                    cursor: hasNotes ? 'pointer' : 'default',
+                    opacity: hasNotes ? 1 : 0.6,
+                    transition: 'background-color 160ms ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (hasNotes) e.currentTarget.style.background = 'var(--cb-accent-emphasis-quiet)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
                 >
-                  <span className="text-xs text-cb-text-muted font-mono w-5 shrink-0 text-right">{i + 1}</span>
+                  <span
+                    className="cb-mono"
+                    style={{ fontSize: 12, color: 'var(--cb-text-muted)', width: 20, textAlign: 'right', flexShrink: 0 }}
+                  >
+                    {i + 1}
+                  </span>
                   <span
                     aria-hidden
-                    className="w-11 h-[25px] shrink-0 rounded-[2px] border border-cb-border-default overflow-hidden bg-cb-surface-sunken flex items-center justify-center"
+                    style={{
+                      width: 44,
+                      height: 25,
+                      flexShrink: 0,
+                      border: '0.5px solid var(--cb-border-default)',
+                      borderRadius: 2,
+                      overflow: 'hidden',
+                      background: 'var(--cb-surface-sunken)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
                   >
                     {slide.imageDataUri ? (
-                      <img src={slide.imageDataUri} alt="" className="w-full h-full object-cover" />
+                      <img src={slide.imageDataUri} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                     ) : (
-                      <span className="block w-5 h-px bg-cb-border-default" />
+                      <span style={{ display: 'block', width: 20, height: 1, background: 'var(--cb-border-default)' }} />
                     )}
                   </span>
-                  <span className="text-sm text-cb-text-default truncate flex-1">{slide.title}</span>
+                  <span
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      fontSize: 14.5,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {slide.title}
+                  </span>
                   {hasNotes && (
                     <svg
-                      className={`w-3.5 h-3.5 text-cb-text-muted shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-                      viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                      aria-hidden
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      style={{
+                        flexShrink: 0,
+                        color: 'var(--cb-text-muted)',
+                        transform: isExpanded ? 'rotate(180deg)' : 'none',
+                        transition: 'transform 160ms ease',
+                      }}
                     >
                       <polyline points="6 9 12 15 18 9" />
                     </svg>
@@ -270,10 +339,12 @@ export function SlidesTab(props: SlidesTabProps) {
                       animate={{ height: 'auto', opacity: 1 }}
                       exit={{ height: 0, opacity: 0 }}
                       transition={{ duration: 0.2 }}
-                      className="overflow-hidden"
+                      style={{ overflow: 'hidden' }}
                     >
-                      <div className="px-4 pb-4 pl-12">
-                        <p className="text-sm text-cb-text-default leading-relaxed whitespace-pre-line">{slide.speakerNotes}</p>
+                      <div className="pl-3.5 sm:pl-[46px]" style={{ paddingTop: 2, paddingRight: 14, paddingBottom: 16 }}>
+                        <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, whiteSpace: 'pre-line' }}>
+                          {slide.speakerNotes}
+                        </p>
                         <SlideImageRefine
                           slide={slide}
                           slideIndex={i}
@@ -282,20 +353,23 @@ export function SlidesTab(props: SlidesTabProps) {
                           onResetDraft={() => onSlidePromptDraftReset(i)}
                           onRefine={() => onRefineSlide(i)}
                           isRefining={refiningSlideIdx === i}
-                          anyRefining={refiningSlideIdx !== null}
+                          anyRefining={refiningSlideIdx !== null || !!slideRefineBusyElsewhere}
                           hasOpenAiKey={hasOpenAiKey}
-                          error={refiningSlideIdx === i ? slideRefineError : null}
+                          // Keyed by slide, not by "is rendering": the render
+                          // has finished by the time its error exists.
+                          error={slideRefineError?.idx === i ? slideRefineError.message : null}
                           onAddKey={onAddKey}
                         />
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </div>
+              </li>
             );
           })}
+          </ol>
         </div>
-      </div>
+      </ArtifactShell>
     </div>
   );
 }
@@ -329,7 +403,8 @@ function SlideImageRefine({
   error: string | null;
   onAddKey: () => void;
 }) {
-  const currentPrompt = slide.imagePrompt ?? '';
+  // Guarded: a malformed reply can carry a non-string here, and .trim() below would throw.
+  const currentPrompt = typeof slide.imagePrompt === 'string' ? slide.imagePrompt : '';
   const value = draft ?? currentPrompt;
   const hasEdit = draft !== undefined && draft !== currentPrompt;
   const trimmed = value.trim();
@@ -340,8 +415,9 @@ function SlideImageRefine({
         marginTop: 16,
         paddingTop: 14,
         borderTop: '0.5px solid var(--cb-border-default)',
+        // Thumbnail beside the prompt when there's room; stacked on a phone.
         display: 'grid',
-        gridTemplateColumns: slide.imageDataUri ? '180px 1fr' : '1fr',
+        gridTemplateColumns: slide.imageDataUri ? 'repeat(auto-fit, minmax(180px, 1fr))' : '1fr',
         gap: 16,
         alignItems: 'start',
       }}

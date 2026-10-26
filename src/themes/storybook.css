@@ -120,7 +120,7 @@
   font-weight: 400;
   font-size: 22px;
   margin: 24px 0 8px;
-  color: #4a8a6f;
+  color: #437d64;
 }
 
 /* KEY TERMS */
@@ -133,7 +133,7 @@
 
 /* CALLOUT */
 .theme-storybook .ch-callout {
-  background: #d94f4f;
+  background: #c54848;
   color: #fff8e7;
   padding: 22px 26px;
   margin: 26px 0;
@@ -154,7 +154,7 @@
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #f4c645;
+  color: #fef8e7;
   margin-bottom: 8px;
   font-weight: 500;
   position: relative;
@@ -184,7 +184,7 @@
 
 /* WIDGET */
 .theme-storybook .ch-widget {
-  background: #4a8a6f;
+  background: #437d64;
   color: #fff8e7;
   padding: 24px 26px;
   margin: 26px 0;
@@ -199,7 +199,7 @@
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #f4c645;
+  color: #fdf7e5;
   display: block;
   margin-bottom: 4px;
   font-weight: 500;
@@ -212,7 +212,7 @@
 }
 .theme-storybook .ch-widget-sub {
   margin: 0 0 16px;
-  color: rgba(255, 248, 231, 0.85);
+  color: #fff8e7;
   font-size: 14.5px;
 }
 .theme-storybook .ch-widget-row {
@@ -226,7 +226,7 @@
   font-size: 10.5px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #f4c645;
+  color: #fdf7e5;
 }
 .theme-storybook .ch-widget-select {
   background: #fff8e7;
@@ -273,7 +273,7 @@
   font-weight: 400;
   text-align: right;
   font-size: 18px;
-  color: #f4c645;
+  color: #fdf7e5;
 }
 .theme-storybook .ch-widget-btn {
   background: #f4c645;
@@ -322,7 +322,7 @@
   font-size: 11px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: #d94f4f;
+  color: #c54848;
   font-weight: 700;
   margin-right: 8px;
 }
@@ -347,7 +347,7 @@
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: #d94f4f;
+  color: #c54848;
   font-weight: 500;
 }
 
@@ -422,7 +422,7 @@
   font-size: 11px;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  color: #d94f4f;
+  color: #c54848;
   margin-bottom: 8px;
   font-weight: 500;
   background: #fff8e7;
@@ -451,7 +451,7 @@
   font-size: 11px;
   letter-spacing: 0.2em;
   text-transform: uppercase;
-  color: #d94f4f;
+  color: #c54848;
   margin: 0 0 10px;
   padding: 0;
   font-weight: 500;
@@ -486,4 +486,11 @@
   font-family: 'DM Serif Display', serif;
   font-size: 20px;
   font-style: italic;
+}
+
+/* PHONE: the header band bleeds exactly to the edges under the shared phone
+   block's 18px side padding (its desktop bleed of 28px would overflow). */
+@media (max-width: 600px) {
+  .theme-storybook .ch-head { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
+  .theme-storybook .ch-head::after { left: 18px; }
 }

@@ -1,11 +1,14 @@
+import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../codex';
+import { useDialogFocus } from './useDialogFocus';
 
 /**
  * Drawer that slides in from the right when the user clicks a chapter image.
  * Shows a thumbnail of the current render, the original prompt (editable when
  * an OpenAI key is present, read-only otherwise), and a Regenerate button that
- * re-runs gpt-image-2 against just this one image.
+ * re-runs gpt-image-2 against just this one image. A figure whose render
+ * failed (src null) opens it too, to try again.
  */
 export function ChapterImageRefineDrawer({
   state,
@@ -18,7 +21,7 @@ export function ChapterImageRefineDrawer({
   error,
   onAddKey,
 }: {
-  state: { idx: number; prompt: string; aspect: string; src: string } | null;
+  state: { idx: number; prompt: string; aspect: string; src: string | null } | null;
   draft: string;
   onDraftChange: (text: string) => void;
   onClose: () => void;
@@ -28,6 +31,23 @@ export function ChapterImageRefineDrawer({
   error: string | null;
   onAddKey: () => void;
 }) {
+  // Esc closes it, as the shortcuts overlay promises. Safe mid-render: the
+  // render keeps going and the image swaps in when done.
+  const open = state !== null;
+  // Focus lands in the prompt (or the panel while it's disabled mid-render),
+  // Tab stays inside, and closing hands focus back to the reading.
+  const panelRef = useRef<HTMLElement>(null);
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  useDialogFocus(open, panelRef, promptRef);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   return (
     <AnimatePresence>
       {state && (
@@ -47,13 +67,19 @@ export function ChapterImageRefineDrawer({
               position: 'fixed',
               inset: 0,
               background: 'rgba(20, 17, 13, 0.36)',
-              zIndex: 40,
+              // Above the app header (50), like the shortcuts overlay.
+              zIndex: 60,
               cursor: 'pointer',
               pointerEvents: isRefining ? 'none' : 'auto',
             }}
           />
           <motion.aside
             key="drawer"
+            ref={panelRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cb-figure-refine-title"
+            tabIndex={-1}
             initial={{ x: 480, opacity: 0 }}
             animate={{ x: 0, opacity: 1 }}
             exit={{ x: 480, opacity: 0 }}
@@ -67,7 +93,8 @@ export function ChapterImageRefineDrawer({
               background: 'var(--cb-ground-page)',
               borderLeft: '1px solid var(--cb-border-default)',
               boxShadow: '-12px 0 36px rgba(20,17,13,0.16)',
-              zIndex: 41,
+              zIndex: 61,
+              outline: 'none',
               display: 'flex',
               flexDirection: 'column',
               fontFamily: 'var(--font-cb-serif)',
@@ -92,9 +119,10 @@ export function ChapterImageRefineDrawer({
                     marginBottom: 4,
                   }}
                 >
-                  Refine image
+                  {state.src ? 'Refine image' : 'Image not drawn'}
                 </div>
                 <h2
+                  id="cb-figure-refine-title"
                   style={{
                     margin: 0,
                     fontSize: 22,
@@ -108,8 +136,10 @@ export function ChapterImageRefineDrawer({
                 </h2>
               </div>
               <button
+                type="button"
                 onClick={onClose}
                 aria-label="Close"
+                className="cb-focus pointer-coarse:min-h-11 pointer-coarse:min-w-11"
                 style={{
                   background: 'none',
                   border: 0,
@@ -135,19 +165,35 @@ export function ChapterImageRefineDrawer({
                   background: 'var(--cb-surface-sunken)',
                 }}
               >
-                <img
-                  src={state.src}
-                  alt={`Figure ${state.idx + 1} current render`}
-                  style={{
-                    display: 'block',
-                    width: '100%',
-                    height: 'auto',
-                    maxHeight: 280,
-                    objectFit: 'contain',
-                    opacity: isRefining ? 0.4 : 1,
-                    transition: 'opacity 240ms ease',
-                  }}
-                />
+                {state.src ? (
+                  <img
+                    src={state.src}
+                    alt={`Figure ${state.idx + 1} current render`}
+                    style={{
+                      display: 'block',
+                      width: '100%',
+                      height: 'auto',
+                      maxHeight: 280,
+                      objectFit: 'contain',
+                      opacity: isRefining ? 0.4 : 1,
+                      transition: 'opacity 240ms ease',
+                    }}
+                  />
+                ) : (
+                  <p
+                    className="cb-italic"
+                    style={{
+                      margin: 0,
+                      padding: '28px 16px',
+                      textAlign: 'center',
+                      fontSize: 13.5,
+                      lineHeight: 1.5,
+                      color: 'var(--cb-text-muted)',
+                    }}
+                  >
+                    This figure couldn't be drawn the first time.
+                  </p>
+                )}
               </div>
 
               <div
@@ -184,6 +230,8 @@ export function ChapterImageRefineDrawer({
                 )}
               </div>
               <textarea
+                ref={promptRef}
+                aria-label="Image prompt"
                 value={draft}
                 onChange={(e) => onDraftChange(e.target.value)}
                 readOnly={!hasOpenAiKey}
@@ -216,8 +264,8 @@ export function ChapterImageRefineDrawer({
                     lineHeight: 1.5,
                   }}
                 >
-                  This is the prompt that built the image above. Add an OpenAI key
-                  to edit it and regenerate just this one figure.
+                  {state.src ? 'This is the prompt that built the image above.' : "This is the figure's prompt."}{' '}
+                  Add an OpenAI key to edit it and draw just this one figure.
                 </p>
               )}
 
@@ -277,7 +325,7 @@ export function ChapterImageRefineDrawer({
                   onClick={onRefine}
                   disabled={isRefining || !draft.trim()}
                 >
-                  {isRefining ? 'Rendering…' : 'Regenerate ↻'}
+                  {isRefining ? 'Rendering…' : state.src ? 'Regenerate ↻' : 'Try again ↻'}
                 </Button>
               )}
             </footer>

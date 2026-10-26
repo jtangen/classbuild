@@ -11,14 +11,19 @@ import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
 import { streamMessage } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
+import { beginAbortable, endAbortable, isInFlight } from '../services/abortRegistry';
 import {
   buildSyllabusPrompt,
+  isBriefReady,
   parseSyllabusResponse,
   parsePartialChapters,
 } from '../prompts/syllabus';
 import type { ChapterSyllabus, WidgetSpec } from '../types/course';
-import { friendlyError } from '../utils/errors';
+import { friendlyError, isAbortError } from '../utils/errors';
 import { CodexButton, CodexInput, CodexTextarea, CodexModal } from '../components/codex';
+
+/** Abort-registry key for the syllabus stream (one at a time). */
+const SYLLABUS_ABORT_KEY = 'syllabus';
 
 const ROMAN_UPPER = [
   'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
@@ -36,6 +41,7 @@ export function SyllabusPage() {
     updateSyllabusChapter,
     syllabusConversation,
     addSyllabusMessage,
+    clearSyllabusConversation,
     setStage,
     completeStage,
     chapters,
@@ -43,7 +49,7 @@ export function SyllabusPage() {
     resetDownstream,
   } = useCourseStore();
   const { claudeApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, error, setError } = useUiStore();
+  const { isGenerating, setIsGenerating, error, setError, setOpenKeysOnNextSetupVisit } = useUiStore();
 
   const [isThinking, setIsThinking] = useState(false);
   const [partialChapters, setPartialChapters] = useState<ChapterSyllabus[]>([]);
@@ -58,6 +64,23 @@ export function SyllabusPage() {
 
   const generateSyllabus = useCallback(
     async (feedbackText?: string) => {
+      // No brief, no paid call: an Opus draft of an empty topic is a junk
+      // syllabus (reached via browser Back after "+ new course", a stale tab,
+      // a bookmarked /syllabus). Send the user to write the brief instead.
+      if (!isBriefReady(setup)) {
+        navigate('/setup', { replace: true });
+        return;
+      }
+      if (!claudeApiKey.trim()) {
+        setOpenKeysOnNextSetupVisit(true);
+        navigate('/setup', { replace: true });
+        return;
+      }
+      // Registered so "Begin again", a regenerate, or a course reset/restore
+      // (abortAll) cancels this stream instead of letting it land the old
+      // brief's syllabus in the new course.
+      const controller = beginAbortable(SYLLABUS_ABORT_KEY);
+      const { signal } = controller;
       setIsGenerating(true);
       setIsThinking(true);
       setPartialChapters([]);
@@ -70,24 +93,22 @@ export function SyllabusPage() {
       fullTextRef.current = '';
 
       try {
-        const { systemPrompt, userMessage } = buildSyllabusPrompt(
-          setup,
-          feedbackText,
-          syllabusConversation,
-        );
+        const { systemPrompt, userMessage } = buildSyllabusPrompt(setup, feedbackText);
+
+        // A refine replays the conversation behind the original brief, so the
+        // model still sees the topic, audience and exclusions it designed
+        // against (and the history opens on a user turn, as the API requires).
+        // A fresh generation starts a new conversation.
+        const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
+        if (feedbackText && syllabusConversation.length > 0) {
+          messages.push({ role: 'user', content: buildSyllabusPrompt(setup).userMessage });
+          messages.push(...syllabusConversation);
+        } else {
+          clearSyllabusConversation();
+        }
+        messages.push({ role: 'user', content: userMessage });
 
         if (feedbackText) addSyllabusMessage('user', feedbackText);
-
-        const messages =
-          feedbackText && syllabusConversation.length > 0
-            ? [
-                ...syllabusConversation.map((m) => ({
-                  role: m.role as 'user' | 'assistant',
-                  content: m.content,
-                })),
-                { role: 'user' as const, content: userMessage },
-              ]
-            : [{ role: 'user' as const, content: userMessage }];
 
         const fullText = await streamMessage(
           {
@@ -95,12 +116,13 @@ export function SyllabusPage() {
             model: MODELS.opus,
             system: systemPrompt,
             messages,
-            // 'high' (not 'max'): on Opus 4.8 the effort levels were
+            // 'high' (not 'max'): since Opus 4.8 the effort levels were
             // recalibrated and 'max' overthinks — it stalled ~7 min before the
             // first token. 'high' matches the (fast) chapter build and is the
             // recommended floor for intelligence-sensitive work.
             thinkingBudget: 'high',
             maxTokens: 16000,
+            signal,
           },
           {
             onText: (text) => {
@@ -114,9 +136,11 @@ export function SyllabusPage() {
               }
             },
             onThinking: (text) => setThinkingText((prev) => prev + text),
-            onError: (err) => setError(err.message),
+            // No onError: the catch below sets the user-facing message (and
+            // stays silent for a cancel).
           },
         );
+        if (signal.aborted) return;
 
         addSyllabusMessage('assistant', fullText);
         const parsed = parseSyllabusResponse(fullText);
@@ -130,11 +154,17 @@ export function SyllabusPage() {
           );
         }
       } catch (err) {
+        if (signal.aborted || isAbortError(err)) return;
         setError(friendlyError(err, 'Syllabus generation failed.'));
       } finally {
-        setIsGenerating(false);
-        // Collapse thinking once we leave the thinking phase.
-        setIsThinking(false);
+        endAbortable(SYLLABUS_ABORT_KEY, controller);
+        // A superseding run owns the flags now; only the last one out (or a
+        // run cancelled by a course reset) clears them.
+        if (!isInFlight(SYLLABUS_ABORT_KEY)) {
+          setIsGenerating(false);
+          // Collapse thinking once we leave the thinking phase.
+          setIsThinking(false);
+        }
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,7 +172,10 @@ export function SyllabusPage() {
   );
 
   useEffect(() => {
-    if (!syllabus && !isGenerating && claudeApiKey && !generationStarted.current) {
+    // The registry, not isGenerating: right after "Begin again" aborts a
+    // running draft, isGenerating is still true until that stream unwinds —
+    // gating on it would skip the new draft entirely.
+    if (!syllabus && !isInFlight(SYLLABUS_ABORT_KEY) && !generationStarted.current) {
       generationStarted.current = true;
       void generateSyllabus();
     }
@@ -169,7 +202,13 @@ export function SyllabusPage() {
   };
 
   // ─── Derived state ──────────────────────────────────────────────────
-  const totalChapters = Math.max(setup.numChapters || 12, partialChapters.length);
+  // A drafted syllabus counts its own chapters. Setup's Length only sets how
+  // many the NEXT draft asks for, so moving the slider afterwards (or Setup
+  // clamping an imported 2-chapter course to 3) must not add empty rows or
+  // hide real chapters here. While drafting, it sizes the skeleton.
+  const totalChapters = syllabus
+    ? syllabus.chapters.length
+    : Math.max(setup.numChapters || 12, partialChapters.length);
   const displayChapters: ChapterSyllabus[] = syllabus?.chapters ?? partialChapters;
   const displayTitle = syllabus?.courseTitle || partialTitle;
   const displayOverview = syllabus?.courseOverview || partialOverview;
@@ -181,6 +220,10 @@ export function SyllabusPage() {
     : isGenerating
     ? 'drafting'
     : 'thinking'; // pre-generation transient — useEffect is about to fire
+
+  // A first draft that failed: no syllabus, nothing running, an error shown.
+  // Without this the page kept its "warming up" trace and disabled buttons.
+  const stalled = !syllabus && !isGenerating && !!error;
 
   const draftedCount = syllabus ? totalChapters : partialChapters.length;
   const activeDraftIndex = syllabus ? -1 : Math.max(0, partialChapters.length - 1);
@@ -202,6 +245,8 @@ export function SyllabusPage() {
       <div style={{ maxWidth: 1180, margin: '0 auto' }}>
         <SyllabusBanner
           phase={phase}
+          busy={isGenerating}
+          stalled={stalled}
           title={displayTitle}
           drafted={draftedCount}
           total={totalChapters}
@@ -260,7 +305,7 @@ export function SyllabusPage() {
           <></>
         </CodexModal>
 
-        {phase === 'thinking' && (
+        {phase === 'thinking' && !stalled && (
           <ThinkingTrace thinkingText={thinkingText} elapsedSec={elapsedSec} />
         )}
 
@@ -401,6 +446,8 @@ function ThinkingTrace({
 
 function SyllabusBanner({
   phase,
+  busy,
+  stalled,
   title,
   drafted,
   total,
@@ -409,6 +456,10 @@ function SyllabusBanner({
   onProceed,
 }: {
   phase: Phase;
+  /** A syllabus stream is running (a regenerate keeps phase 'settled'). */
+  busy: boolean;
+  /** The first draft failed: no syllabus and nothing running. */
+  stalled: boolean;
   title: string;
   drafted: number;
   total: number;
@@ -416,19 +467,26 @@ function SyllabusBanner({
   onRegenerate: () => void;
   onProceed: () => void;
 }) {
-  const progress =
-    phase === 'thinking'
-      ? 'Designing the course architecture…'
-      : phase === 'drafting'
-      ? `Drafting chapter ${Math.min(drafted + 1, total)} of ${total}.`
-      : `${total} ${pluralise('chapter', total)} · syllabus settled.`;
+  const progress = stalled
+    ? 'Drafting stopped. The note below says why.'
+    : phase === 'thinking'
+    ? 'Designing the course architecture…'
+    : phase === 'drafting'
+    ? `Drafting chapter ${Math.min(drafted + 1, total)} of ${total}.`
+    : busy
+    ? 'Redrafting the syllabus…'
+    : `${total} ${pluralise('chapter', total)} · syllabus settled.`;
 
-  const displayTitle =
-    phase === 'thinking' && !title
-      ? 'Drafting your syllabus…'
-      : title || 'Drafting your syllabus…';
+  const displayTitle = stalled && !title
+    ? 'No syllabus yet'
+    : title || 'Drafting your syllabus…';
 
-  const isGenerating = phase !== 'settled';
+  // Buttons follow the real stream state, not the phase. A regenerate keeps
+  // the old syllabus on screen ('settled') while the new one streams, so
+  // phase alone left "Begin research" open mid-redraft; a failed first draft
+  // has no syllabus but nothing running, so phase alone locked "Edit brief".
+  const isGenerating = busy || (phase !== 'settled' && !stalled);
+  const showPen = busy || (phase !== 'settled' && !stalled);
 
   return (
     <header
@@ -477,8 +535,8 @@ function SyllabusBanner({
             color: 'var(--cb-text-muted)',
           }}
         >
-          {phase !== 'settled' && <PenStroke width={48} />}
-          {phase === 'settled' && (
+          {showPen && <PenStroke width={48} />}
+          {!showPen && (
             <span
               style={{ color: 'var(--cb-accent-emphasis)', fontSize: 14.5 }}
             >
@@ -513,7 +571,7 @@ function SyllabusBanner({
           variant="primary"
           size="sm"
           onClick={onProceed}
-          disabled={isGenerating}
+          disabled={isGenerating || phase !== 'settled'}
         >
           {isGenerating ? 'Begin research · drafting…' : 'Begin research →'}
         </CodexButton>
@@ -1003,7 +1061,9 @@ function DraftedSlot({
             onClick={beginEdit}
             onFocus={() => setEditFocused(true)}
             onBlur={() => setEditFocused(false)}
-            className="cb-focus"
+            // cb-syllabus-edit: index.css shows it outright on touch screens,
+            // which have no hover to reveal it.
+            className="cb-focus cb-syllabus-edit"
             aria-label={`Edit “${title}”`}
             style={{
               background: 'transparent',

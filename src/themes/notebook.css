@@ -81,7 +81,7 @@
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10.5px;
   letter-spacing: 0.04em;
-  color: #6b758b;
+  color: #697389;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -236,7 +236,7 @@
   font-size: 10px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #6b758b;
+  color: #697389;
 }
 .theme-notebook .ch-widget-fieldlabel::before { content: '> '; color: #c93b2a; }
 .theme-notebook .ch-widget-select {
@@ -361,7 +361,7 @@
   font-style: normal;
   font-size: 10.5px;
   letter-spacing: 0.06em;
-  color: #6b758b;
+  color: #697389;
 }
 .theme-notebook .ch-quote cite::before { content: '— '; }
 
@@ -471,7 +471,7 @@
   font-family: 'IBM Plex Mono', monospace;
   font-size: 10px;
   letter-spacing: 0.04em;
-  color: #6b758b;
+  color: #697389;
 }
 .theme-notebook .ch-foot-mark {
   color: #c93b2a;
@@ -480,3 +480,11 @@
 }
 .theme-notebook .ch-foot-mark::before { content: '·· '; }
 .theme-notebook .ch-foot-mark::after { content: ' ··'; }
+
+/* PHONE: the shared phone block in wrapChapterHtml narrows the side padding;
+   keep the margin rule clear of the text and drop the punched holes. */
+@media (max-width: 600px) {
+  body.theme-notebook { padding-left: 30px; }
+  .theme-notebook::before { left: 18px; }
+  .theme-notebook::after { display: none; }
+}

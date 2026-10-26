@@ -14,6 +14,7 @@ import type {
   SlideData,
 } from '../../src/types/course';
 import { getTheme } from '../../src/themes';
+import { toScriptJson } from '../../src/templates/htmlEscape';
 
 export interface ChapterPackageData {
   number: number;
@@ -70,7 +71,9 @@ export function buildCoursePackageHtml(
     })),
   };
 
-  const courseDataJson = JSON.stringify(courseData);
+  // Escaped for an inline <script>: a transcript or note containing
+  // "</script>" must not end the script element.
+  const courseDataJson = toScriptJson(courseData);
 
   // Stats
   const totalSources = sorted.reduce((sum, ch) => sum + (ch.research?.sources.length || 0), 0);
@@ -454,11 +457,9 @@ export function buildCoursePackageHtml(
       cursor: pointer;
       padding: 0.2rem 0;
       margin-top: 0.2rem;
-      opacity: 0.8;
-      transition: opacity 0.15s;
     }
 
-    .desc-toggle:hover { opacity: 1; }
+    .desc-toggle:hover { text-decoration: underline; }
 
     /* ── Tab bar ──────────────────────────── */
     .tab-bar {
@@ -959,7 +960,7 @@ export function buildCoursePackageHtml(
           ch.slides.forEach(function(s, i) {
             html += '<div class="card"><span class="card-num">' + (i + 1) + '</span><h3>' + esc(s.title) + '</h3>';
             html += '<img class="slide-thumb" loading="lazy" alt="" src="slides/ch' + (ch.number < 10 ? '0' : '') + ch.number + '/slide-' + ((i + 1) < 10 ? '0' : '') + (i + 1) + '.jpg" onerror="this.style.display=\\'none\\'">';
-            if (s.layout) html += '<span class="badge">' + s.layout + '</span>';
+            if (s.layout) html += '<span class="badge">' + esc(s.layout) + '</span>';
             if (s.bodyText) html += '<p style="margin-top:0.5rem;font-weight:500">' + esc(s.bodyText) + '</p>';
             if (s.bullets && s.bullets.length > 0) {
               html += '<ul>';
@@ -1030,12 +1031,13 @@ export function buildCoursePackageHtml(
         container.appendChild(panel);
       });
 
-      // Escape helper
+      // Escape helper. Quotes too: results also land in attribute values
+      // (alt text, DOI links).
       function esc(s) {
         if (!s) return '';
-        var el = document.createElement('span');
-        el.textContent = s;
-        return el.innerHTML;
+        return String(s).replace(/[&<>"']/g, function(c) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+        });
       }
 
       // Description expand/collapse

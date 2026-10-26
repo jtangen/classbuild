@@ -1,26 +1,28 @@
 # ClassBuild
 
-> AI-powered course generator that takes a topic and produces a complete, ready-to-teach university course — interactive HTML chapters, gamified quizzes, PowerPoint slides, AI-narrated audiobooks, infographics, and teaching packs — all grounded in five evidence-based learning science principles. Built with TypeScript, React 19, Vite 7, and Claude.
+> AI-powered course generator that takes a topic and produces a complete, ready-to-teach university course — interactive HTML chapters, gamified quizzes, image-led PowerPoint slides, narrated audiobooks, infographics, weekly mastery challenges and teaching packs — all grounded in five evidence-based learning science principles. Built with TypeScript, React 19, Vite 7, and Claude.
 
-ClassBuild operates as both a browser app (React + Zustand + Vite at localhost:5173) and a headless CLI (`scripts/generate-course.ts`). API keys are bring-your-own: Anthropic Claude (required), Google Gemini (optional, covers infographics and voice narration via Gemini TTS).
+ClassBuild operates as both a browser app (React + Zustand + Vite at localhost:5173) and a headless CLI (`scripts/generate-course.ts`). API keys are bring-your-own: Anthropic Claude (required), OpenAI (optional — gpt-image-2 figures, slide images and infographics) and ElevenLabs (optional — audiobook narration). In the browser, keys stay in localStorage and go only to their own provider.
 
 ## Architecture
 
 The codebase has two entry points sharing the same generation core:
 
-- **Browser app**: React 19 SPA with Zustand stores (`src/store/`), Tailwind CSS 4, Framer Motion. Pages follow the pipeline stages: Setup, Syllabus, Research, Build, Export.
-- **CLI**: `scripts/generate-course.ts` — headless Node.js script using `tsx`. Runs the same prompt builders and Claude streaming functions without a browser. Supports parallel research (3 chapters concurrently) and parallel material generation per chapter.
+- **Browser app**: React 19 SPA with Zustand stores (`src/store/`), Tailwind CSS 4, Framer Motion. Pages follow the pipeline stages: Setup, Syllabus, Research, Build, Export. Course state persists to IndexedDB; a `.classbuild.json` project file saves and restores a course.
+- **CLI**: `scripts/generate-course.ts` — headless Node.js script run with `tsx` plus a small `?raw` CSS loader (`scripts/raw-loader.mjs`). Runs the same prompt builders and Claude streaming functions without a browser.
 
 Key directories:
 - `src/prompts/` — All LLM prompt builders (system + user prompts for each generation stage)
-- `src/services/claude/` — Anthropic SDK client, streaming with retry, model constants
-- `src/services/gemini/` — Image generation for infographics and text-to-speech (chunked at 2800 chars; PCM wrapped as WAV)
-- `src/services/export/` — PPTX, quiz DOCX, and publish exporters
+- `src/services/claude/` — Anthropic SDK client, streaming with retry and refusal fallback, model constants
+- `src/services/openai/` — gpt-image-2 image generation and chapter-figure placeholder replacement
+- `src/services/elevenLabs/` — Audiobook narration (MP3)
+- `src/services/academic/` — Source verification against Crossref, Semantic Scholar and Unpaywall
+- `src/services/export/` — PPTX, quiz DOCX, and publish (course site) exporters
 - `src/services/quiz/` — Answer balancer for quiz generation
 - `src/types/` — TypeScript interfaces for the entire domain model
-- `src/themes.ts` — Four visual themes (Midnight, Classic, Ocean, Warm) with full color specs
-- `src/templates/` — HTML templates for course viewer and quizzes
-- `src/store/` — Zustand stores: `courseStore` (generation state), `apiStore` (keys), `uiStore`
+- `src/themes/` — Six chapter themes (CSS files + `themes.config.ts`) and the narration voice list
+- `src/templates/` — Standalone HTML for the practice quiz, weekly challenge, course site and outcomes table
+- `src/store/` — Zustand stores: `courseStore` (course state, IndexedDB), `apiStore` (keys, localStorage), `uiStore` (transient)
 - `scripts/lib/` — CLI-only helpers: publish assembler, DOCX builders, Node image generation
 
 ## Generation Pipeline
@@ -29,63 +31,69 @@ The pipeline has five stages, each with dedicated prompt builders in `src/prompt
 
 1. **Setup** (`CourseSetup` type) — User defines topic, audience level, chapter count, theme, teaching environment, and notes.
 2. **Syllabus** (`src/prompts/syllabus.ts`) — Claude Opus designs the full course arc. Outputs JSON with chapter titles, narratives, key concepts, widget specs, learning science annotations, and spacing connections. Parsed into `Syllabus` type.
-3. **Research** (`src/prompts/research.ts`) — Claude with web search gathers real-world sources per chapter. Produces `ResearchDossier` with verified/unverified sources, DOIs validated via `src/utils/doiValidator.ts`.
+3. **Research** (`src/prompts/research.ts`) — Claude with web search gathers real-world sources per chapter. Produces a `ResearchDossier`; DOIs and metadata are checked against Crossref / Semantic Scholar (`src/services/academic/`).
 4. **Build** — Per chapter, generates all materials in parallel where possible:
-   - **Chapter HTML** (`src/prompts/chapter.ts`) — Standalone HTML with embedded interactive widgets, themed CSS, and reading progress bar
+   - **Chapter HTML** (`src/prompts/chapter.ts`) — Reading in the chosen theme's markup contract, with interactive widgets and gpt-image-2 figure placeholders
    - **Practice quiz** (`src/prompts/practiceQuiz.ts`) — Gamified quiz with confidence calibration
    - **In-class quiz** (`src/prompts/inClassQuiz.ts`) — 5 shuffled versions + answer keys
    - **Discussion questions** (`src/prompts/discussion.ts`)
    - **Activities** (`src/prompts/activities.ts`) — Facilitated activities with step-by-step guides
-   - **Audio transcript** (`src/prompts/audioTranscript.ts`) — Narration script sent to Gemini TTS
-   - **Slides** (`src/prompts/slides.ts`) — JSON slide data rendered to PPTX via pptxgenjs
+   - **Audio transcript** (`src/prompts/audioTranscript.ts`) — Narration script sent to ElevenLabs
+   - **Slides** (`src/prompts/slides.ts`) — One gpt-image-2 prompt per slide; each slide is a full-bleed 4K image with speaker notes, packed with pptxgenjs
    - **Weekly challenge** (`src/prompts/weeklyChallenge.ts`) — Mastery-gated assessment with 6 question types, parameterised variants, SCORM 2004 wrapper for Blackboard
-   - **Infographic** (`src/prompts/infographic.ts`) — Claude writes a prompt, Gemini generates the image
-5. **Export/Publish** (`scripts/lib/publish.ts`) — Assembles a static course viewer site from all generated materials, or exports as ZIP/PPTX.
+   - **Infographic** (`src/prompts/infographic.ts`) — Claude writes a prompt, gpt-image-2 renders it
+5. **Export/Publish** — Download as ZIP or PowerPoint, package SCORM, or publish a static course site (`src/services/export/publishExporter.ts`; CLI: `scripts/lib/publish.ts`).
 
 ## CLI Usage
 
+Keys go in `.env.local` (copy `.env.example`; gitignored), never inline on the command line:
+
 ```
-ANTHROPIC_API_KEY=sk-... npx tsx scripts/generate-course.ts \
+npm run course -- \
   --topic "The Psychology of Prejudice" \
   --chapters 12 \
   --level advanced-undergrad \
-  --theme midnight \
+  --theme terminal \
   --length comprehensive \
   --notes "Use international and Australian examples." \
   --output ./output/prejudice
 ```
 
+`npm run course` runs `npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts`.
+
 Flags:
 - `--topic` (required): Course topic
 - `--chapters` (default 12): Number of chapters
 - `--level` (default advanced-undergrad): `general-public`, `professional`, `advanced-undergrad`
-- `--theme` (default midnight): `midnight`, `classic`, `ocean`, `warm`
+- `--theme` (default press): `press`, `notebook`, `almanac`, `storybook`, `studio`, `terminal`
 - `--length` (default standard): `concise`, `standard`, `comprehensive`
 - `--widgets` (default 3): Interactive widgets per chapter
 - `--cohort` (default 60): Expected class size
 - `--environment` (default lecture-theatre): `lecture-theatre`, `collaborative`, `flat-classroom`, `online-hybrid`
 - `--notes`: Additional context for the AI
-- `--voice-id`: Gemini TTS voice name for audiobook narration (e.g. `Kore`, `Puck`, `Charon`)
+- `--voice-id`: ElevenLabs voice ID for audiobook narration (defaults to a neutral narrator)
 - `--syllabus`: Path to existing syllabus.json (skip regeneration)
 - `--stop-after`: `syllabus` or `research` — stop early for review
 - `--no-publish`: Skip course viewer assembly
+- `--specific-topics`, `--avoid-topics`, `--textbook`: Topic steering and textbook alignment
+- `--output` (default ./output): Output directory
 
-Environment variables: `ANTHROPIC_API_KEY` (required), `GEMINI_API_KEY` (optional — enables infographics and TTS). Install `ffmpeg` if you want the CLI to transcode WAV audio to MP3.
+Environment variables: `ANTHROPIC_API_KEY` (required), `OPENAI_API_KEY` (optional — figures, slide images, infographics), `ELEVENLABS_API_KEY` (optional — narration). The CLI exits non-zero if any step failed.
 
 ## AI Models and Services
 
 Claude models (`src/services/claude/client.ts`):
-- `claude-opus-4-6` — Syllabus design and chapter writing (high-quality, extended thinking)
-- `claude-sonnet-4-6` — Quizzes, discussions, activities, slides, research (fast, parallel tasks)
-- `claude-haiku-4-5` — Lightweight tasks
+- `claude-opus-5-5` — Syllabus, chapters, practice and in-class quizzes, weekly challenge. Adaptive thinking with `output_config.effort`, plus a server-side refusal fallback (`fallbacks: "default"`).
+- `claude-sonnet-4-6` — Research with web search, slides, discussion, activities, audio transcripts (the `streamMessage` default)
+- `claude-haiku-4-5-20251001` — Answer balancing, activity detail, key validation
 
-Extended thinking budgets: `max` (32k tokens), `high` (16k), `medium` (8k), `low` (4k).
+Thinking levels: `max`, `high`, `medium`, `low` — sent as `output_config.effort` on Opus and as `budget_tokens` (32k/16k/8k/4k) on Sonnet and Haiku.
 
-Streaming (`src/services/claude/streaming.ts`): All Claude calls use streaming with retry. Callbacks for `onText`, `onThinking`, `onToolUse`, `onWebSearch`, `onWebSearchResults`, `onDone`, `onError`.
+Streaming (`src/services/claude/streaming.ts`): `streamMessage()` with callbacks for `onText`, `onThinking`, `onToolUse`, `onWebSearch`, `onWebSearchResults`, `onDone`, `onError`; `streamWithRetry()` retries rate limits, overloads and 5xx errors that occur before any output. A response every model declined raises a `ModelRefusalError`.
 
-Gemini TTS (`src/services/gemini/tts.ts`): Text-to-speech using `gemini-2.5-flash-preview-tts`. Text chunked at 2800 chars respecting paragraph/sentence boundaries to avoid quality drift. PCM (24 kHz, 16-bit, mono) concatenated into a single WAV container. Default voice: `Kore`. Retries transient 5xx errors per the Gemini docs.
+OpenAI images (`src/services/openai/`): gpt-image-2 renders chapter figures (replacing `<figure class="ai-image">` placeholders), 4K slide images and infographics, as JPEG, with Retry-After-aware retries.
 
-Gemini Images (`src/services/gemini/imageGen.ts`): Generates infographic images from Claude-written prompts. Serialized requests with retry and backoff.
+ElevenLabs (`src/services/elevenLabs/tts.ts`): Audiobook narration as MP3, chunked on paragraph and sentence boundaries.
 
 ## Core Types
 
@@ -94,9 +102,9 @@ Defined in `src/types/course.ts`:
 - `CourseSetup` — Input configuration: topic, level, chapters, theme, environment, notes
 - `Syllabus` — Course blueprint: title, overview, array of `ChapterSyllabus`
 - `ChapterSyllabus` — Per-chapter plan: title, narrative, keyConcepts, widgets (`WidgetSpec[]`), scienceAnnotations, spacingConnections
-- `GeneratedChapter` — All outputs for one chapter: htmlContent, practiceQuizData, inClassQuizData, discussionData, activityData, audioTranscript, audioUrl, slidesJson, infographicDataUri
+- `GeneratedChapter` — All outputs for one chapter: htmlContent, practiceQuizData, inClassQuizData, weeklyChallengeData, discussionData, activityData, audioTranscript, audioUrl / audioDataUri, slidesJson, infographicDataUri
 - `ResearchDossier` — Sources per chapter with verification status
-- `SlideData` — Individual slide: title, bullets, speakerNotes, layout type
+- `SlideData` — Individual slide: title, speakerNotes, imagePrompt (rendered to imageDataUri); legacy decks may carry bullets and a layout type
 - `EducationLevel` — `high-school`, `first-year`, `advanced-undergrad`, `postgraduate`, `professional`, `general-public`
 - `ChapterLength` — `concise` (2k words), `standard` (4k words), `comprehensive` (6k words)
 - `SciencePrinciple` — `spacing`, `interleaving`, `retrieval`, `examples`, `dual-coding`
@@ -120,56 +128,44 @@ The syllabus stage annotates each chapter with `ScienceAnnotation[]` specifying 
 
 ## Themes
 
-Four themes defined in `src/themes.ts`, each with full color system (pageBg, cardBg, accent, text colors, fonts). The `buildThemePromptBlock()` function injects theme colors into Claude prompts so generated HTML matches the chosen theme.
+Six chapter themes live in `src/themes/` — each a CSS file plus an entry in `themes.config.ts` — and wrap readings via `renderChapterHtml()`. The app's own UI uses a separate "Codex" design system.
 
-- **Midnight** — Dark purple/violet, system-ui headings, Georgia body
-- **Classic** — Light cream/navy, Georgia throughout
-- **Ocean** — Dark blue/cyan, system-ui throughout
-- **Warm** — Light warm/orange, Georgia headings, Lora body
+- **Press** — Sunday broadsheet (default): humanities, history, journalism
+- **Notebook** — Engineer's graph paper: STEM, maths, problem sets
+- **Almanac** — Naturalist's field guide: biology, geography, food, crafts
+- **Storybook** — Bold and friendly: languages, intros, K-12
+- **Studio** — Modernist monograph: art, architecture, design
+- **Terminal** — Dark dev docs: programming, CS, sysadmin, ML
 
 ## Voice Options
 
-Gemini TTS voices (`src/themes.ts`):
-- Kore — Firm, confident default narrator
-- Puck — Upbeat, energetic
-- Charon — Informative, measured (lecture-friendly)
-- Sulafat — Warm, approachable
-- Rasalgethi — Clear, knowledgeable (technical topics)
-- Leda — Youthful, expressive
+ElevenLabs premade voices (`VOICE_OPTIONS` in `src/themes/index.ts`): George (default), Daniel, Alice, Lily, Dorothy, Charlie, Brian, Sarah.
 
 ## Key Source Files
 
 - `scripts/generate-course.ts`: Headless CLI entry point — arg parsing, pipeline orchestration, file I/O
-- `scripts/lib/publish.ts`: Static course viewer assembler
-- `scripts/lib/coursePackageTemplate.ts`: HTML template for published course viewer
+- `scripts/raw-loader.mjs`: Lets tsx load the `?raw` theme CSS imports
+- `scripts/lib/publish.ts`: Static course site assembler
 - `scripts/lib/docx-helpers.ts`: DOCX generation for discussion, activities, transcript, research, syllabus
-- `scripts/lib/node-image.ts`: Node.js Gemini image generation
-- `scripts/lib/node-image-placer.ts`: Replaces Gemini image placeholders in chapter HTML
+- `scripts/lib/node-image.ts`, `scripts/lib/node-image-placer.ts`: Node gpt-image-2 generation and figure placement
 - `scripts/gen-audio.ts`: Standalone audio generation script
+- `scripts/package-scorm.ts`: SCORM 2004 packager
 - `src/services/claude/client.ts`: Anthropic SDK singleton, model constants, thinking budgets
-- `src/services/claude/streaming.ts`: Streaming with retry, web search integration
-- `src/services/gemini/tts.ts`: Gemini text-to-speech with chunking, retry, and WAV wrapping
-- `src/services/gemini/imageGen.ts`: Gemini image generation with retry
-- `src/services/gemini/imagePlacer.ts`: Browser-side image placeholder replacement
+- `src/services/claude/streaming.ts`: Streaming with retry, web search integration, refusal handling
+- `src/services/openai/imageGen.ts`, `imagePlacer.ts`: gpt-image-2 generation and chapter figure placement
+- `src/services/elevenLabs/tts.ts`: ElevenLabs narration
+- `src/services/academic/`: Source verification (Crossref, Semantic Scholar, Unpaywall)
 - `src/services/export/pptxExporter.ts`: PowerPoint generation via pptxgenjs
-- `src/services/export/quizDocExporter.ts`: Quiz document export
+- `src/services/export/quizDocExporter.ts`: In-class quiz DOCX export
+- `src/services/export/publishExporter.ts`: Course site export
 - `src/services/quiz/answerBalancer.ts`: Ensures balanced answer distributions
-- `src/store/courseStore.ts`: Zustand store — central state for generation pipeline
+- `src/store/courseStore.ts`: Zustand store — central state for the generation pipeline
 - `src/store/apiStore.ts`: API key management store
-- `src/prompts/syllabus.ts`: Syllabus prompt builder — the architectural blueprint prompt
-- `src/prompts/chapter.ts`: Chapter HTML prompt with full CSS template injection
-- `src/prompts/research.ts`: Research/web search prompt
-- `src/prompts/practiceQuiz.ts`: Gamified practice quiz prompt
-- `src/prompts/inClassQuiz.ts`: In-class quiz prompt (5 versions)
-- `src/prompts/discussion.ts`: Discussion questions prompt
-- `src/prompts/activities.ts`: Teaching activities prompt
-- `src/prompts/audioTranscript.ts`: Audio narration transcript prompt
-- `src/prompts/slides.ts`: Slide deck JSON prompt
-- `src/prompts/infographic.ts`: Infographic meta-prompt (Claude writes prompt for Gemini)
-- `src/prompts/learningObjectives.ts`: Bloom's taxonomy learning objectives
+- `src/utils/projectFile.ts`: `.classbuild.json` save/restore (imports are validated and sanitized)
+- `src/prompts/*.ts`: The 12 prompt builders (syllabus, chapter, research, practiceQuiz, inClassQuiz, weeklyChallenge, discussion, activities, audioTranscript, slides, infographic, learningObjectives)
 - `src/types/course.ts`: All domain types and interfaces
 - `src/types/generation.ts`: Generation status and progress types
-- `src/themes.ts`: Theme definitions, theme prompt block builder, voice options
-- `src/templates/quizTemplate.ts`: Interactive quiz HTML template
-- `src/templates/courseViewerTemplate.ts`: Course viewer HTML template
-- `src/utils/doiValidator.ts`: DOI validation for research sources
+- `src/themes/`: Chapter themes and voice options
+- `src/templates/quizTemplate.ts`: Interactive practice quiz HTML
+- `src/templates/weeklyChallengeTemplate.ts`: Weekly mastery challenge HTML with SCORM reporting
+- `src/templates/codexCourseSiteTemplate.ts`: Published course site

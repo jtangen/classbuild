@@ -1,10 +1,13 @@
 import { useCourseStore } from '../../store/courseStore';
+import type { ReadingDraft } from '../../store/uiStore';
 
 interface ChapterSidebarProps {
   selectedChapterNum: number;
   onSelectChapter: (num: number) => void;
   disabled: boolean;
   batchCurrentChapter: number | null;
+  /** The single reading draft/refine in flight, flagged on its own card. */
+  readingDraft?: Pick<ReadingDraft, 'chapterNum' | 'mode'> | null;
 }
 
 const ROMAN_UPPER = [
@@ -46,6 +49,7 @@ export function ChapterSidebar({
   onSelectChapter,
   disabled,
   batchCurrentChapter,
+  readingDraft,
 }: ChapterSidebarProps) {
   const { syllabus, chapters, researchDossiers } = useCourseStore();
 
@@ -91,7 +95,16 @@ export function ChapterSidebar({
             ? countReady(generated)
             : { ready: 0, total: 8 };
           const isSelected = ch.number === selectedChapterNum;
-          const isBatchCurrent = batchCurrentChapter === ch.number;
+          // "drafting" for the batch's current chapter or a reading draft;
+          // "refining" for a reading refine.
+          const activity =
+            batchCurrentChapter === ch.number
+              ? 'drafting'
+              : readingDraft?.chapterNum === ch.number
+                ? readingDraft.mode === 'refine'
+                  ? 'refining'
+                  : 'drafting'
+                : null;
           const fullyReady = counts.ready === counts.total && counts.ready > 0;
           const roman = ROMAN_UPPER[idx] ?? String(ch.number);
 
@@ -185,7 +198,7 @@ export function ChapterSidebar({
                   paddingLeft: 42,
                 }}
               >
-                {isBatchCurrent ? (
+                {activity ? (
                   <>
                     <span
                       aria-hidden
@@ -217,7 +230,7 @@ export function ChapterSidebar({
                         color: 'var(--cb-accent-emphasis)',
                       }}
                     >
-                      drafting
+                      {activity}
                     </span>
                   </>
                 ) : fullyReady ? (

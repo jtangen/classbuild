@@ -11,7 +11,12 @@ import { ActivitiesTab } from '../components/build/tabs/ActivitiesTab';
 import { AudioTab } from '../components/build/tabs/AudioTab';
 import { ReadingTab } from '../components/build/tabs/ReadingTab';
 import { SlidesTab } from '../components/build/tabs/SlidesTab';
-import { useChapterMaterials } from '../components/build/useChapterMaterials';
+import {
+  useChapterMaterials,
+  wellFormedInClassQuiz,
+  wellFormedRows,
+  revokeNarrationUrl,
+} from '../components/build/useChapterMaterials';
 import { ChapterImageRefineDrawer } from '../components/build/ChapterImageRefineDrawer';
 import { ShortcutsHelpOverlay } from '../components/build/ShortcutsHelpOverlay';
 import { TransientToast } from '../components/build/TransientToast';
@@ -25,7 +30,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
-import { useUiStore } from '../store/uiStore';
+import { useUiStore, MATERIAL_KINDS } from '../store/uiStore';
 import { streamMessage, streamWithRetry } from '../services/claude/streaming';
 import { MODELS } from '../services/claude/client';
 import { buildChapterPrompt, buildChapterUserPrompt } from '../prompts/chapter';
@@ -38,10 +43,11 @@ import { buildSlidesPrompt, buildSlidesUserPrompt } from '../prompts/slides';
 import { CodexButton as Button } from '../components/codex';
 import { ChapterSidebar } from '../components/build/ChapterSidebar';
 import { ResearchPanel } from '../components/build/ResearchPanel';
+import { ArtifactShell } from '../components/build/ArtifactShell';
 import type { SlideData, InClassQuizQuestion, WeeklyChallengeData } from '../types/course';
 import { getVoiceOption } from '../themes';
 import { slugify, extractHtml, parseJson } from '../utils/format';
-import { friendlyError, isAbortError } from '../utils/errors';
+import { figureFailureMessage, friendlyError, friendlyImageError, isAbortError } from '../utils/errors';
 import { beginAbortable, endAbortable, abortInFlight, materialAbortKey } from '../services/abortRegistry';
 import type { BatchFailure } from '../store/uiStore';
 
@@ -64,12 +70,28 @@ interface Activity {
 // formatElapsed moved to ReadingTab (only place it was used).
 // slugify, extractHtml, parseJson moved to src/utils/format.ts
 
-async function replaceAiPlaceholders(html: string, apiKey: string): Promise<string> {
+/** Render a reading's figures. Figures that fail keep an "image unavailable"
+ *  box (click it on Build to try again); `figureError` says how many and why. */
+async function replaceAiPlaceholders(
+  html: string,
+  apiKey: string,
+  signal?: AbortSignal,
+): Promise<{ html: string; figureError: string | null }> {
   const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
-  return replaceAiImagePlaceholders(html, apiKey);
+  const errors: unknown[] = [];
+  const out = await replaceAiImagePlaceholders(html, apiKey, {
+    signal,
+    onFigureError: (err) => errors.push(err),
+  });
+  return { html: out, figureError: errors.length ? figureFailureMessage(errors) : null };
 }
 
 // Chapter image helpers moved to src/components/build/chapterImageHelpers.ts
+
+const ROMAN_NUMERALS = [
+  'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X',
+  'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX',
+];
 
 /** One-time-hint state, persisted to localStorage so it stays dismissed
  *  across sessions per-browser. */
@@ -93,7 +115,11 @@ export function BuildPage() {
   const navigate = useNavigate();
   const { syllabus, researchDossiers, chapters, addChapter, updateChapter, setSlideImage, updateSlide, setup, setStage, completeStage } = useCourseStore();
   const { claudeApiKey, openaiApiKey, elevenLabsApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, batchIndex, batchTotal, batchChapterMs, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, batchSummary, setBatchSummary, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
+  // readingDraft / thinkingText / streamingText: the reading draft or refine in
+  // flight lives in uiStore so it survives leaving /build. Coming back shows
+  // that chapter's stream, thinking trace, timer and a working Stop. Only one
+  // runs at a time.
+  const { isGenerating, setIsGenerating, streamingText, setStreamingText, appendStreamingText, readingDraft, setReadingDraft, thinkingText, setThinkingText, appendThinkingText, rebuildMaterialsFor, setRebuildMaterialsFor, error, setError, activeTab, setActiveTab, selectedChapterNum, setSelectedChapterNum, batchGenerating, batchCurrentChapter, batchPhase, batchMaterial, setBatchGenerating, setBatchCurrentChapter, setBatchPhase, setBatchMaterial, batchIndex, batchTotal, batchChapterMs, setBatchProgress, pushBatchChapterMs, resetBatchChapterMs, batchSummary, setBatchSummary, slidesRender, setSlidesRender, inFlight, setInFlight, setOpenKeysOnNextSetupVisit } = useUiStore();
 
   // Navigate to /setup with the keys modal auto-opening. Used by inline
   // "Add OpenAI key →" / "Add ElevenLabs key →" CTAs on the Slides and Audio
@@ -123,17 +149,8 @@ export function BuildPage() {
   const setGeneratingSlides = useCallback((v: number | null) => setInFlight('slides', v), [setInFlight]);
   const setGeneratingWeeklyChallenge = useCallback((v: number | null) => setInFlight('weeklychallenge', v), [setInFlight]);
 
-  const [thinkingText, setThinkingText] = useState('');
   const [refineFeedback, setRefineFeedback] = useState('');
   const [showRefineConfirm, setShowRefineConfirm] = useState(false);
-  /** Which chapter (if any) is currently in the chapter-drafting pipeline.
-   *  Distinct from uiStore.isGenerating (which is global). Lets ReadingTab
-   *  show the drafting UI ONLY on the chapter that's actually being drafted,
-   *  not whichever chapter the user has clicked to. */
-  const [chapterDraftingFor, setChapterDraftingFor] = useState<number | null>(null);
-  /** True while a refine is in flight — drives the streaming UI to show
-   *  "Refining…" feedback instead of the old iframe. */
-  const [isRefining, setIsRefining] = useState(false);
   /** Confirm-panel checkbox: when a refine clears dependent materials,
    *  should we automatically regenerate them once the new reading lands? */
   const [refineAutoRegen, setRefineAutoRegen] = useState(true);
@@ -142,21 +159,29 @@ export function BuildPage() {
    *  callback recreates after updateChapter fires). */
   const generateAllOutputsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   // Per-slide image refine state. Edited prompts live here until the user
-  // either regenerates (commits) or hits Reset. `refiningSlideIdx` is the
-  // index currently being rendered through gpt-image-2.
+  // either regenerates (commits) or hits Reset; they belong to the chapter in
+  // view and are dropped on a chapter switch. `refiningSlide` is the slide
+  // currently being rendered through gpt-image-2. It and the error carry their
+  // chapter: a render outlives a chapter switch, and a slide index only means
+  // something within one deck.
   const [editedSlidePrompts, setEditedSlidePrompts] = useState<Record<number, string>>({});
-  const [refiningSlideIdx, setRefiningSlideIdx] = useState<number | null>(null);
-  const [slideRefineError, setSlideRefineError] = useState<string | null>(null);
+  const [refiningSlide, setRefiningSlide] = useState<{ chapterNum: number; idx: number } | null>(null);
+  const [slideRefineError, setSlideRefineError] = useState<
+    { chapterNum: number; idx: number; message: string } | null
+  >(null);
 
   // Per-image chapter refine. When the user clicks an image inside the chapter
   // iframe, the shim postMessages here and we open a drawer with the original
-  // prompt + the rendered image. Edits commit only when Regenerate succeeds.
+  // prompt + the rendered image (src is null for a figure whose render
+  // failed). Edits commit only when Regenerate succeeds.
   const [chapterImageRefine, setChapterImageRefine] = useState<
-    { idx: number; prompt: string; aspect: string; src: string } | null
+    { idx: number; prompt: string; aspect: string; src: string | null } | null
   >(null);
   const [chapterImageDraft, setChapterImageDraft] = useState('');
   const [chapterImageRefining, setChapterImageRefining] = useState(false);
   const [chapterImageRefineError, setChapterImageRefineError] = useState<string | null>(null);
+  /** The reading iframe — the only window allowed to post image clicks. */
+  const readingIframeRef = useRef<HTMLIFrameElement>(null);
   // One-time discoverability hints — surfaced inline until the user dismisses
   // or auto-dismissed after 12s once the relevant artifact has rendered.
   const [showChapterImageHint, setShowChapterImageHint] = useState<boolean>(() => !readHintSeen('chapter-image-refine'));
@@ -167,6 +192,48 @@ export function BuildPage() {
   const autoGenStarted = useRef(false);
   const selectedChapterRef = useRef(selectedChapterNum);
   const batchCancelRef = useRef(false);
+  // A draft or refine outlives this page when the user navigates away; its
+  // completion must not act on a closed page's stale closures.
+  const mountedRef = useRef(false);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // On desktop the page is a column exactly as tall as the viewport below the
+  // app chrome, and the two-panel work area takes what the banners leave
+  // (flex: 1; min-height: 0). It used to be calc(100vh - 220px) starting
+  // ~280px down, so the page scrolled on top of the panel's own scroll. Under
+  // 901px the stacked layout keeps natural page scroll (see index.css).
+  const [fitHeight, setFitHeight] = useState<number | null>(null);
+  const fitPageRef = useCallback((el: HTMLDivElement | null) => {
+    if (!el) return;
+    const wide = window.matchMedia('(min-width: 901px)');
+    const measure = () => {
+      if (!wide.matches) {
+        setFitHeight(null);
+        return;
+      }
+      const top = el.getBoundingClientRect().top + window.scrollY;
+      // 48px: AppShell's content wrapper pads the page bottom (pb-12). The
+      // floor keeps the panel usable on very short windows (page scrolls).
+      setFitHeight(Math.max(480, Math.round(window.innerHeight - top - 48)));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    wide.addEventListener('change', measure);
+    // The chrome above can change height (e.g. the multi-tab notice).
+    const ro = new ResizeObserver(measure);
+    const main = el.closest('main');
+    if (main) ro.observe(main);
+    return () => {
+      window.removeEventListener('resize', measure);
+      wide.removeEventListener('change', measure);
+      ro.disconnect();
+    };
+  }, []);
 
   // Derived: the chapter currently in view from courseStore.
   const currentChapterEarly = chapters.find((c) => c.number === selectedChapterNum);
@@ -268,11 +335,11 @@ export function BuildPage() {
 
   // Dismiss the slide-image hint as soon as the user starts a refine.
   useEffect(() => {
-    if (refiningSlideIdx !== null && showSlideImageHint) {
+    if (refiningSlide !== null && showSlideImageHint) {
       setShowSlideImageHint(false);
       writeHintSeen('slide-image-refine');
     }
-  }, [refiningSlideIdx, showSlideImageHint]);
+  }, [refiningSlide, showSlideImageHint]);
 
   const dismissChapterImageHint = useCallback(() => {
     setShowChapterImageHint(false);
@@ -293,7 +360,9 @@ export function BuildPage() {
   const [transientToast, setTransientToast] = useState<string | null>(null);
   useEffect(() => {
     if (!transientToast) return;
-    const id = setTimeout(() => setTransientToast(null), 2400);
+    // Longer notices (a refine that couldn't auto-rebuild, slides that fell
+    // back to text) stay up long enough to read.
+    const id = setTimeout(() => setTransientToast(null), Math.max(2400, transientToast.length * 60));
     return () => clearTimeout(id);
   }, [transientToast]);
 
@@ -324,12 +393,16 @@ export function BuildPage() {
         setTransientToast('No need to save — every change is auto-saved to this browser.');
         return;
       }
-      // ? → toggle the help overlay.
+      // ? → toggle the help overlay (not over the image drawer).
       if (e.key === '?') {
+        if (chapterImageRefine) return;
         e.preventDefault();
         setShortcutsHelpOpen((v) => !v);
         return;
       }
+      // While the help or the image drawer is open, the page behind it
+      // doesn't take J/K/G/1–8 (J used to switch chapter under the help).
+      if (shortcutsHelpOpen || chapterImageRefine) return;
 
       // No other modifier-required shortcuts.
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -358,9 +431,17 @@ export function BuildPage() {
         }
         return;
       }
-      // G → generate all materials for the current chapter.
+      // G → generate all materials for the current chapter. Gated like the
+      // "Generate all" button (hidden while drafting, disabled while any
+      // material is in flight): a second press, or key auto-repeat, used to
+      // abort and re-issue every in-flight call.
       if (e.key === 'g' || e.key === 'G') {
         e.preventDefault();
+        if (e.repeat) return;
+        const ui = useUiStore.getState();
+        if (ui.isGenerating || Object.values(ui.inFlight).some((n) => n != null)) return;
+        // No key, no call (the "Add Anthropic key" banner explains).
+        if (!useApiStore.getState().claudeApiKey.trim()) return;
         void generateAllOutputsRef.current();
         return;
       }
@@ -368,22 +449,22 @@ export function BuildPage() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [batchGenerating, syllabus, selectedChapterNum, setActiveTab, setSelectedChapterNum]);
+  }, [batchGenerating, syllabus, selectedChapterNum, setActiveTab, setSelectedChapterNum, shortcutsHelpOpen, chapterImageRefine]);
 
-  // Tick elapsed seconds while a single-chapter generation is running so the
-  // "Thinking..." phase (~30-90s on Opus) shows observable progress.
+  // Tick elapsed seconds while a reading draft/refine is running so the
+  // "Thinking..." phase (~30-90s on Opus) shows observable progress. Counted
+  // from the stored start time, so it carries on across leaving /build.
+  const readingStartedAt = readingDraft?.startedAt ?? null;
   useEffect(() => {
-    if (!isGenerating) {
+    if (readingStartedAt === null) {
       setElapsedSec(0);
       return;
     }
-    const t0 = Date.now();
-    setElapsedSec(0);
-    const id = setInterval(() => {
-      setElapsedSec(Math.floor((Date.now() - t0) / 1000));
-    }, 500);
+    const tick = () => setElapsedSec(Math.floor((Date.now() - readingStartedAt) / 1000));
+    tick();
+    const id = setInterval(tick, 500);
     return () => clearInterval(id);
-  }, [isGenerating]);
+  }, [readingStartedAt]);
 
   // Close the batch-confirm modal on Escape.
   useEffect(() => {
@@ -403,8 +484,23 @@ export function BuildPage() {
   const syllabusChapter = syllabus?.chapters.find(c => c.number === selectedChapterNum);
   const anyLocalGenerating = !!(generatingQuiz || generatingInClassQuiz || generatingDiscussion || generatingActivities || generatingAudio || generatingSlides || generatingWeeklyChallenge);
   const anyBusy = isGenerating || anyLocalGenerating || batchGenerating;
+  /** No Anthropic key (e.g. a project restored in a new browser): nothing
+   *  that calls Claude may fire. The banner offers "Add Anthropic key →". */
+  const hasClaudeKey = !!claudeApiKey.trim();
+  /** The in-progress reading UI belongs to this chapter only. */
+  const draftingThisChapter = readingDraft?.chapterNum === selectedChapterNum;
+  /** Why this chapter's reading can't be drafted or refined right now: one
+   *  reading at a time, and the note names the chapter that holds the slot.
+   *  isGenerating without a readingDraft is another page's draft (Export's
+   *  single-chapter generate, a syllabus redraft). */
+  const readingBlockedNote = draftingThisChapter || !(isGenerating || readingDraft)
+    ? null
+    : readingDraft
+      ? `Chapter ${readingDraft.chapterNum} is ${readingDraft.mode === 'refine' ? 'being refined' : 'drafting'} right now. One reading runs at a time, so this one unlocks when it finishes.`
+      : 'Another draft is running right now. This unlocks when it finishes.';
 
   const tabGenerating: Record<string, boolean> = {
+    chapter: draftingThisChapter,
     quiz: generatingQuiz === selectedChapterNum,
     inclassquiz: generatingInClassQuiz === selectedChapterNum,
     discussion: generatingDiscussion === selectedChapterNum,
@@ -417,7 +513,13 @@ export function BuildPage() {
   // setTabError + clearTabError moved into useChapterMaterials.
 
   const copyToClipboard = useCallback(async (text: string, label: string) => {
-    await navigator.clipboard.writeText(text);
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {
+      // Unfocused tab, denied permission, or no clipboard API (insecure context).
+      setTransientToast("Couldn't copy: the browser blocked clipboard access.");
+      return;
+    }
     setCopiedLabel(label);
     setTimeout(() => setCopiedLabel(''), 2000);
   }, []);
@@ -481,24 +583,37 @@ export function BuildPage() {
     return lines.join('\n');
   }, [activities, expandedActivities, syllabusChapter]);
 
-  // Reset BuildPage-owned local state on chapter switch, then hydrate
-  // chapterHtml from the courseStore-persisted chapter (if any). All material
-  // state (quiz/discussion/audio/slides/etc.) is managed inside
-  // useChapterMaterials; its own effect handles reset + rehydrate.
+  // Reset BuildPage-owned per-chapter UI state on a chapter switch only. It
+  // used to depend on `chapters` too, so any store write (a material landing in
+  // any chapter, each slide image render) wiped a half-typed refine note. All
+  // material state (quiz/discussion/audio/slides/etc.) is managed inside
+  // useChapterMaterials; its own effects handle reset + rehydrate.
+  // (The thinking trace isn't reset here: it belongs to the reading draft in
+  // flight, not to the chapter in view.)
   useEffect(() => {
-    setChapterHtml('');
-    setThinkingText('');
     setRefineFeedback('');
     setShowRefineConfirm(false);
-    const ch = chapters.find((c) => c.number === selectedChapterNum);
-    if (ch) setChapterHtml(ch.htmlContent);
-  }, [selectedChapterNum, chapters]);
+    setEditedSlidePrompts({});
+    setSlideRefineError(null);
+    setChapterImageRefine(null);
+    setChapterImageRefineError(null);
+  }, [selectedChapterNum]);
+
+  // Mirror the selected chapter's persisted HTML into chapterHtml.
+  const selectedChapterHtml = chapters.find((c) => c.number === selectedChapterNum)?.htmlContent ?? '';
+  useEffect(() => {
+    setChapterHtml(selectedChapterHtml);
+  }, [selectedChapterHtml]);
 
   // Auto-generate chapter 1 on first mount if not already generated and has research
   useEffect(() => {
     const ch1 = chapters.find(c => c.number === 1);
     const hasResearch = researchDossiers.some(d => d.chapterNumber === 1 && d.sources.length > 0);
-    if (!ch1 && syllabus && !isGenerating && !autoGenStarted.current && hasResearch) {
+    // A running batch drafts chapter 1 itself without setting isGenerating; a
+    // second draft racing it would later replace the chapter (addChapter) and
+    // wipe the materials the batch built on top of its own draft.
+    // Nor without a key: it would only come back as an error.
+    if (!ch1 && syllabus && claudeApiKey.trim() && !isGenerating && !batchGenerating && !autoGenStarted.current && hasResearch) {
       autoGenStarted.current = true;
       generateChapter(1);
     }
@@ -508,11 +623,18 @@ export function BuildPage() {
     if (!syllabus) return;
     const ch = syllabus.chapters.find(c => c.number === chapterNum);
     if (!ch) return;
+    // One reading at a time (the buttons are disabled too; this is the
+    // backstop). readingDraft too: ErrorBoundary resets isGenerating on a
+    // crash while the draft itself keeps running.
+    const ui = useUiStore.getState();
+    if (ui.isGenerating || ui.readingDraft) return;
+    // No key, no call: it could only fail ("Add Anthropic key" banner shows).
+    if (!claudeApiKey.trim()) return;
 
     const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
     setIsGenerating(true);
-    setChapterDraftingFor(chapterNum);
+    setReadingDraft({ chapterNum, mode: 'draft', startedAt: Date.now() });
     setStreamingText('');
     setThinkingText('');
 
@@ -550,15 +672,18 @@ export function BuildPage() {
           signal: controller.signal,
         },
         {
-          onThinking: (text) => setThinkingText(prev => prev + text),
+          onThinking: (text) => appendThinkingText(text),
           onText: (text) => appendStreamingText(text),
         }
       );
 
       let html = extractHtml(fullText);
+      let figureError: string | null = null;
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey);
+        ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, controller.signal));
       }
+      // A Stop during figure rendering still discards the draft.
+      controller.signal.throwIfAborted();
 
       if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
       addChapter({
@@ -566,45 +691,71 @@ export function BuildPage() {
         title: ch.title,
         htmlContent: html,
       });
+      if (figureError) setError(`Chapter ${chapterNum}: ${figureError} Click a failed figure to retry it.`);
     } catch (err) {
       // A user Stop is a silent cancel — the partial stream is discarded.
       if (!isAbortError(err)) setError(friendlyError(err, 'Chapter generation failed.'));
     } finally {
       endAbortable(abortKey, controller);
       setIsGenerating(false);
-      setChapterDraftingFor(null);
+      setReadingDraft(null);
       setThinkingText('');
+      setStreamingText('');
     }
-  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, addChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, addChapter, setIsGenerating, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText, setError]);
 
   const refineChapter = useCallback(async (feedback: string) => {
     if (!syllabus || !currentChapter || !syllabusChapter) return;
+    // One reading at a time, and a key to run it; both checked before the
+    // destructive clear below.
+    const ui = useUiStore.getState();
+    if (ui.isGenerating || ui.readingDraft || !claudeApiKey.trim()) return;
+    // Captured: a refine runs for minutes and the UI invites clicking away.
+    const chapterNum = selectedChapterNum;
+    // Only rebuild what this refine clears ("only the reading will change"
+    // when nothing else had been generated yet).
+    const hadDependents = !!(
+      currentChapter.practiceQuizData ||
+      currentChapter.inClassQuizData?.length ||
+      currentChapter.weeklyChallengeData ||
+      currentChapter.discussionData?.length ||
+      currentChapter.activityData?.length ||
+      currentChapter.audioTranscript ||
+      currentChapter.slidesJson?.length
+    );
 
-    updateChapter(selectedChapterNum, {
+    // Cancel this chapter's in-flight material jobs first: they were drafted
+    // from the reading being replaced and would otherwise land after the clear.
+    for (const kind of MATERIAL_KINDS) abortInFlight(materialAbortKey(kind, chapterNum));
+    const staleAudioUrl = currentChapter.audioUrl;
+    updateChapter(chapterNum, {
       practiceQuizData: undefined,
       inClassQuizData: undefined,
+      weeklyChallengeData: undefined,
       discussionData: undefined,
       activityData: undefined,
       activityDetails: undefined,
       audioTranscript: undefined,
       audioUrl: undefined,
+      audioDataUri: undefined,
       slidesJson: undefined,
     });
+    revokeNarrationUrl(staleAudioUrl);
     // updateChapter above cleared dependent materials in courseStore;
-    // useChapterMaterials' reset effect will wipe the local mirrors.
+    // useChapterMaterials' rehydrate effect will wipe the local mirrors.
     setRefineFeedback('');
     setShowRefineConfirm(false);
+    setEditedSlidePrompts({});
 
-    const abortKey = materialAbortKey('reading', selectedChapterNum);
+    const abortKey = materialAbortKey('reading', chapterNum);
     const controller = beginAbortable(abortKey);
-    setIsRefining(true);
     setIsGenerating(true);
-    setChapterDraftingFor(selectedChapterNum);
+    setReadingDraft({ chapterNum, mode: 'refine', startedAt: Date.now() });
     setStreamingText('');
     setThinkingText('');
 
     try {
-      const dossier = researchDossiers.find(d => d.chapterNumber === selectedChapterNum);
+      const dossier = researchDossiers.find(d => d.chapterNumber === chapterNum);
       const researchSources = dossier?.sources.map(s => ({
         title: s.title, authors: s.authors, year: s.year,
         summary: s.summary, url: s.url, doi: s.doi,
@@ -655,25 +806,40 @@ Teacher feedback: "${feedback}"`;
           signal: controller.signal,
         },
         {
-          onThinking: (text) => setThinkingText(prev => prev + text),
+          onThinking: (text) => appendThinkingText(text),
           onText: (text) => appendStreamingText(text),
         }
       );
 
       let html = extractHtml(fullText);
+      let figureError: string | null = null;
       if (hasImageGen) {
-        html = await replaceAiPlaceholders(html, openaiApiKey);
+        ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, controller.signal));
       }
-      setChapterHtml(html);
-      updateChapter(selectedChapterNum, { htmlContent: html });
+      // A Stop during figure rendering keeps the original reading.
+      controller.signal.throwIfAborted();
+      if (selectedChapterRef.current === chapterNum) setChapterHtml(html);
+      updateChapter(chapterNum, { htmlContent: html });
+      if (figureError) setError(`Chapter ${chapterNum}: ${figureError} Click a failed figure to retry it.`);
 
       // If the user opted in, automatically rebuild quizzes/discussion/etc.
       // against the new reading. The setTimeout lets React flush the chapter
       // state update so the refreshed generateAllOutputs callback reads from
-      // the new content, not the pre-refine snapshot.
-      if (refineAutoRegen) {
+      // the new content, not the pre-refine snapshot. generateAllOutputs
+      // works on the *selected* chapter of a *mounted* page: if the user has
+      // switched chapters or left /build, leave a marker instead, and the
+      // rebuild runs when this chapter is next opened (never on whichever
+      // chapter happens to be open, nor from a closed page's stale closures).
+      if (refineAutoRegen && hadDependents) {
         setTimeout(() => {
-          void generateAllOutputsRef.current();
+          if (mountedRef.current && selectedChapterRef.current === chapterNum) {
+            void generateAllOutputsRef.current();
+            return;
+          }
+          useUiStore.getState().setRebuildMaterialsFor({ chapterNum, htmlContent: html });
+          if (mountedRef.current) {
+            setTransientToast(`Chapter ${chapterNum} is refined. Its materials will rebuild when you open it.`);
+          }
         }, 250);
       }
     } catch (err) {
@@ -694,11 +860,13 @@ Teacher feedback: "${feedback}"`;
     } finally {
       endAbortable(abortKey, controller);
       setIsGenerating(false);
-      setIsRefining(false);
-      setChapterDraftingFor(null);
+      setReadingDraft(null);
       setThinkingText('');
+      setStreamingText('');
     }
-  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, updateChapter, setIsGenerating, setStreamingText, appendStreamingText, setError]);
+    // refineAutoRegen is listed: without it, unticking "Rebuild automatically"
+    // was ignored (the callback kept the value from when it was last built).
+  }, [syllabus, currentChapter, syllabusChapter, selectedChapterNum, claudeApiKey, openaiApiKey, researchDossiers, setup.chapterLength, setup.chapterLengthBrief, setup.educationLevel, setup.learnerNotes, setup.priorKnowledge, setup.themeId, updateChapter, setIsGenerating, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText, setError, refineAutoRegen]);
 
   // 7 generators + retryAudio + fleshOutActivity moved to useChapterMaterials hook.
 
@@ -713,16 +881,18 @@ Teacher feedback: "${feedback}"`;
   // download pick up the new render.
   const refineSlideImage = useCallback(
     async (idx: number) => {
-      if (!openaiApiKey || refiningSlideIdx !== null) return;
+      if (!openaiApiKey || refiningSlide !== null) return;
       const slide = slidesData[idx];
       if (!slide) return;
+      // Captured: a 4K render takes 30–60s and the user may switch chapters.
+      const chapterNum = selectedChapterNum;
       const draft = editedSlidePrompts[idx];
       const newPrompt = (draft ?? slide.imagePrompt ?? '').trim();
       if (!newPrompt) {
-        setSlideRefineError('Image prompt is empty.');
+        setSlideRefineError({ chapterNum, idx, message: 'Image prompt is empty.' });
         return;
       }
-      setRefiningSlideIdx(idx);
+      setRefiningSlide({ chapterNum, idx });
       setSlideRefineError(null);
       try {
         const [{ generateImageWithRetry }, { withSafetyClause }] = await Promise.all([
@@ -734,37 +904,46 @@ Teacher feedback: "${feedback}"`;
           openaiApiKey,
           { size: '3840x2160', quality: 'high', compression: 88 },
         );
-        // Mirror to local state so the row immediately reflects the new render.
-        setSlidesData((prev) =>
-          prev.map((s, i) =>
-            i === idx ? { ...s, imagePrompt: newPrompt, imageDataUri: dataUri } : s,
-          ),
-        );
+        // Mirror to local state so the row immediately reflects the new render
+        // — but only while this chapter's deck is the one in view; otherwise
+        // the image would land on another chapter's slide at the same index.
+        if (selectedChapterRef.current === chapterNum) {
+          setSlidesData((prev) =>
+            prev.map((s, i) =>
+              i === idx ? { ...s, imagePrompt: newPrompt, imageDataUri: dataUri } : s,
+            ),
+          );
+          // Clear this slide's draft now that it's committed.
+          setEditedSlidePrompts((prev) => {
+            const next = { ...prev };
+            delete next[idx];
+            return next;
+          });
+        }
         // Persist atomically — both prompt and image — so a tab-switch /
         // refresh never loses the edited prompt.
-        updateSlide(selectedChapterNum, idx, {
+        updateSlide(chapterNum, idx, {
           imagePrompt: newPrompt,
           imageDataUri: dataUri,
         });
-        // Clear this slide's draft now that it's committed.
-        setEditedSlidePrompts((prev) => {
-          const next = { ...prev };
-          delete next[idx];
-          return next;
-        });
       } catch (err) {
-        setSlideRefineError(friendlyError(err, 'Slide image regeneration failed.'));
+        setSlideRefineError({
+          chapterNum,
+          idx,
+          message: friendlyError(err, 'Slide image regeneration failed.'),
+        });
       } finally {
-        setRefiningSlideIdx(null);
+        setRefiningSlide(null);
       }
     },
     [
       openaiApiKey,
-      refiningSlideIdx,
+      refiningSlide,
       slidesData,
       editedSlidePrompts,
       updateSlide,
       selectedChapterNum,
+      setSlidesData,
     ],
   );
 
@@ -779,16 +958,19 @@ Teacher feedback: "${feedback}"`;
       return;
     }
     if (!syllabus || !syllabusChapter) return;
+    // Captured: the render takes minutes and the user may switch chapters,
+    // after which the local slides mirror holds a different chapter's deck.
+    const chapterNum = selectedChapterNum;
 
     setSlidesRender({
-      chapterNum: selectedChapterNum,
+      chapterNum,
       current: 0,
       total: slidesData.length,
       phase: 'rendering',
     });
     try {
       const { generatePptx } = await import('../services/export/pptxExporter');
-      const { blob } = await generatePptx(
+      const result = await generatePptx(
         slidesData,
         syllabus.courseTitle,
         syllabusChapter.title,
@@ -799,18 +981,22 @@ Teacher feedback: "${feedback}"`;
           imageSize: '3840x2160',
           onProgress: (current, total, phase) =>
             setSlidesRender({
-              chapterNum: selectedChapterNum,
+              chapterNum,
               current,
               total,
               phase,
             }),
           onSlideRendered: (i, dataUri) => {
             // Atomic write to courseStore — safe even with parallel workers.
-            setSlideImage(selectedChapterNum, i, dataUri);
-            // Mirror to local state so the "rendered" chip updates live.
-            setSlidesData((prev) =>
-              prev.map((s, idx) => (idx === i ? { ...s, imageDataUri: dataUri } : s)),
-            );
+            setSlideImage(chapterNum, i, dataUri);
+            // Mirror to local state so the "rendered" chip updates live, only
+            // while this chapter is still in view (else another chapter's
+            // deck would pick the image up as pre-rendered).
+            if (selectedChapterRef.current === chapterNum) {
+              setSlidesData((prev) =>
+                prev.map((s, idx) => (idx === i ? { ...s, imageDataUri: dataUri } : s)),
+              );
+            }
           },
           preRendered: Object.fromEntries(
             slidesData
@@ -822,9 +1008,16 @@ Teacher feedback: "${feedback}"`;
         },
       );
       downloadFile(
-        blob,
-        `slides-${selectedChapterNum}-${slugify(syllabusChapter.title || 'chapter')}.pptx`,
+        result.blob,
+        `slides-${chapterNum}-${slugify(syllabusChapter.title || 'chapter')}.pptx`,
       );
+      // Read tolerantly: exporters that predate per-slide reporting omit it.
+      const failedCount = (result as { failedSlides?: number[] }).failedSlides?.length ?? 0;
+      if (failedCount > 0) {
+        setTransientToast(
+          `Deck downloaded, but ${failedCount} slide ${failedCount === 1 ? 'image' : 'images'} couldn't render, so ${failedCount === 1 ? 'that slide is' : 'those slides are'} text-only. Download again to retry.`,
+        );
+      }
     } catch (err) {
       setError(friendlyError(err, 'Slides export failed.'));
     } finally {
@@ -837,6 +1030,7 @@ Teacher feedback: "${feedback}"`;
     syllabusChapter,
     selectedChapterNum,
     slidesData,
+    setSlidesData,
     setup.themeId,
     setSlidesRender,
     setSlideImage,
@@ -850,18 +1044,33 @@ Teacher feedback: "${feedback}"`;
   // parent (this page) opens an ImageRefineDrawer with the original prompt.
   useEffect(() => {
     function onMessage(e: MessageEvent) {
-      const data = e?.data as { __cbImageClick?: number; idx?: number; prompt?: string; aspect?: string } | undefined;
+      // Only the reading iframe's own click shim may open the drawer: not the
+      // quiz/challenge previews, a nested frame, or another window holding a
+      // reference to this one. Its payload is still model-adjacent, so check
+      // the shape too (a non-string prompt used to crash the drawer render).
+      const frame = readingIframeRef.current?.contentWindow;
+      if (!frame || e.source !== frame) return;
+      const data = e.data as
+        | { __cbImageClick?: unknown; idx?: unknown; prompt?: unknown; aspect?: unknown }
+        | null
+        | undefined;
       if (!data || data.__cbImageClick !== 1) return;
-      if (typeof data.idx !== 'number') return;
-      const src = getChapterImageSrc(chapterHtml, data.idx);
-      if (!src) return;
+      const { idx, prompt, aspect } = data;
+      if (typeof idx !== 'number' || !Number.isInteger(idx) || idx < 0) return;
+      // Only figures that exist in this reading; a failed one has no src yet.
+      if (!new RegExp(`<figure[^>]*\\bdata-image-idx="${idx}"`, 'i').test(chapterHtml)) return;
+      const src = getChapterImageSrc(chapterHtml, idx);
+      const promptText = typeof prompt === 'string' ? prompt : '';
       setChapterImageRefine({
-        idx: data.idx,
-        prompt: data.prompt ?? '',
-        aspect: data.aspect ?? 'landscape',
+        idx,
+        prompt: promptText,
+        aspect:
+          typeof aspect === 'string' && Object.hasOwn(CHAPTER_ASPECT_TO_SIZE, aspect)
+            ? aspect
+            : 'landscape',
         src,
       });
-      setChapterImageDraft(data.prompt ?? '');
+      setChapterImageDraft(promptText);
       setChapterImageRefineError(null);
     }
     window.addEventListener('message', onMessage);
@@ -883,6 +1092,8 @@ Teacher feedback: "${feedback}"`;
       setChapterImageRefineError('Image prompt is empty.');
       return;
     }
+    // Captured: the drawer can be closed and the chapter switched mid-render.
+    const chapterNum = selectedChapterNum;
     setChapterImageRefining(true);
     setChapterImageRefineError(null);
     try {
@@ -903,13 +1114,13 @@ Teacher feedback: "${feedback}"`;
         newPrompt,
         newDataUri,
       );
-      setChapterHtml(updatedHtml);
+      if (selectedChapterRef.current === chapterNum) setChapterHtml(updatedHtml);
       if (currentChapter) {
-        updateChapter(selectedChapterNum, { htmlContent: updatedHtml });
+        updateChapter(chapterNum, { htmlContent: updatedHtml });
       }
       setChapterImageRefine(null);
     } catch (err) {
-      setChapterImageRefineError(friendlyError(err, 'Chapter image regeneration failed.'));
+      setChapterImageRefineError(friendlyImageError(err));
     } finally {
       setChapterImageRefining(false);
     }
@@ -930,6 +1141,7 @@ Teacher feedback: "${feedback}"`;
   // ops visibility.
   const generateAllOutputs = useCallback(async () => {
     if (!currentChapter || !syllabusChapter || !syllabus) return;
+    if (!claudeApiKey.trim()) return;
     const logFailure = (kind: string) => (err: unknown) =>
       console.error(`[generateAllOutputs] ${kind} failed:`, err);
     const tasks: Promise<void>[] = [];
@@ -941,7 +1153,7 @@ Teacher feedback: "${feedback}"`;
     if (!audioTranscript) tasks.push(generateAudio().catch(logFailure('audio')));
     if (!currentChapter.weeklyChallengeData) tasks.push(generateWeeklyChallengeContent().catch(logFailure('weekly-challenge')));
     await Promise.allSettled(tasks);
-  }, [currentChapter, syllabusChapter, syllabus, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio, generateWeeklyChallengeContent]);
+  }, [currentChapter, syllabusChapter, syllabus, claudeApiKey, quizHtml, inClassQuizData, discussions, activities, slidesData, audioTranscript, generateQuiz, generateInClassQuiz, generateDiscussion, generateActivities, generateSlides, generateAudio, generateWeeklyChallengeContent]);
 
   // Keep the ref pointing at the latest generateAllOutputs so refineChapter
   // can fire a post-refine regen *after* the new chapter content has been
@@ -950,6 +1162,27 @@ Teacher feedback: "${feedback}"`;
   useEffect(() => {
     generateAllOutputsRef.current = generateAllOutputs;
   }, [generateAllOutputs]);
+
+  // Run a refine's opted-in rebuild that was deferred because its chapter
+  // wasn't open when the new reading landed (see refineChapter).
+  useEffect(() => {
+    const pending = rebuildMaterialsFor;
+    if (!pending || pending.chapterNum !== selectedChapterNum || !currentChapter) return;
+    if (isGenerating || batchGenerating) return;
+    setRebuildMaterialsFor(null);
+    // The reading changed since (another refine, a new course): stale, drop it.
+    if (currentChapter.htmlContent !== pending.htmlContent) return;
+    // Give the materials hook a beat to rehydrate this chapter, so the
+    // refreshed generateAllOutputs only fills what's actually missing.
+    // No cleanup on purpose: clearing the marker re-runs this effect.
+    setTimeout(() => {
+      if (mountedRef.current && selectedChapterRef.current === pending.chapterNum) {
+        void generateAllOutputsRef.current();
+      } else {
+        useUiStore.getState().setRebuildMaterialsFor(pending);
+      }
+    }, 250);
+  }, [rebuildMaterialsFor, selectedChapterNum, currentChapter, isGenerating, batchGenerating, setRebuildMaterialsFor]);
 
   // ─── Batch generation ───
   //
@@ -961,7 +1194,7 @@ Teacher feedback: "${feedback}"`;
   //   'classes'    → reading + practice quiz + in-class quiz + weekly challenge
   //   'everything' → the above plus discussion, activities, audio, slides
   const runBatch = useCallback(async (mode: 'everything' | 'classes') => {
-    if (!syllabus) return;
+    if (!syllabus || !claudeApiKey.trim()) return;
     setBatchGenerating(true);
     setBatchSummary(null);
     resetBatchChapterMs();
@@ -1034,11 +1267,18 @@ Teacher feedback: "${feedback}"`;
               }
             );
             let html = extractHtml(fullText);
+            let figureError: string | null = null;
             if (hasImageGen) {
               setBatchPhase('writing');
-              html = await replaceAiPlaceholders(html, openaiApiKey);
+              ({ html, figureError } = await replaceAiPlaceholders(html, openaiApiKey, signal));
             }
+            signal.throwIfAborted();
             addChapter({ number: ch.number, title: ch.title, htmlContent: html });
+            // Not a retryable batch step (the reading exists now): each figure
+            // is retried by clicking it.
+            if (figureError) {
+              failures.push({ chapter: ch.number, material: 'Figures', message: `${figureError} Click a failed figure in the reading to retry it.` });
+            }
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
             failures.push({ chapter: ch.number, material: 'Reading', message: friendlyError(err, 'Drafting failed.') });
@@ -1072,7 +1312,8 @@ Teacher feedback: "${feedback}"`;
               {}
             );
             const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-            const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey);
+            const balancedQuiz = await balancePracticeQuiz(quizText, claudeApiKey, signal);
+            signal.throwIfAborted();
             updateChapter(ch.number, { practiceQuizData: balancedQuiz });
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
@@ -1101,13 +1342,21 @@ Teacher feedback: "${feedback}"`;
               },
               {}
             );
+            let parsed: InClassQuizQuestion[] = [];
             try {
-              const parsed = parseJson(inClassText) as InClassQuizQuestion[];
-              const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-              const balanced = await balanceInClassQuiz(parsed, claudeApiKey);
-              if (balanced) updateChapter(ch.number, { inClassQuizData: balanced });
+              parsed = wellFormedInClassQuiz(parseJson(inClassText));
             } catch {
+              /* reported below */
+            }
+            if (parsed.length === 0) {
               failures.push({ chapter: ch.number, material: 'In-class quiz', message: 'The model returned unparseable quiz data — a retry usually fixes this.' });
+            } else {
+              // Outside the parse guard: an abort while balancing must break the
+              // run (outer catch), not be reported as unparseable data.
+              const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
+              const balanced = await balanceInClassQuiz(parsed, claudeApiKey, signal);
+              signal.throwIfAborted();
+              updateChapter(ch.number, { inClassQuizData: balanced });
             }
           } catch (err) {
             if (isAbortError(err) || signal.aborted) break;
@@ -1180,7 +1429,8 @@ Teacher feedback: "${feedback}"`;
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as DiscussionPrompt[];
+                const parsed = wellFormedRows<DiscussionPrompt>(parseJson(fullText), ['prompt']);
+                if (parsed.length === 0) throw new Error('Malformed discussion JSON.');
                 updateChapter(ch.number, { discussionData: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Discussion', message: friendlyError(err, 'Generation failed.') });
@@ -1206,7 +1456,8 @@ Teacher feedback: "${feedback}"`;
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as Activity[];
+                const parsed = wellFormedRows<Activity>(parseJson(fullText), ['title']);
+                if (parsed.length === 0) throw new Error('Malformed activities JSON.');
                 updateChapter(ch.number, { activityData: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Activities', message: friendlyError(err, 'Generation failed.') });
@@ -1239,9 +1490,12 @@ Teacher feedback: "${feedback}"`;
                     const { generateAudiobook } = await import('../services/elevenLabs/tts');
                     const batchVoice = getVoiceOption(setup.voiceId);
                     const blob = await generateAudiobook(transcript, elevenLabsApiKey, { voiceId: batchVoice.id, signal });
-                    const url = URL.createObjectURL(blob);
                     const audioDataUri = await persistableAudioDataUri(blob);
+                    signal.throwIfAborted();
+                    const url = URL.createObjectURL(blob);
+                    const prevUrl = useCourseStore.getState().chapters.find(c => c.number === ch.number)?.audioUrl;
                     updateChapter(ch.number, { audioUrl: url, audioDataUri });
+                    if (prevUrl !== url) revokeNarrationUrl(prevUrl);
                   } catch (err) {
                     // The transcript is saved either way.
                     if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Audio narration', message: friendlyError(err, 'Synthesis failed — the transcript is saved.') });
@@ -1267,11 +1521,14 @@ Teacher feedback: "${feedback}"`;
                       content: buildSlidesUserPrompt(ch.title, ch.keyConcepts, html),
                     }],
                     thinkingBudget: 'medium',
-                    maxTokens: 4000,
+                    // 12–14 slides with long imagePrompts need ~5–7k output
+                    // tokens beside up to 8k of thinking; 4000 truncated them.
+                    maxTokens: 12000,
                   },
                   {}
                 );
-                const parsed = parseJson(fullText) as SlideData[];
+                const parsed = wellFormedRows<SlideData>(parseJson(fullText), ['title']);
+                if (parsed.length === 0) throw new Error('Malformed slides JSON.');
                 updateChapter(ch.number, { slidesJson: parsed });
               } catch (err) {
                 if (!isAbortError(err)) failures.push({ chapter: ch.number, material: 'Slides', message: friendlyError(err, 'Generation failed.') });
@@ -1381,10 +1638,14 @@ Teacher feedback: "${feedback}"`;
 
   return (
     <div
+      ref={fitPageRef}
       style={{
         fontFamily: 'var(--font-cb-serif)',
         color: 'var(--cb-text-default)',
-        padding: '24px 0 32px',
+        padding: '20px 0 24px',
+        display: 'flex',
+        flexDirection: 'column',
+        height: fitHeight ?? undefined,
       }}
     >
       {/* ─── Codex slim banner ─── */}
@@ -1395,8 +1656,8 @@ Teacher feedback: "${feedback}"`;
           gridTemplateColumns: '1fr auto',
           gap: 24,
           alignItems: 'flex-end',
-          paddingBottom: 14,
-          marginBottom: 18,
+          paddingBottom: 12,
+          marginBottom: 14,
           borderBottom: '0.5px solid var(--cb-border-rule)',
         }}
       >
@@ -1469,6 +1730,10 @@ Teacher feedback: "${feedback}"`;
                   ]
                     .filter(Boolean)
                     .join(' · ')
+                : readingDraft
+                ? `${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built · ${
+                    readingDraft.mode === 'refine' ? 'refining' : 'drafting'
+                  } chapter ${readingDraft.chapterNum}…`
                 : generatedCount === totalChapters && totalChapters > 0
                 ? `— ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`
                 : `${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} built.`}
@@ -1503,7 +1768,7 @@ Teacher feedback: "${feedback}"`;
                 fontFamily: 'inherit',
                 fontSize: 13,
                 fontStyle: 'italic',
-                color: 'var(--cb-status-warning)',
+                color: 'var(--cb-status-warning-text)',
                 textDecoration: 'underline',
                 textDecorationThickness: '0.5px',
                 textUnderlineOffset: 3,
@@ -1517,7 +1782,7 @@ Teacher feedback: "${feedback}"`;
                 size="sm"
                 variant="secondary"
                 onClick={() => setShowBatchConfirm(true)}
-                disabled={anyBusy}
+                disabled={anyBusy || !hasClaudeKey}
               >
                 {generatedCount > 0 ? 'Draft remaining chapters' : 'Draft all chapters'}
               </Button>
@@ -1554,52 +1819,104 @@ Teacher feedback: "${feedback}"`;
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="mb-4 overflow-hidden"
+              style={{ overflow: 'hidden', marginBottom: 16, flexShrink: 0 }}
               role="dialog"
               aria-modal="true"
               aria-labelledby="batch-confirm-title"
             >
-              <div className="p-5 rounded-xl bg-cb-status-warning-bg border border-cb-status-warning">
-                <h3 id="batch-confirm-title" className="text-sm font-semibold text-cb-status-warning mb-2">
+              <div
+                style={{
+                  padding: '16px 18px',
+                  background: 'var(--cb-status-warning-bg)',
+                  borderLeft: '2px solid var(--cb-status-warning)',
+                  borderRadius: 2,
+                }}
+              >
+                <h3
+                  id="batch-confirm-title"
+                  style={{
+                    margin: '0 0 6px',
+                    fontSize: 16,
+                    fontWeight: 500,
+                    color: 'var(--cb-status-warning-text)',
+                  }}
+                >
                   Generate {researched} class{researched !== 1 ? 'es' : ''} at once?
                 </h3>
-                <p className="text-sm text-cb-text-default mb-3 leading-relaxed">
+                <p style={{ margin: '0 0 10px', fontSize: 14, lineHeight: 1.55 }}>
                   This will use a meaningful amount of your API key balance.
                 </p>
                 {unresearched > 0 && (
-                  <p className="text-xs text-cb-status-warning mb-3 leading-relaxed">
+                  <p
+                    className="cb-italic"
+                    style={{ margin: '0 0 12px', fontSize: 13, lineHeight: 1.55, color: 'var(--cb-status-warning-text)' }}
+                  >
                     {unresearched} class{unresearched !== 1 ? 'es' : ''} without research will be skipped. Go to Research to add them.
                   </p>
                 )}
-                <div className="grid gap-2 sm:grid-cols-2 mb-3">
-                  <button
-                    onClick={() => { setShowBatchConfirm(false); generateEverything(); }}
-                    disabled={researched === 0}
-                    className="p-3 rounded-lg border border-cb-border-strong bg-cb-accent-emphasis-quiet hover:bg-cb-accent-emphasis-quiet transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
-                  >
-                    <div className="text-sm font-semibold text-cb-accent-emphasis mb-1">Build Everything</div>
-                    <p className="text-xs text-cb-text-muted leading-relaxed">
-                      All materials — reading, quizzes, weekly challenge, discussion, activities, audiobook, slides.
-                      {researched >= 6 ? ' Possibly 1-2 hours.' : researched >= 3 ? ' Possibly 30-60 min.' : ' Takes a while.'}
-                    </p>
-                  </button>
-                  <button
-                    onClick={() => { setShowBatchConfirm(false); generateAllClasses(); }}
-                    disabled={researched === 0}
-                    className="p-3 rounded-lg border border-cb-border-default bg-cb-surface-sunken hover:bg-cb-ground-page transition-colors text-left disabled:opacity-40 disabled:cursor-default cursor-pointer"
-                  >
-                    <div className="text-sm font-semibold text-cb-text-default mb-1">Classes + Quizzes Only</div>
-                    <p className="text-xs text-cb-text-muted leading-relaxed">
-                      Reading, Practice Quiz, and In-Class Quiz for each class.
-                      {researched >= 6 ? ' Possibly 30+ min.' : researched >= 3 ? ' Possibly 10-15 min.' : ''}
-                    </p>
-                  </button>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                    gap: 10,
+                    marginBottom: 12,
+                  }}
+                >
+                  {[
+                    {
+                      label: 'Build everything',
+                      body: `All materials: reading, quizzes, weekly challenge, discussion, activities, audiobook, slides.${
+                        researched >= 6 ? ' Possibly 1–2 hours.' : researched >= 3 ? ' Possibly 30–60 min.' : ' Takes a while.'
+                      }`,
+                      onPick: generateEverything,
+                      emphasis: true,
+                    },
+                    {
+                      label: 'Classes and quizzes only',
+                      body: `Reading, practice quiz, in-class quiz and weekly challenge for each class.${
+                        researched >= 6 ? ' Possibly 30+ min.' : researched >= 3 ? ' Possibly 10–15 min.' : ''
+                      }`,
+                      onPick: generateAllClasses,
+                      emphasis: false,
+                    },
+                  ].map((opt) => (
+                    <button
+                      key={opt.label}
+                      type="button"
+                      onClick={() => { setShowBatchConfirm(false); void opt.onPick(); }}
+                      disabled={researched === 0}
+                      className="cb-focus"
+                      style={{
+                        textAlign: 'left',
+                        padding: '12px 14px',
+                        background: opt.emphasis ? 'var(--cb-accent-emphasis-quiet)' : 'var(--cb-ground-page)',
+                        border: `0.5px solid ${opt.emphasis ? 'var(--cb-border-strong)' : 'var(--cb-border-default)'}`,
+                        borderRadius: 2,
+                        fontFamily: 'inherit',
+                        color: 'var(--cb-text-default)',
+                        cursor: researched === 0 ? 'default' : 'pointer',
+                        opacity: researched === 0 ? 0.45 : 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: 15,
+                          fontWeight: 500,
+                          marginBottom: 4,
+                          color: opt.emphasis ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-default)',
+                        }}
+                      >
+                        {opt.label}
+                      </div>
+                      <p className="cb-italic" style={{ margin: 0, fontSize: 13, lineHeight: 1.5, color: 'var(--cb-text-muted)' }}>
+                        {opt.body}
+                      </p>
+                    </button>
+                  ))}
                 </div>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="ghost" onClick={() => setShowBatchConfirm(false)}>
-                    Cancel
-                  </Button>
-                </div>
+                <Button size="sm" variant="ghost" onClick={() => setShowBatchConfirm(false)}>
+                  Cancel
+                </Button>
               </div>
             </motion.div>
           );
@@ -1611,7 +1928,8 @@ Teacher feedback: "${feedback}"`;
         <div
           role="status"
           style={{
-            marginBottom: 20,
+            flexShrink: 0,
+            marginBottom: 16,
             padding: '14px 16px',
             background: batchSummary.failures.length
               ? 'var(--cb-status-warning-bg)'
@@ -1650,6 +1968,10 @@ Teacher feedback: "${feedback}"`;
                 <Button
                   size="sm"
                   variant="secondary"
+                  // Same gate as "Draft remaining chapters": a batch must not
+                  // start under a running draft or material job.
+                  disabled={anyBusy || !hasClaudeKey}
+                  title={anyBusy ? 'Wait for the current generation to finish.' : undefined}
                   onClick={() => {
                     const mode = batchSummary.mode;
                     setBatchSummary(null);
@@ -1689,17 +2011,46 @@ Teacher feedback: "${feedback}"`;
 
       {error && (
         <div
+          role="alert"
           style={{
-            marginBottom: 20,
+            flexShrink: 0,
+            marginBottom: 16,
             padding: '12px 14px',
             background: 'var(--cb-status-danger-bg)',
             borderLeft: '2px solid var(--cb-status-danger)',
             fontSize: 14,
             lineHeight: 1.55,
             color: 'var(--cb-text-default)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'baseline',
+            gap: 16,
           }}
         >
-          {error}
+          <span>{error}</span>
+          {/* It otherwise stayed up until you left the page. */}
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="cb-focus pointer-coarse:min-h-11"
+            style={{
+              background: 'transparent',
+              border: 0,
+              padding: 0,
+              cursor: 'pointer',
+              fontSize: 13,
+              fontStyle: 'italic',
+              color: 'var(--cb-accent-link)',
+              textDecoration: 'underline',
+              textDecorationThickness: '0.5px',
+              textUnderlineOffset: 3,
+              whiteSpace: 'nowrap',
+              fontFamily: 'inherit',
+              flexShrink: 0,
+            }}
+          >
+            dismiss
+          </button>
         </div>
       )}
 
@@ -1709,7 +2060,9 @@ Teacher feedback: "${feedback}"`;
         style={{
           display: 'flex',
           gap: 0,
-          height: 'calc(100vh - 220px)',
+          // Fills what the page column leaves (see fitPageRef).
+          flex: '1 1 auto',
+          minHeight: 0,
           border: '1px solid var(--cb-border-default)',
           borderRadius: 2,
           overflow: 'hidden',
@@ -1721,6 +2074,7 @@ Teacher feedback: "${feedback}"`;
           onSelectChapter={setSelectedChapterNum}
           disabled={batchGenerating}
           batchCurrentChapter={batchCurrentChapter}
+          readingDraft={readingDraft}
         />
 
         {/* Right: Content area */}
@@ -1733,140 +2087,218 @@ Teacher feedback: "${feedback}"`;
             background: 'var(--cb-ground-page)',
           }}
         >
-          {/* Batch progress panel — shown during batch mode */}
+          {/* Batch progress panel — shown during batch mode. Same vocabulary
+              as the chapter sidebar: numeral, title, one italic status line,
+              pen stroke on the chapter in progress. */}
           {batchGenerating && (
-            <div className="mb-4 bg-cb-ground-page border border-cb-border-default rounded-xl p-5">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-cb-accent-emphasis">Batch Generation</h3>
-                <span className="text-xs text-cb-text-muted">
-                  {generatedCount} of {totalChapters} complete
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute left-5 top-0 bottom-0 w-px bg-cb-border-default" />
-                <div className="space-y-1">
-                  {syllabus.chapters.map((ch) => {
+            <div style={{ marginBottom: 16 }}>
+              <ArtifactShell
+                kicker="Batch generation"
+                title={`${generatedCount} of ${totalChapters} ${totalChapters === 1 ? 'chapter' : 'chapters'} drafted`}
+                bodyless
+              >
+                <ol style={{ listStyle: 'none', margin: 0, padding: 0 }}>
+                  {syllabus.chapters.map((ch, idx) => {
                     const generated = chapters.find(c => c.number === ch.number);
                     const isCurrent = batchCurrentChapter === ch.number;
-                    // Count completed materials for this chapter
+                    // Count completed materials for this chapter (the same eight the sidebar counts)
                     let matCount = 0;
-                    const maxMat = 7;
+                    const maxMat = 8;
                     if (generated) {
                       if (generated.htmlContent) matCount++;
                       if (generated.practiceQuizData) matCount++;
                       if (generated.inClassQuizData && generated.inClassQuizData.length > 0) matCount++;
+                      if (generated.weeklyChallengeData) matCount++;
                       if (generated.discussionData && generated.discussionData.length > 0) matCount++;
                       if (generated.activityData && generated.activityData.length > 0) matCount++;
                       if (generated.audioTranscript) matCount++;
                       if (generated.slidesJson && generated.slidesJson.length > 0) matCount++;
                     }
+                    const status = isCurrent
+                      ? `${batchMaterial ? `${batchMaterial.toLowerCase()} · ` : ''}${batchPhase === 'thinking' ? 'thinking…' : 'writing…'}`
+                      : generated && matCount === maxMat
+                      ? '— complete'
+                      : generated
+                      ? `— ${matCount} of ${maxMat} drafted`
+                      : '— pending';
                     return (
-                      <div key={ch.number} className="relative flex items-center gap-4 pl-0">
-                        <div className="relative z-10 shrink-0">
-                          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium border-2 transition-all duration-300 ${
-                            generated && matCount === maxMat
-                              ? 'bg-cb-status-success border-cb-status-success text-cb-status-success'
-                              : generated
-                              ? 'bg-cb-accent-emphasis-quiet border-cb-border-strong text-cb-accent-emphasis'
-                              : isCurrent
-                              ? 'bg-cb-accent-emphasis-quiet border-cb-border-strong text-cb-accent-emphasis'
-                              : 'bg-cb-ground-page border-cb-border-default text-cb-text-muted'
-                          }`}>
-                            {generated && matCount === maxMat ? (
-                              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><polyline points="20 6 9 17 4 12" /></svg>
-                            ) : isCurrent ? (
-                              <motion.div
-                                className="w-3 h-3 rounded-full bg-cb-accent-emphasis"
-                                animate={{ scale: [1, 1.3, 1] }}
-                                transition={{ duration: 1, repeat: Infinity }}
-                              />
-                            ) : (
-                              ch.number
-                            )}
-                          </div>
-                        </div>
-                        <div className={`flex-1 py-2 px-3 rounded-xl transition-all ${
-                          isCurrent ? 'bg-cb-accent-emphasis-quiet border border-cb-border-default' : generated ? 'bg-cb-ground-page/50' : ''
-                        }`}>
-                          <div className="text-sm font-medium truncate">{ch.title}</div>
-                          <div className="text-xs text-cb-text-muted mt-0.5">
-                            {generated
-                              ? `${matCount}/${maxMat} materials`
-                              : isCurrent
-                              ? batchMaterial
-                                ? `${batchMaterial}${batchPhase === 'thinking' ? ' — thinking...' : ' — writing...'}`
-                                : batchPhase === 'thinking' ? 'Thinking...' : 'Writing...'
-                              : 'Pending'}
-                          </div>
-                        </div>
+                      <li
+                        key={ch.number}
+                        aria-current={isCurrent ? 'step' : undefined}
+                        style={{
+                          position: 'relative',
+                          display: 'grid',
+                          gridTemplateColumns: '36px minmax(0, 1fr)',
+                          gap: 8,
+                          padding: '10px 20px',
+                          borderTop: idx === 0 ? 'none' : '0.5px solid var(--cb-border-subtle)',
+                          background: isCurrent ? 'var(--cb-accent-emphasis-quiet)' : 'transparent',
+                        }}
+                      >
                         {isCurrent && (
-                          <motion.div
-                            className="w-5 h-5 border-2 border-cb-accent-emphasis border-t-transparent rounded-full shrink-0"
-                            animate={{ rotate: 360 }}
-                            transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                          <span
+                            aria-hidden
+                            style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 2, background: 'var(--cb-accent-emphasis)' }}
                           />
                         )}
-                      </div>
+                        <span
+                          className="cb-italic"
+                          style={{
+                            fontSize: 16,
+                            lineHeight: 1.35,
+                            color: generated || isCurrent ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-subtle)',
+                          }}
+                        >
+                          {ROMAN_NUMERALS[idx] ?? ch.number}
+                        </span>
+                        <div style={{ minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: 14.5,
+                              lineHeight: 1.35,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {ch.title}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginTop: 2 }}>
+                            {isCurrent && (
+                              <span
+                                aria-hidden
+                                style={{
+                                  display: 'inline-block',
+                                  width: 28,
+                                  height: 1,
+                                  background: 'var(--cb-border-default)',
+                                  position: 'relative',
+                                  overflow: 'hidden',
+                                  verticalAlign: 'middle',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    inset: 0,
+                                    background: 'var(--cb-accent-emphasis)',
+                                    animation: 'cb-pen 1.4s cubic-bezier(0.32,0.04,0.32,1) infinite',
+                                  }}
+                                />
+                              </span>
+                            )}
+                            <span
+                              className="cb-italic"
+                              style={{
+                                fontSize: 12.5,
+                                color: isCurrent ? 'var(--cb-accent-emphasis)' : 'var(--cb-text-muted)',
+                              }}
+                            >
+                              {status}
+                            </span>
+                          </div>
+                        </div>
+                      </li>
                     );
                   })}
-                </div>
-              </div>
+                </ol>
+              </ArtifactShell>
             </div>
           )}
 
-          {/* Research panel */}
-          {!batchGenerating && (
-            <ResearchPanel chapterNum={selectedChapterNum} />
+          {/* No Anthropic key (e.g. a project restored in a new browser):
+              nothing that calls Claude fires; say why and offer the fix. */}
+          {!hasClaudeKey && !batchGenerating && (
+            <div style={{ marginBottom: 14 }}>
+              <KeyMissingBanner
+                tone="recommended"
+                text={
+                  <>
+                    <strong>No Anthropic key yet.</strong> Drafting readings and materials
+                    runs on your Anthropic key. Add it to keep building; everything already
+                    drafted stays as it is.
+                  </>
+                }
+                ctaLabel="Add Anthropic key →"
+                onCta={openKeysModal}
+              />
+            </div>
           )}
 
-          {/* Generate all outputs for current class */}
-          {!batchGenerating && currentChapter && !isGenerating && (() => {
-            const missing = [
-              !quizHtml,
-              inClassQuizData.length === 0,
-              discussions.length === 0,
-              activities.length === 0,
-              slidesData.length === 0,
-              !audioTranscript,
-              !currentChapter.weeklyChallengeData,
-            ].filter(Boolean).length;
-            return (
-              <div className="flex items-baseline gap-3 mb-4 flex-wrap">
-                {missing > 0 ? (
+          {/* One status row above the tabs: the research pointer on the left,
+              the chapter's material status and "Generate all" on the right. */}
+          {!batchGenerating && (
+            <ResearchPanel chapterNum={selectedChapterNum}>
+              {currentChapter && !isGenerating && (() => {
+                const missing = [
+                  !quizHtml,
+                  inClassQuizData.length === 0,
+                  discussions.length === 0,
+                  activities.length === 0,
+                  slidesData.length === 0,
+                  !audioTranscript,
+                  !currentChapter.weeklyChallengeData,
+                ].filter(Boolean).length;
+                // Eight materials, counting the reading (as the sidebar does).
+                return missing > 0 ? (
                   <>
+                    <span className="cb-italic" style={{ fontSize: 13, color: 'var(--cb-text-muted)' }}>
+                      {anyLocalGenerating
+                        ? 'Generating… rate limits may cause automatic retries'
+                        : `${missing} of 8 remaining`}
+                    </span>
                     <Button
                       size="sm"
                       variant="secondary"
                       onClick={() => void generateAllOutputs()}
-                      disabled={anyLocalGenerating}
+                      disabled={anyLocalGenerating || !hasClaudeKey}
                       title={
                         anyLocalGenerating
                           ? 'Generation is already running for this chapter.'
-                          : undefined
+                          : 'Drafts every missing material for this chapter. A few minutes, on your keys.'
                       }
                     >
-                      ▸ Generate all materials for this chapter
+                      ▸ Generate all materials
                     </Button>
-                    <span className="text-xs italic text-cb-text-muted">
-                      {anyLocalGenerating
-                        ? 'Generating… rate limits may cause automatic retries'
-                        : `${missing} of 7 remaining · a few minutes, on your keys`}
-                    </span>
                   </>
                 ) : (
-                  <span className="text-xs italic text-cb-text-muted">
-                    All seven materials are drafted for this chapter.
+                  <span className="cb-italic" style={{ fontSize: 13, color: 'var(--cb-text-muted)' }}>
+                    All eight materials are drafted.
                   </span>
-                )}
-              </div>
-            );
-          })()}
+                );
+              })()}
+            </ResearchPanel>
+          )}
 
-          {/* Generate chapter button when chapter not yet generated */}
-          {!batchGenerating && !currentChapter && !isGenerating && (() => {
+          {/* Generate chapter button when chapter not yet generated. Shown on
+              every undrafted chapter except the one drafting; while another
+              reading holds the one-at-a-time slot the buttons are disabled
+              and the note names that chapter. */}
+          {!batchGenerating && !currentChapter && !draftingThisChapter && (() => {
             const hasResearch = researchDossiers.some(d => d.chapterNumber === selectedChapterNum && d.sources.length > 0);
             const romanIdx = selectedChapterNum - 1;
-            const roman = ['I','II','III','IV','V','VI','VII','VIII','IX','X','XI','XII','XIII','XIV','XV','XVI','XVII','XVIII','XIX','XX'][romanIdx] ?? String(selectedChapterNum);
+            const roman = ROMAN_NUMERALS[romanIdx] ?? String(selectedChapterNum);
+            const startDraft = () => {
+              // Land on the Reading tab, where the draft's progress shows.
+              setActiveTab('chapter');
+              void generateChapter(selectedChapterNum);
+            };
+            const blockedNote = readingBlockedNote && (
+              <p
+                className="cb-italic"
+                role="status"
+                style={{
+                  margin: '0 0 14px',
+                  fontSize: 13.5,
+                  color: 'var(--cb-text-muted)',
+                  lineHeight: 1.55,
+                  maxWidth: '72ch',
+                }}
+              >
+                {readingBlockedNote}
+              </p>
+            );
             return (
               <section
                 style={{
@@ -1952,7 +2384,8 @@ Teacher feedback: "${feedback}"`;
                         />
                       </div>
                     )}
-                    <Button onClick={() => generateChapter(selectedChapterNum)}>
+                    {blockedNote}
+                    <Button onClick={startDraft} disabled={!!readingBlockedNote || !hasClaudeKey}>
                       Draft this chapter →
                     </Button>
                   </>
@@ -1963,7 +2396,7 @@ Teacher feedback: "${feedback}"`;
                       style={{
                         margin: '0 0 6px',
                         fontSize: 14.5,
-                        color: 'var(--cb-status-warning)',
+                        color: 'var(--cb-status-warning-text)',
                         lineHeight: 1.55,
                       }}
                     >
@@ -1982,11 +2415,12 @@ Teacher feedback: "${feedback}"`;
                       Drafting without research may include unverified references. Better
                       to go back and research first; or proceed anyway and verify by hand.
                     </p>
+                    {blockedNote}
                     <div style={{ display: 'flex', gap: 10 }}>
                       <Button onClick={() => navigate('/research')}>
                         Go to Research
                       </Button>
-                      <Button variant="ghost" onClick={() => generateChapter(selectedChapterNum)}>
+                      <Button variant="ghost" onClick={startDraft} disabled={!!readingBlockedNote || !hasClaudeKey}>
                         Draft anyway
                       </Button>
                     </div>
@@ -1996,8 +2430,8 @@ Teacher feedback: "${feedback}"`;
             );
           })()}
 
-          {/* Tabs — only show when chapter exists or is generating */}
-          {!batchGenerating && (currentChapter || isGenerating) && (
+          {/* Tabs — only show when the chapter exists or is the one drafting */}
+          {!batchGenerating && (currentChapter || draftingThisChapter) && (
             <>
               <div
                 role="tablist"
@@ -2121,14 +2555,16 @@ Teacher feedback: "${feedback}"`;
                 >
                   <span>{tabErrors[activeTab]}</span>
                   <span style={{ display: 'flex', gap: 14, flexShrink: 0 }}>
-                    {tabRetryHandlers[activeTab] && (
+                    {/* No retry without a key: it couldn't run (banner above). */}
+                    {tabRetryHandlers[activeTab] && hasClaudeKey && (
                       <button
+                        type="button"
                         onClick={() => {
                           const retry = tabRetryHandlers[activeTab];
                           clearTabError(activeTab);
                           retry?.();
                         }}
-                        className="cb-focus"
+                        className="cb-focus pointer-coarse:min-h-11"
                         style={{
                           background: 'transparent',
                           border: 0,
@@ -2148,8 +2584,9 @@ Teacher feedback: "${feedback}"`;
                       </button>
                     )}
                     <button
+                      type="button"
                       onClick={() => clearTabError(activeTab)}
-                      className="cb-focus"
+                      className="cb-focus pointer-coarse:min-h-11"
                       style={{
                         background: 'transparent',
                         border: 0,
@@ -2175,16 +2612,23 @@ Teacher feedback: "${feedback}"`;
               <AnimatePresence mode="wait">
                 {activeTab === 'chapter' && (
                   <ReadingTab
+                    iframeRef={readingIframeRef}
                     chapterHtml={chapterHtml}
                     chapterNum={selectedChapterNum}
                     chapterTitle={syllabusChapter?.title ?? ''}
                     themeId={setup.themeId}
-                    isGenerating={isGenerating && chapterDraftingFor === selectedChapterNum}
-                    isRefining={isRefining}
-                    streamingText={streamingText}
-                    thinkingText={thinkingText}
+                    // The in-progress UI (stream, trace, timer, Stop) only on
+                    // the chapter actually drafting or refining.
+                    isGenerating={draftingThisChapter}
+                    isRefining={draftingThisChapter && readingDraft?.mode === 'refine'}
+                    streamingText={draftingThisChapter ? streamingText : ''}
+                    thinkingText={draftingThisChapter ? thinkingText : ''}
                     elapsedSec={elapsedSec}
                     onStop={() => abortInFlight(materialAbortKey('reading', selectedChapterNum))}
+                    refineBlockedNote={
+                      readingBlockedNote ??
+                      (hasClaudeKey ? null : 'Refining runs on your Anthropic key. Add it above to refine this reading.')
+                    }
                     showImageHint={showChapterImageHint}
                     onDismissImageHint={dismissChapterImageHint}
                     refineFeedback={refineFeedback}
@@ -2215,7 +2659,7 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingQuiz === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingQuiz}
+                      canGenerate={!!currentChapter && !generatingQuiz && hasClaudeKey}
                       onGenerate={generateQuiz}
                       onStop={() => abortInFlight(materialAbortKey('quiz', selectedChapterNum))}
                     />
@@ -2234,7 +2678,7 @@ Teacher feedback: "${feedback}"`;
                       courseTitle={syllabus?.courseTitle ?? ''}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingInClassQuiz === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingInClassQuiz}
+                      canGenerate={!!currentChapter && !generatingInClassQuiz && hasClaudeKey}
                       onGenerate={generateInClassQuiz}
                       onStop={() => abortInFlight(materialAbortKey('inclassquiz', selectedChapterNum))}
                       onError={(msg) => setError(friendlyError(msg, 'Quiz export failed.'))}
@@ -2254,7 +2698,7 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingWeeklyChallenge === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingWeeklyChallenge}
+                      canGenerate={!!currentChapter && !generatingWeeklyChallenge && hasClaudeKey}
                       onGenerate={generateWeeklyChallengeContent}
                       onStop={() => abortInFlight(materialAbortKey('weeklychallenge', selectedChapterNum))}
                     />
@@ -2271,7 +2715,7 @@ Teacher feedback: "${feedback}"`;
                     <DiscussionTab
                       discussions={discussions}
                       isGenerating={generatingDiscussion === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingDiscussion}
+                      canGenerate={!!currentChapter && !generatingDiscussion && hasClaudeKey}
                       onGenerate={generateDiscussion}
                       onStop={() => abortInFlight(materialAbortKey('discussion', selectedChapterNum))}
                       onCopy={copyToClipboard}
@@ -2294,7 +2738,8 @@ Teacher feedback: "${feedback}"`;
                       expandingActivity={expandingActivity}
                       copiedLabel={copiedLabel}
                       isGenerating={generatingActivities === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingActivities}
+                      canGenerate={!!currentChapter && !generatingActivities && hasClaudeKey}
+                      canExpand={hasClaudeKey}
                       onGenerate={generateActivities}
                       onStop={() => abortInFlight(materialAbortKey('activities', selectedChapterNum))}
                       onCopy={copyToClipboard}
@@ -2319,6 +2764,9 @@ Teacher feedback: "${feedback}"`;
                     exit={{ opacity: 0 }}
                   >
                     <AudioTab
+                      // Remount per chapter so an open transcript editor (and
+                      // its draft) can't be saved into the next chapter.
+                      key={selectedChapterNum}
                       audioTranscript={audioTranscript}
                       audioUrl={audioUrl}
                       audioError={audioError}
@@ -2328,7 +2776,10 @@ Teacher feedback: "${feedback}"`;
                       chapterNum={selectedChapterNum}
                       chapterTitle={syllabusChapter?.title ?? ''}
                       isGenerating={generatingAudio === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingAudio}
+                      // The transcript needs Claude; narrating an existing
+                      // transcript only needs ElevenLabs (one narration at a time).
+                      canGenerate={!!currentChapter && !generatingAudio && hasClaudeKey}
+                      canNarrate={!generatingAudio}
                       hasElevenLabsKey={!!elevenLabsApiKey}
                       onGenerate={generateAudio}
                       onRetry={retryAudio}
@@ -2352,7 +2803,7 @@ Teacher feedback: "${feedback}"`;
                       slides={slidesData}
                       chapterNum={selectedChapterNum}
                       isGenerating={generatingSlides === selectedChapterNum}
-                      canGenerate={!!currentChapter && !generatingSlides}
+                      canGenerate={!!currentChapter && !generatingSlides && hasClaudeKey}
                       hasOpenAiKey={!!openaiApiKey}
                       showImageHint={showSlideImageHint}
                       onDismissImageHint={dismissSlideImageHint}
@@ -2372,8 +2823,15 @@ Teacher feedback: "${feedback}"`;
                           return next;
                         })
                       }
-                      refiningSlideIdx={refiningSlideIdx}
-                      slideRefineError={slideRefineError}
+                      refiningSlideIdx={
+                        refiningSlide?.chapterNum === selectedChapterNum ? refiningSlide.idx : null
+                      }
+                      slideRefineBusyElsewhere={
+                        !!refiningSlide && refiningSlide.chapterNum !== selectedChapterNum
+                      }
+                      slideRefineError={
+                        slideRefineError?.chapterNum === selectedChapterNum ? slideRefineError : null
+                      }
                       onRefineSlide={refineSlideImage}
                     />
                   </motion.div>

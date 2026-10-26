@@ -10,8 +10,25 @@
  * - Game-like animations, confetti, and polish
  * - Theme integration via CSS variables
  */
-import { getTheme } from '../themes';
+import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
 import type { WeeklyChallengeData } from '../types/course';
+import { readableOnTheme } from '../themes/themes.config';
+import { toScriptJson } from './htmlEscape';
+
+/** Decimal places in a numeric value (0.25 -> 2, 65 -> 0). */
+function decimalPlaces(n: unknown): number {
+  if (typeof n !== 'number' || !Number.isFinite(n)) return 0;
+  const m = String(n).match(/\.(\d+)$/);
+  return m ? m[1].length : 0;
+}
+
+/** Slider step fine enough for the question's numbers: 1 for whole numbers
+ *  (the browser default), 0.01 for a value like 0.35, capped at 3 places. */
+function sliderStep(v: Record<string, unknown>): number {
+  const range = Array.isArray(v.acceptableRange) ? v.acceptableRange : [];
+  const dp = Math.min(3, Math.max(0, ...[v.sliderMin, v.sliderMax, v.correctValue, ...range].map(decimalPlaces)));
+  return dp === 0 ? 1 : Number(Math.pow(10, -dp).toFixed(dp));
+}
 
 export function buildWeeklyChallengeHtml(
   challengeTitle: string,
@@ -20,6 +37,10 @@ export function buildWeeklyChallengeHtml(
   themeId?: string,
 ): string {
   const t = getTheme(themeId);
+  const ct = getChapterTheme(themeId);
+  // Status colours are used as text (verdicts, tier labels, review lines), so
+  // each is adjusted to read at 4.5:1 on this theme's page, card and panels.
+  const rd = (color: string) => readableOnTheme(color, t);
 
   // ── Build-time answer obfuscation ──
   // Strip answer fields from questions and encode them so they don't appear
@@ -43,9 +64,18 @@ export function buildWeeklyChallengeHtml(
 
   // Deep clone and strip answers
   const sanitised = JSON.parse(JSON.stringify(challengeData)) as WeeklyChallengeData;
+  // The runtime reads metadata fields directly; tolerate a model that omits it.
+  if (!sanitised.metadata) sanitised.metadata = {} as WeeklyChallengeData['metadata'];
   for (const q of (sanitised.questions || [])) {
     // Strip answer fields from variants too
     const allVersions = [q, ...(q.variants || []) as Record<string, unknown>[]];
+    if (q.type === 'slider-estimation') {
+      // Computed before the answer fields are stripped below. A variant that
+      // omits a field falls through to the base value, as it does at runtime.
+      for (const v of allVersions) {
+        (v as Record<string, unknown>)._step = sliderStep({ ...(q as unknown as Record<string, unknown>), ...v });
+      }
+    }
     for (const v of allVersions) {
       if ('correctIndex' in v) {
         (v as Record<string, unknown>)._oCI = obf(v.correctIndex as number);
@@ -82,6 +112,9 @@ export function buildWeeklyChallengeHtml(
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>${challengeTitle}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="${FONTS_URL}">
     <style>
         /* ─── Timing Constants (CSS) ─── */
         :root {
@@ -102,15 +135,16 @@ export function buildWeeklyChallengeHtml(
             --text-secondary: ${t.textSecondary};
             --text-muted: ${t.textMuted};
             --success: ${t.success};
-            --error: #ef4444;
-            --gold: #f59e0b;
-            --blue: #3b82f6;
+            --error: ${rd('#ef4444')};
+            --gold: ${rd('#f59e0b')};
+            --blue: ${rd('#3b82f6')};
             --on-accent: ${t.isDark ? '#1a1a2e' : '#ffffff'};
             --shadow: 0 4px 12px rgba(0, 0, 0, ${t.isDark ? '0.4' : '0.15'});
             --shadow-lg: 0 8px 24px rgba(0, 0, 0, ${t.isDark ? '0.5' : '0.18'});
 
-            --font-heading: ${t.headingFont};
-            --font-body: ${t.bodyFont};
+            /* Full stacks with fallbacks, loaded via FONTS_URL like the quiz */
+            --font-heading: ${ct.displayFont};
+            --font-body: ${ct.bodyFont};
 
             /* Tier colors */
             --tier-warmup: var(--blue);
@@ -484,12 +518,12 @@ export function buildWeeklyChallengeHtml(
 
         .option-card.correct .option-letter {
             background: var(--success);
-            color: #fff;
+            color: var(--on-accent);
         }
 
         .option-card.incorrect .option-letter {
             background: var(--error);
-            color: #fff;
+            color: var(--on-accent);
         }
 
         .option-text { flex: 1; }
@@ -979,7 +1013,7 @@ export function buildWeeklyChallengeHtml(
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.1em;
-            color: var(--warm-accent);
+            color: #fbbf24; /* on the dark intro overlay in every theme */
             text-shadow: 0 0 30px rgba(245,158,11,0.4);
         }
 
@@ -1507,11 +1541,20 @@ export function buildWeeklyChallengeHtml(
             .confidence-btn { max-width: 100%; }
         }
 
+        /* The stem takes focus programmatically so screen readers announce the
+           new question. It is not a control, so it gets no focus ring. */
+        .question-stem:focus { outline: none; }
+
         @media (max-width: 480px) {
             .question-stem { font-size: 16px; }
             .option-card { padding: 12px 14px; font-size: 14px; }
             .mastery-score { font-size: 36px; }
             .matrix-table { font-size: 13px; }
+            /* Keep all three answer columns on screen at phone width */
+            .matrix-table thead th { padding: 6px 2px; font-size: 10px; letter-spacing: 0.02em; }
+            .matrix-table thead th:first-child { width: 40%; }
+            .matrix-table tbody td { padding: 10px 4px; }
+            .matrix-table tbody td:first-child { padding-left: 12px; }
         }
     </style>
 </head>
@@ -1598,11 +1641,11 @@ export function buildWeeklyChallengeHtml(
                 <div class="reflection-question">
                     <label>How confident do you feel about this week's material overall?</label>
                     <div class="confidence-scale" id="reflection-confidence">
-                        <button class="confidence-scale-btn" data-val="1">1</button>
-                        <button class="confidence-scale-btn" data-val="2">2</button>
-                        <button class="confidence-scale-btn" data-val="3">3</button>
-                        <button class="confidence-scale-btn" data-val="4">4</button>
-                        <button class="confidence-scale-btn" data-val="5">5</button>
+                        <button class="confidence-scale-btn" data-val="1" aria-pressed="false">1</button>
+                        <button class="confidence-scale-btn" data-val="2" aria-pressed="false">2</button>
+                        <button class="confidence-scale-btn" data-val="3" aria-pressed="false">3</button>
+                        <button class="confidence-scale-btn" data-val="4" aria-pressed="false">4</button>
+                        <button class="confidence-scale-btn" data-val="5" aria-pressed="false">5</button>
                     </div>
                 </div>
                 <div class="reflection-actions">
@@ -1643,12 +1686,9 @@ export function buildWeeklyChallengeHtml(
 
         /* ─── Timing Constants ─── */
         const ADVANCE_DELAY = 800;
-        const CELEBRATION_DURATION = 1800;
-        const SHAKE_DURATION = 400;
         const BOSS_INTRO_DURATION = 2000;
         const MASTERY_THRESHOLD = 0.85;
         const CONFETTI_COUNT = 40;
-        const CONFETTI_MIN_DURATION = 2000;
         const CONFETTI_MAX_DURATION = 3500;
 
         /* Scoring */
@@ -1693,7 +1733,9 @@ export function buildWeeklyChallengeHtml(
         const RELATIONSHIP_KEYS = Object.keys(RELATIONSHIP_LABELS);
 
         /* ─── Data ─── */
-        const CHALLENGE_DATA = ${JSON.stringify(sanitised)};
+        const CHALLENGE_DATA = ${toScriptJson(sanitised)};
+        // The exact key the answers were encoded with at build time.
+        const OBF_KEY = ${toScriptJson(xorKey)};
 
         /* ─── State ─── */
         const state = {
@@ -1742,28 +1784,28 @@ export function buildWeeklyChallengeHtml(
             document.getElementById(id).classList.remove('hidden');
         }
 
+        // Escapes quotes too: some results land in attribute values (aria-label).
         function escapeHtml(str) {
-            const d = document.createElement('div');
-            d.textContent = str;
-            return d.innerHTML;
+            return String(str == null ? '' : str).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
         }
 
         /* ─── Answer obfuscation ─── */
+        // Byte-masked to match the build-time encoder.
         function obfuscate(val) {
             const s = String(val);
-            const key = 'wc' + CHALLENGE_DATA.metadata.weekNumber;
             let out = '';
             for (let i = 0; i < s.length; i++) {
-                out += String.fromCharCode(s.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+                out += String.fromCharCode((s.charCodeAt(i) ^ OBF_KEY.charCodeAt(i % OBF_KEY.length)) & 0xff);
             }
             return btoa(out);
         }
         function deobfuscate(encoded) {
-            const key = 'wc' + CHALLENGE_DATA.metadata.weekNumber;
             const decoded = atob(encoded);
             let out = '';
             for (let i = 0; i < decoded.length; i++) {
-                out += String.fromCharCode(decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length));
+                out += String.fromCharCode((decoded.charCodeAt(i) ^ OBF_KEY.charCodeAt(i % OBF_KEY.length)) & 0xff);
             }
             return out;
         }
@@ -1849,12 +1891,15 @@ export function buildWeeklyChallengeHtml(
             state.streak = 0;
             state.bestStreak = 0;
             state.reflectionData = { review: '', confidence: 0 };
+            // A retake starts with a blank reflection
+            const reflectionTextarea = document.getElementById('reflection-review');
+            if (reflectionTextarea) reflectionTextarea.value = '';
             streakDisplay.classList.remove('visible');
             streakDisplay.innerHTML = '';
 
             // Populate welcome
             document.getElementById('welcome-title').textContent = data.metadata.chapterTitle || 'Weekly Challenge';
-            document.getElementById('welcome-subtitle').textContent = ${JSON.stringify(courseTitle)} + ' \\u2014 Week ' + (data.metadata.weekNumber || '');
+            document.getElementById('welcome-subtitle').textContent = ${toScriptJson(courseTitle)} + ' \\u2014 Week ' + (data.metadata.weekNumber || '');
             document.getElementById('stat-questions').textContent = state.questions.length;
             document.getElementById('stat-time').textContent = '~' + (data.metadata.estimatedMinutes || 8);
 
@@ -2026,6 +2071,7 @@ export function buildWeeklyChallengeHtml(
             const submitBtn = container.querySelector('#btn-submit');
 
             function selectOption(i) {
+                if (q._submitted) return;
                 selected = i;
                 cards.forEach((c, ci) => c.classList.toggle('selected', ci === i));
                 submitBtn.disabled = false;
@@ -2039,8 +2085,9 @@ export function buildWeeklyChallengeHtml(
             });
 
             submitBtn.addEventListener('click', () => {
-                if (selected < 0) return;
+                if (selected < 0 || q._submitted) return;
                 if (checkRapidGuess(q)) return;
+                q._submitted = true;
                 submitBtn.disabled = true;
                 cards.forEach(c => c.classList.add('disabled'));
 
@@ -2126,6 +2173,7 @@ export function buildWeeklyChallengeHtml(
                 const submitBtn = justArea.querySelector('#btn-ts-submit');
 
                 function selectJust(i) {
+                    if (q._submitted) return;
                     selectedJust = i;
                     jCards.forEach((c, ci) => c.classList.toggle('selected', ci === i));
                     submitBtn.disabled = false;
@@ -2139,8 +2187,9 @@ export function buildWeeklyChallengeHtml(
                 });
 
                 submitBtn.addEventListener('click', () => {
-                    if (selectedJust < 0) return;
+                    if (selectedJust < 0 || q._submitted) return;
                     if (checkRapidGuess(q)) return;
+                    q._submitted = true;
                     submitBtn.disabled = true;
                     jCards.forEach(c => c.classList.add('disabled'));
 
@@ -2200,6 +2249,7 @@ export function buildWeeklyChallengeHtml(
             const submitBtn = container.querySelector('#btn-ar-submit');
 
             function selectRel(val) {
+                if (q._submitted) return;
                 selected = val;
                 opts.forEach(o => o.classList.toggle('selected', o.dataset.value === val));
                 submitBtn.disabled = false;
@@ -2213,8 +2263,9 @@ export function buildWeeklyChallengeHtml(
             });
 
             submitBtn.addEventListener('click', () => {
-                if (!selected) return;
+                if (!selected || q._submitted) return;
                 if (checkRapidGuess(q)) return;
+                q._submitted = true;
                 submitBtn.disabled = true;
                 opts.forEach(o => o.classList.add('disabled'));
 
@@ -2273,7 +2324,9 @@ export function buildWeeklyChallengeHtml(
             });
 
             submitBtn.addEventListener('click', () => {
+                if (q._submitted) return;
                 if (checkRapidGuess(q)) return;
+                q._submitted = true;
                 submitBtn.disabled = true;
                 radios.forEach(r => { r.disabled = true; });
 
@@ -2354,9 +2407,14 @@ export function buildWeeklyChallengeHtml(
                 chtml += '</div></div>';
                 confArea.innerHTML = chtml;
 
-                confArea.querySelectorAll('.confidence-btn').forEach(btn => {
+                const confBtns = confArea.querySelectorAll('.confidence-btn');
+                confBtns.forEach(btn => {
                     btn.addEventListener('click', () => {
+                        // One rating per question: a double-click must not score twice
+                        if (q._submitted) return;
                         if (checkRapidGuess(q)) return;
+                        q._submitted = true;
+                        confBtns.forEach(b => { b.disabled = true; });
                         const level = btn.dataset.level;
                         const correctIdx = parseInt(deobfuscate(q._oCI), 10);
                         const ansCorrect = selectedAnswer === correctIdx;
@@ -2369,7 +2427,7 @@ export function buildWeeklyChallengeHtml(
                         if (!ansCorrect) cards[selectedAnswer].classList.add('incorrect');
                         updateStreak(isCorrect);
 
-                        recordAnswer(q, isCorrect, points, null, level);
+                        recordAnswer(q, isCorrect, points, level);
 
                         const confLabel = level === 'high' ? 'Very Sure' : level === 'medium' ? 'Somewhat Sure' : 'Not Sure';
                         setTimeout(() => showFeedback(q, isCorrect, points, null, confLabel), ADVANCE_DELAY);
@@ -2380,7 +2438,11 @@ export function buildWeeklyChallengeHtml(
 
         /* ─── Slider Estimation Renderer ─── */
         function renderSliderEstimation(q, container) {
-            const mid = Math.round((q.sliderMin + q.sliderMax) / 2);
+            // Step comes from the build: fine enough for values like 0.35, and
+            // the browser default of 1 for whole-number questions.
+            const step = q._step || 1;
+            const stepDp = step < 1 ? Math.round(-Math.log10(step)) : 0;
+            const mid = Number((Math.round((q.sliderMin + q.sliderMax) / 2 / step) * step).toFixed(stepDp));
 
             let html = '';
             if (q.isSpacedReview) html += '<div class="spaced-review-badge">Review Question</div>';
@@ -2392,7 +2454,7 @@ export function buildWeeklyChallengeHtml(
             html += '</div>';
             html += '<div class="slider-track-wrapper">';
             html += '<input type="range" class="slider-input" id="slider-input"'
-                + ' min="' + q.sliderMin + '" max="' + q.sliderMax + '" value="' + mid + '"'
+                + ' min="' + q.sliderMin + '" max="' + q.sliderMax + '" step="' + step + '" value="' + mid + '"'
                 + ' aria-label="' + escapeHtml(q.stem) + '"'
                 + ' aria-valuemin="' + q.sliderMin + '" aria-valuemax="' + q.sliderMax + '"'
                 + ' aria-valuenow="' + mid + '">';
@@ -2417,24 +2479,29 @@ export function buildWeeklyChallengeHtml(
             });
 
             submitBtn.addEventListener('click', () => {
+                if (q._submitted) return;
                 if (checkRapidGuess(q)) return;
+                q._submitted = true;
                 submitBtn.disabled = true;
                 slider.disabled = true;
 
                 const userVal = parseFloat(slider.value);
                 const correctValue = parseFloat(deobfuscate(q._oCV));
                 const acceptableRange = JSON.parse(deobfuscate(q._oAR));
-                const distance = Math.abs(userVal - correctValue);
-                const rangeLo = acceptableRange[0];
-                const rangeHi = acceptableRange[1];
+                const rangeLo = Math.min(acceptableRange[0], acceptableRange[1]);
+                const rangeHi = Math.max(acceptableRange[0], acceptableRange[1]);
                 const halfRange = (rangeHi - rangeLo) / 2;
                 const base = BASE_POINTS[q.difficulty] || 100;
 
+                // Full marks anywhere inside the acceptable range, then a linear
+                // fall-off over another half-range outside it (identical to the
+                // old distance-from-answer rule when the range is centred).
+                const outside = userVal < rangeLo ? rangeLo - userVal : (userVal > rangeHi ? userVal - rangeHi : 0);
                 let points;
-                if (distance <= halfRange) {
+                if (outside === 0) {
                     points = base;
-                } else if (distance <= halfRange * 2) {
-                    points = Math.round(base * (1 - (distance - halfRange) / halfRange));
+                } else if (halfRange > 0 && outside <= halfRange) {
+                    points = Math.round(base * (1 - outside / halfRange));
                 } else {
                     points = 0;
                 }
@@ -2460,7 +2527,9 @@ export function buildWeeklyChallengeHtml(
         }
 
         /* ─── Record Answer ─── */
-        function recordAnswer(q, isCorrect, points, _response, extra) {
+        function recordAnswer(q, isCorrect, points, extra) {
+            // Answers are matched to questions by position: never record twice
+            if (state.answers.length > state.currentIndex) return;
             state.answers.push({
                 questionIndex: state.currentIndex,
                 isCorrect: isCorrect,
@@ -2524,7 +2593,13 @@ export function buildWeeklyChallengeHtml(
             const continueBtn = document.getElementById('btn-continue');
             const newBtn = continueBtn.cloneNode(true);
             continueBtn.parentNode.replaceChild(newBtn, continueBtn);
+            // One advance per feedback screen. The boss intro keeps this screen
+            // (and the focused button) up for 2 s, so a second Enter used to
+            // skip the boss question.
+            let advanced = false;
             newBtn.addEventListener('click', () => {
+                if (advanced) return;
+                advanced = true;
                 state.currentIndex++;
                 if (state.currentIndex >= state.questions.length) {
                     showReflection();
@@ -2538,14 +2613,10 @@ export function buildWeeklyChallengeHtml(
         function showReflection() {
             showScreen('reflection-screen');
 
-            // Confidence scale buttons
+            // Confidence scale buttons (their click listeners are wired once, at startup)
             document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(btn => {
                 btn.classList.remove('selected');
-                btn.addEventListener('click', function() {
-                    document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(b => b.classList.remove('selected'));
-                    this.classList.add('selected');
-                    state.reflectionData.confidence = parseInt(this.dataset.val, 10);
-                });
+                btn.setAttribute('aria-pressed', 'false');
             });
 
             const toResultsBtn = document.getElementById('btn-to-results');
@@ -2562,7 +2633,8 @@ export function buildWeeklyChallengeHtml(
         function showResults() {
             showScreen('results-screen');
 
-            const pct = state.maxPossibleScore > 0 ? state.score / state.maxPossibleScore : 0;
+            // Clamped: an all-wrong "Very Sure" run can total below zero
+            const pct = state.maxPossibleScore > 0 ? Math.min(1, Math.max(0, state.score / state.maxPossibleScore)) : 0;
             const passed = pct >= MASTERY_THRESHOLD;
 
             document.getElementById('mastery-icon').textContent = passed ? '\\uD83C\\uDFC6' : '\\uD83D\\uDCAA';
@@ -2641,6 +2713,8 @@ export function buildWeeklyChallengeHtml(
             newRetake.addEventListener('click', () => {
                 init();
                 showScreen('welcome-screen');
+                // The results page is long: bring the new attempt into view
+                welcomeScreen.scrollIntoView({ block: 'nearest' });
             });
 
             // Fire confetti on mastery!
@@ -2746,8 +2820,16 @@ export function buildWeeklyChallengeHtml(
         // "Begin Challenge" button is wired, so the preview looks dead while the
         // downloaded file (not sandboxed) works. Guard it: a missing LMS just
         // means run standalone.
+        // As in the SCORM 2004 discovery algorithm, fall back to the opener
+        // chain: LMSs that launch content in a pop-up keep the API there.
         let scormAPI = null;
         try { scormAPI = findSCORM2004API(window); } catch (e) { scormAPI = null; }
+        if (!scormAPI) {
+            try { if (window.opener) scormAPI = findSCORM2004API(window.opener); } catch (e) { scormAPI = null; }
+        }
+        if (!scormAPI) {
+            try { if (window.top && window.top.opener) scormAPI = findSCORM2004API(window.top.opener); } catch (e) { scormAPI = null; }
+        }
         let scormConnected = false;
 
         function scormInit() {
@@ -2773,11 +2855,18 @@ export function buildWeeklyChallengeHtml(
             try { scormAPI.Terminate(''); scormConnected = false; } catch (e) { /* ignore */ }
         }
 
+        // Best result reported this session: a retake never lowers the LMS
+        // score or turns a pass into a fail.
+        let scormBestScaled = -1;
+
         function reportToSCORM(scaledScore, mastery) {
+            if (!scormConnected || scaledScore <= scormBestScaled) return;
+            scormBestScaled = scaledScore;
+            const maxScore = Math.round(state.maxPossibleScore);
             scormSetValue('cmi.score.scaled', scaledScore.toFixed(2));
-            scormSetValue('cmi.score.raw', Math.round(state.score));
+            scormSetValue('cmi.score.raw', Math.min(maxScore, Math.max(0, Math.round(state.score))));
             scormSetValue('cmi.score.min', '0');
-            scormSetValue('cmi.score.max', Math.round(state.maxPossibleScore));
+            scormSetValue('cmi.score.max', maxScore);
             scormSetValue('cmi.completion_status', 'completed');
             scormSetValue('cmi.success_status', mastery ? 'passed' : 'failed');
             scormSetValue('cmi.suspend_data', JSON.stringify({
@@ -2790,20 +2879,25 @@ export function buildWeeklyChallengeHtml(
             scormCommit();
         }
 
-        window.addEventListener('beforeunload', function() {
-            if (scormConnected) {
-                if (state.answers.length > 0 && state.answers.length < state.questions.length) {
-                    scormSetValue('cmi.suspend_data', JSON.stringify({
-                        currentIndex: state.currentIndex,
-                        answers: state.answers,
-                        score: state.score,
-                        completed: false,
-                    }));
-                    scormCommit();
-                }
-                scormTerminate();
+        function scormExit() {
+            if (!scormConnected) return;
+            // Partial progress only matters if no finished attempt was reported
+            if (scormBestScaled < 0 && state.answers.length > 0 && state.answers.length < state.questions.length) {
+                scormSetValue('cmi.suspend_data', JSON.stringify({
+                    currentIndex: state.currentIndex,
+                    answers: state.answers,
+                    score: state.score,
+                    completed: false,
+                }));
+                scormCommit();
             }
-        });
+            scormTerminate();
+        }
+
+        // beforeunload doesn't fire when an LMS removes the content frame;
+        // pagehide does. scormTerminate makes the second call a no-op.
+        window.addEventListener('beforeunload', scormExit);
+        window.addEventListener('pagehide', scormExit);
 
         /* ─── Start ─── */
         scormInit();
@@ -2812,6 +2906,19 @@ export function buildWeeklyChallengeHtml(
         document.getElementById('btn-start').addEventListener('click', () => {
             showScreen('question-screen');
             showQuestion();
+        });
+
+        // Reflection confidence scale: wired once so retakes don't stack listeners
+        document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('#reflection-confidence .confidence-scale-btn').forEach(b => {
+                    b.classList.remove('selected');
+                    b.setAttribute('aria-pressed', 'false');
+                });
+                this.classList.add('selected');
+                this.setAttribute('aria-pressed', 'true');
+                state.reflectionData.confidence = parseInt(this.dataset.val, 10);
+            });
         });
     });
     </script>

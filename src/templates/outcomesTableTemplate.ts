@@ -389,7 +389,11 @@ ${fragment}
 </html>`;
 }
 
-/** CSV: header row + one row per objective. Wide format (chapters as columns). */
+/**
+ * CSV: header row + one row per objective. Wide format (chapters as columns).
+ * Starts with a UTF-8 byte-order mark: without it Excel decodes the file in
+ * the system code page and em-dashes / accents in titles come out garbled.
+ */
 export function buildOutcomesCsv(map: CurriculumMap, syllabus: Syllabus): string {
   const chapters = [...syllabus.chapters].sort((a, b) => a.number - b.number);
   const objectives = [...map.objectives].sort((a, b) => a.id - b.id);
@@ -401,7 +405,7 @@ export function buildOutcomesCsv(map: CurriculumMap, syllabus: Syllabus): string
     });
     return [obj.bloomLevel, obj.text, ...cells];
   });
-  return [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
+  return '\ufeff' + [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
 }
 
 function csvEscape(s: string): string {

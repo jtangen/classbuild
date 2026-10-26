@@ -48,9 +48,12 @@ export function StageIndicator() {
         // e.g. a syllabus drafting in the background while you re-read Setup.
         const isReturnTarget = stage.id === currentStage && !isCurrent;
 
+        // "Done" is what the course has actually completed, not position:
+        // opening /export on a fresh profile put a ✓ on every earlier stage.
+        // (isPast still keeps earlier stages clickable — going back is fine.)
         const state: 'done' | 'current' | 'upcoming' = isCurrent
           ? 'current'
-          : isComplete || isPast
+          : isComplete
           ? 'done'
           : 'upcoming';
 
@@ -72,11 +75,15 @@ export function StageIndicator() {
               gap: 2,
               padding: '14px 22px',
               minWidth: 0,
+              // Longhands only: a `border: 'none'` after borderLeft wiped
+              // the cell dividers.
+              borderTop: 'none',
+              borderRight: 'none',
+              borderBottom: 'none',
               borderLeft:
                 i === 0 ? 'none' : '0.5px solid var(--cb-border-default)',
               background:
                 state === 'current' ? 'var(--cb-accent-emphasis-quiet)' : 'transparent',
-              border: 'none',
               cursor: isClickable ? 'pointer' : 'default',
               textAlign: 'left',
               transition: 'background-color 200ms cubic-bezier(0.32,0.04,0.32,1)',

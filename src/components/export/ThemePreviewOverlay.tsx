@@ -1,4 +1,5 @@
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import type { CSSProperties } from 'react';
 import {
   CHAPTER_THEMES,
   type ChapterThemeId,
@@ -16,10 +17,28 @@ interface ThemePreviewOverlayProps {
   onPick: (id: ChapterThemeId) => void;
 }
 
+const FOCUSABLE =
+  'button:not([disabled]), iframe, [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+/** Invisible, focusable edge marker for the focus trap. */
+const GUARD_STYLE: CSSProperties = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  overflow: 'hidden',
+  opacity: 0,
+  pointerEvents: 'none',
+};
+
 /**
  * Shared full-bleed preview overlay. Used by both the Export picker
  * (3×2 card grid) and the Setup picker (compact 6-tile row) — single source
  * of truth for what a chapter looks like in each theme.
+ *
+ * A modal dialog for keyboard users too: focus moves in on open (to the close
+ * button), Tab and Shift+Tab stay inside — including through the preview
+ * iframe, via guard elements at both edges — Escape closes even from inside
+ * the iframe, and focus returns to whatever opened it.
  */
 export function ThemePreviewOverlay({
   themeId,
@@ -31,6 +50,25 @@ export function ThemePreviewOverlay({
     return wrapChapterHtml(PREVIEW_CHAPTER_FRAGMENT, themeId, 'Preview');
   }, [themeId]);
 
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  // Latest onClose for listeners attached inside the iframe document.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  const focusables = useCallback(
+    () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? []),
+    [],
+  );
+  const focusFirst = useCallback(() => focusables()[0]?.focus(), [focusables]);
+  const focusLast = useCallback(() => {
+    const all = focusables();
+    all[all.length - 1]?.focus();
+  }, [focusables]);
+
   useEffect(() => {
     if (!themeId) return;
     const onKey = (e: KeyboardEvent) => {
@@ -40,13 +78,33 @@ export function ThemePreviewOverlay({
     return () => window.removeEventListener('keydown', onKey);
   }, [themeId, onClose]);
 
+  // Take focus on open; give it back to the opener on close.
+  useEffect(() => {
+    if (!themeId) return;
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    closeRef.current?.focus();
+    // Safety net for focus that lands outside the dialog some other way.
+    const onFocusIn = (e: FocusEvent) => {
+      const dialog = dialogRef.current;
+      if (dialog && e.target instanceof Node && !dialog.contains(e.target)) focusFirst();
+    };
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      if (opener?.isConnected) opener.focus();
+    };
+  }, [themeId, focusFirst]);
+
   if (!themeId) return null;
   const theme = CHAPTER_THEMES.find((t) => t.id === themeId);
+  const label = `Theme preview: ${theme?.name ?? themeId}`;
 
   return (
     <div
+      ref={dialogRef}
       role="dialog"
       aria-modal="true"
+      aria-label={label}
       onClick={onClose}
       style={{
         position: 'fixed',
@@ -60,7 +118,10 @@ export function ThemePreviewOverlay({
         backdropFilter: 'blur(4px)',
       }}
     >
+      {/* Shift+Tab off the first control wraps to the last. */}
+      <div tabIndex={0} onFocus={focusLast} style={GUARD_STYLE} />
       <div
+        ref={panelRef}
         onClick={(e) => e.stopPropagation()}
         style={{
           position: 'relative',
@@ -118,6 +179,7 @@ export function ThemePreviewOverlay({
               use this theme
             </button>
             <button
+              ref={closeRef}
               type="button"
               onClick={onClose}
               className="cb-mono cb-focus"
@@ -141,6 +203,13 @@ export function ThemePreviewOverlay({
           srcDoc={previewHtml}
           title={`Full chapter preview — ${themeId}`}
           sandbox="allow-scripts allow-same-origin"
+          onLoad={(e) => {
+            // Keys pressed inside the preview go to the iframe's own document,
+            // so listen there too: Escape still closes.
+            e.currentTarget.contentDocument?.addEventListener('keydown', (ev) => {
+              if (ev.key === 'Escape') onCloseRef.current();
+            });
+          }}
           style={{
             flex: 1,
             width: '100%',
@@ -151,6 +220,8 @@ export function ThemePreviewOverlay({
           }}
         />
       </div>
+      {/* Tab off the last control (or out of the iframe) wraps to the first. */}
+      <div tabIndex={0} onFocus={focusFirst} style={GUARD_STYLE} />
     </div>
   );
 }

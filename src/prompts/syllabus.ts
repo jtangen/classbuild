@@ -14,7 +14,6 @@ function normalizePrinciple(raw: string): SciencePrinciple {
 export function buildSyllabusPrompt(
   setup: CourseSetup,
   refinementFeedback?: string,
-  _conversationHistory?: Array<{ role: string; content: string }>
 ): { systemPrompt: string; userMessage: string } {
   // If the user supplied a free-text reading length brief, pass it verbatim
   // to the model. Otherwise fall back to the enum-derived word/time targets.
@@ -202,47 +201,90 @@ export function parsePartialChapters(text: string): {
   return result;
 }
 
+/** Minimum topic length Setup accepts — and the floor for any paid syllabus call. */
+export function isBriefReady(setup: CourseSetup): boolean {
+  return typeof setup.topic === 'string' && setup.topic.trim().length > 10;
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+const asList = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+const asText = (v: unknown): string =>
+  typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '';
+const asNumbers = (v: unknown): number[] =>
+  asList(v)
+    .map((n) => (typeof n === 'string' ? Number(n) : n))
+    .filter((n): n is number => typeof n === 'number' && Number.isFinite(n));
+
+/**
+ * Coerce one syllabus chapter — from model output or an imported project
+ * file — so every field the UI maps over or measures is present and typed.
+ */
+export function normalizeSyllabusChapter(ch: Record<string, unknown>, i: number): ChapterSyllabus {
+  return {
+    number: typeof ch.number === 'number' && Number.isFinite(ch.number) ? ch.number : i + 1,
+    title: asText(ch.title) || `Chapter ${i + 1}`,
+    narrative: asText(ch.narrative),
+    keyConcepts: asList(ch.keyConcepts).map(asText).filter(Boolean),
+    widgets: asList(ch.widgets).filter(isObject).map((w) => ({
+      title: asText(w.title),
+      description: asText(w.description),
+      concept: asText(w.concept),
+      rationale: asText(w.rationale),
+    })),
+    scienceAnnotations: asList(ch.scienceAnnotations).filter(isObject).map((a): ScienceAnnotation => ({
+      principle: normalizePrinciple(asText(a.principle)),
+      description: asText(a.description),
+      relatedChapters: asNumbers(a.relatedChapters),
+    })),
+    spacingConnections: asNumbers(ch.spacingConnections),
+  };
+}
+
+/** Coerce a parsed syllabus object. Null when it has no usable chapters. */
+export function normalizeSyllabus(raw: unknown): Syllabus | null {
+  if (!isObject(raw)) return null;
+  const chapters = asList(raw.chapters).filter(isObject).map(normalizeSyllabusChapter);
+  if (chapters.length === 0) return null;
+  return {
+    courseTitle: asText(raw.courseTitle) || 'Untitled Course',
+    courseOverview: asText(raw.courseOverview),
+    chapters,
+  };
+}
+
+/**
+ * The prompt asks for bare JSON, so try that first. Only then cut the object
+ * out of surrounding prose, and only then look inside a code fence — running
+ * the fence regex first would match a ``` inside a string value (a
+ * code-flavoured widget description) and throw the real object away.
+ */
+function extractJsonObject(text: string): unknown {
+  const sliceObject = (s: string) => {
+    const first = s.indexOf('{');
+    const last = s.lastIndexOf('}');
+    return first !== -1 && last > first ? s.slice(first, last + 1) : s;
+  };
+  const attempts = [text.trim(), sliceObject(text)];
+  const fence = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (fence) attempts.push(sliceObject(fence[1]));
+  let lastError: unknown;
+  for (const attempt of attempts) {
+    try {
+      return JSON.parse(attempt);
+    } catch (e) {
+      lastError = e;
+    }
+  }
+  throw lastError;
+}
+
 export function parseSyllabusResponse(text: string): Syllabus | null {
   try {
-    // Strip markdown code fences if present
-    let jsonStr = text.trim();
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1];
-    }
-
-    // Also strip any leading/trailing non-JSON text
-    const firstBrace = jsonStr.indexOf('{');
-    const lastBrace = jsonStr.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1) {
-      jsonStr = jsonStr.slice(firstBrace, lastBrace + 1);
-    }
-
-    const raw = JSON.parse(jsonStr);
-
-    const syllabus: Syllabus = {
-      courseTitle: raw.courseTitle || 'Untitled Course',
-      courseOverview: raw.courseOverview || '',
-      chapters: (raw.chapters || []).map((ch: Record<string, unknown>, i: number): ChapterSyllabus => ({
-        number: (ch.number as number) || i + 1,
-        title: (ch.title as string) || `Chapter ${i + 1}`,
-        narrative: (ch.narrative as string) || '',
-        keyConcepts: (ch.keyConcepts as string[]) || [],
-        widgets: ((ch.widgets as Array<Record<string, string>>) || []).map((w) => ({
-          title: w.title || '',
-          description: w.description || '',
-          concept: w.concept || '',
-          rationale: w.rationale || '',
-        })),
-        scienceAnnotations: ((ch.scienceAnnotations as Array<Record<string, unknown>>) || []).map((a): ScienceAnnotation => ({
-          principle: normalizePrinciple(a.principle as string),
-          description: (a.description as string) || '',
-          relatedChapters: (a.relatedChapters as number[]) || [],
-        })),
-        spacingConnections: (ch.spacingConnections as number[]) || [],
-      })),
-    };
-
+    const syllabus = normalizeSyllabus(extractJsonObject(text));
+    // Zero chapters (e.g. the object came back wrapped under another key) is
+    // a failed parse, not an empty course.
+    if (!syllabus) console.error('Failed to parse syllabus response: no chapters found.');
     return syllabus;
   } catch (e) {
     console.error('Failed to parse syllabus response:', e);

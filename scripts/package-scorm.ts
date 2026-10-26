@@ -4,7 +4,7 @@
  * for upload to Blackboard Ultra (or any SCORM-compliant LMS).
  *
  * Usage:
- *   npx tsx scripts/package-scorm.ts \
+ *   npx tsx --import ./scripts/raw-loader.mjs scripts/package-scorm.ts \
  *     --input output/test-challenge.html \
  *     --output output/weekly-challenge-scorm.zip
  */
@@ -27,7 +27,7 @@ const { values } = parseArgs({
 });
 
 if (!values.input || !values.output) {
-  console.error('Usage: npx tsx scripts/package-scorm.ts --input <file.html> --output <package.zip>');
+  console.error('Usage: npx tsx --import ./scripts/raw-loader.mjs scripts/package-scorm.ts --input <file.html> --output <package.zip>');
   process.exit(1);
 }
 

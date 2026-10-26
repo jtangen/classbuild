@@ -24,7 +24,11 @@ export class ErrorBoundary extends Component<Props, State> {
 
   componentDidCatch(error: Error, info: ErrorInfo) {
     console.error('ErrorBoundary caught:', error, info.componentStack);
-    useUiStore.getState().setIsGenerating(false);
+    // Clear both halves of the "a reading is drafting" state together, so the
+    // header and the Build page can't disagree after a crash.
+    const ui = useUiStore.getState();
+    ui.setIsGenerating(false);
+    ui.setReadingDraft(null);
   }
 
   render() {

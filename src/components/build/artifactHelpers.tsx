@@ -133,7 +133,7 @@ export function ArtifactStatusLine({
         <button
           type="button"
           onClick={onStop}
-          className="cb-mono"
+          className="cb-mono cb-focus pointer-coarse:min-h-11"
           title="Stop generating — nothing is saved from a stopped draft"
           style={{
             flexShrink: 0,
@@ -355,6 +355,93 @@ export function KeyMissingBanner({
   );
 }
 
+/** The in-flight pen stroke (a hairline with a travelling accent). */
+export function PenStroke({ width = 28 }: { width?: number }) {
+  return (
+    <span
+      aria-hidden
+      style={{
+        display: 'inline-block',
+        width,
+        height: 1,
+        background: 'var(--cb-border-default)',
+        position: 'relative',
+        overflow: 'hidden',
+        verticalAlign: 'middle',
+        flexShrink: 0,
+      }}
+    >
+      <span
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'var(--cb-accent-emphasis)',
+          animation: 'cb-pen 1.4s cubic-bezier(0.32,0.04,0.32,1) infinite',
+        }}
+      />
+    </span>
+  );
+}
+
+/**
+ * Square "copy this one item" icon button (Discussion, Activities): Codex
+ * corner and hairline-on-hover; a 44px hit area on touch.
+ */
+export function CopyIconButton({
+  copied,
+  onClick,
+  label,
+}: {
+  copied: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  const rest = copied ? 'var(--cb-status-success)' : 'var(--cb-text-muted)';
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={copied ? 'Copied' : label}
+      aria-label={copied ? 'Copied' : label}
+      className="cb-focus pointer-coarse:min-h-11 pointer-coarse:min-w-11"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 30,
+        height: 30,
+        padding: 0,
+        flexShrink: 0,
+        background: 'transparent',
+        border: '0.5px solid transparent',
+        borderRadius: 1.5,
+        color: rest,
+        cursor: 'pointer',
+        transition: 'border-color 160ms ease, color 160ms ease',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.borderColor = 'var(--cb-border-default)';
+        e.currentTarget.style.color = 'var(--cb-accent-emphasis)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.borderColor = 'transparent';
+        e.currentTarget.style.color = rest;
+      }}
+    >
+      {copied ? (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" aria-hidden>
+          <polyline points="20 6 9 17 4 12" />
+        </svg>
+      ) : (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 /**
  * One-time inline hint strip surfaced when a new affordance becomes relevant
  * for the first time. Dismisses with × or via a parent timer. Persistence
@@ -395,6 +482,8 @@ export function DiscoveryHint({
         onClick={onDismiss}
         aria-label="Dismiss hint"
         title="Dismiss"
+        // ~44px hit area on touch (the glyph alone is ~18×21).
+        className="cb-focus pointer-coarse:min-h-11 pointer-coarse:min-w-11"
         style={{
           background: 'none',
           border: 0,

@@ -1,3 +1,4 @@
+import { useMemo, type Ref } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import { downloadFile } from '../../../utils/download';
@@ -17,6 +18,8 @@ function formatElapsed(sec: number): string {
 }
 
 export interface ReadingTabProps {
+  /** BuildPage only accepts image-click messages from this iframe's window. */
+  iframeRef?: Ref<HTMLIFrameElement>;
   chapterHtml: string;
   chapterNum: number;
   chapterTitle: string;
@@ -41,10 +44,14 @@ export interface ReadingTabProps {
   onRefineAutoRegenChange: (v: boolean) => void;
   onRefine: (feedback: string) => void;
   dependents: string[];
+  /** Set while another chapter's reading holds the one-at-a-time slot: the
+   *  refine controls are disabled and this note (naming it) is shown. */
+  refineBlockedNote?: string | null;
 }
 
 export function ReadingTab(props: ReadingTabProps) {
   const {
+    iframeRef,
     chapterHtml,
     chapterNum,
     chapterTitle,
@@ -65,7 +72,15 @@ export function ReadingTab(props: ReadingTabProps) {
     onRefineAutoRegenChange,
     onRefine,
     dependents,
+    refineBlockedNote,
   } = props;
+
+  // Memoized: the page re-renders on every streamed token, and themed chapter
+  // HTML with inline base64 figures runs to megabytes.
+  const srcDoc = useMemo(
+    () => (chapterHtml ? withImageClickShim(renderChapterHtml(chapterHtml, themeId, chapterTitle)) : ''),
+    [chapterHtml, themeId, chapterTitle],
+  );
 
   return (
     <div
@@ -114,7 +129,11 @@ export function ReadingTab(props: ReadingTabProps) {
               type="button"
               onClick={onStop}
               className="cb-mono"
-              title="Stop drafting — nothing is saved from a stopped draft"
+              title={
+                isRefining
+                  ? 'Stop refining — the current reading is kept'
+                  : 'Stop drafting — nothing is saved from a stopped draft'
+              }
               style={{
                 marginLeft: 'auto',
                 flexShrink: 0,
@@ -235,14 +254,13 @@ export function ReadingTab(props: ReadingTabProps) {
           </div>
           {showImageHint && chapterHasRefinableImages(chapterHtml) && (
             <DiscoveryHint
-              text="Hover any image in the chapter — click to refine just that one figure."
+              text="Click or tap any image in the chapter to refine just that one figure."
               onDismiss={onDismissImageHint}
             />
           )}
           <iframe
-            srcDoc={withImageClickShim(
-              renderChapterHtml(chapterHtml, themeId, chapterTitle),
-            )}
+            ref={iframeRef}
+            srcDoc={srcDoc}
             style={{
               width: '100%',
               height: '70vh',
@@ -303,12 +321,27 @@ export function ReadingTab(props: ReadingTabProps) {
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={!refineFeedback.trim()}
+                  disabled={!refineFeedback.trim() || !!refineBlockedNote}
                   onClick={() => onShowRefineConfirm(true)}
                 >
                   Refine
                 </Button>
               </div>
+              {refineBlockedNote && (
+                <p
+                  className="cb-italic"
+                  role="status"
+                  style={{
+                    margin: '10px 0 0',
+                    fontSize: 13,
+                    color: 'var(--cb-text-muted)',
+                    lineHeight: 1.55,
+                    maxWidth: '72ch',
+                  }}
+                >
+                  {refineBlockedNote}
+                </p>
+              )}
 
               <AnimatePresence>
                 {showRefineConfirm && (
@@ -390,7 +423,11 @@ export function ReadingTab(props: ReadingTabProps) {
                       </label>
                     )}
                     <div style={{ display: 'flex', gap: 8 }}>
-                      <Button size="sm" onClick={() => onRefine(refineFeedback)}>
+                      <Button
+                        size="sm"
+                        disabled={!!refineBlockedNote}
+                        onClick={() => onRefine(refineFeedback)}
+                      >
                         Refine reading
                       </Button>
                       <Button

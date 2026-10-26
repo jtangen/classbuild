@@ -25,12 +25,35 @@ export type MaterialKind =
   | 'audio'
   | 'slides';
 
+/** Every MaterialKind — e.g. to cancel all of a chapter's material jobs. */
+export const MATERIAL_KINDS: readonly MaterialKind[] = [
+  'quiz',
+  'inclassquiz',
+  'weeklychallenge',
+  'discussion',
+  'activities',
+  'audio',
+  'slides',
+];
+
 /** One failed step from a batch run, kept so the user can see and retry it. */
 export interface BatchFailure {
   chapter: number;
   /** Human label, e.g. "Practice quiz" or "Reading". */
   material: string;
   message: string;
+}
+
+/**
+ * The one reading draft or refine in flight. Lives here rather than in
+ * BuildPage so leaving /build and coming back keeps its progress UI (stream,
+ * thinking trace, timer) and its Stop button, on the right chapter.
+ */
+export interface ReadingDraft {
+  chapterNum: number;
+  mode: 'draft' | 'refine';
+  /** Date.now() at start; drives the elapsed timer across remounts. */
+  startedAt: number;
 }
 
 /** End-of-batch report shown on the Build page until dismissed. */
@@ -47,6 +70,18 @@ interface UiState {
   showScienceOverlay: boolean;
   isGenerating: boolean;
   streamingText: string;
+  /** Build's reading draft/refine in flight, if any (transient, never persisted). */
+  readingDraft: ReadingDraft | null;
+  /** Streamed thinking summary of that draft. */
+  thinkingText: string;
+  /**
+   * A refine whose "rebuild materials automatically" couldn't run when it
+   * landed (the chapter wasn't in view, or the Build page was closed). The
+   * Build page runs it when the chapter is next opened, provided it still
+   * holds this refined reading (so a stale marker, e.g. after starting a new
+   * course, never builds anything).
+   */
+  rebuildMaterialsFor: { chapterNum: number; htmlContent: string } | null;
   error: string | null;
   activeTab: string;
   /** Persists across reload so users land where they left. */
@@ -90,6 +125,10 @@ interface UiState {
   setIsGenerating: (v: boolean) => void;
   setStreamingText: (text: string) => void;
   appendStreamingText: (text: string) => void;
+  setReadingDraft: (v: ReadingDraft | null) => void;
+  setThinkingText: (text: string) => void;
+  appendThinkingText: (text: string) => void;
+  setRebuildMaterialsFor: (v: { chapterNum: number; htmlContent: string } | null) => void;
   setError: (error: string | null) => void;
   setActiveTab: (tab: string) => void;
   setSelectedChapterNum: (n: number) => void;
@@ -138,6 +177,9 @@ export const useUiStore = create<UiState>((set) => ({
   showScienceOverlay: false,
   isGenerating: false,
   streamingText: '',
+  readingDraft: null,
+  thinkingText: '',
+  rebuildMaterialsFor: null,
   error: null,
   activeTab: readLs(LS_ACTIVE_TAB, 'chapter'),
   selectedChapterNum: Number(readLs(LS_SELECTED_CHAPTER, '1')) || 1,
@@ -161,6 +203,11 @@ export const useUiStore = create<UiState>((set) => ({
   setStreamingText: (text) => set({ streamingText: text }),
   appendStreamingText: (text) =>
     set((state) => ({ streamingText: state.streamingText + text })),
+  setReadingDraft: (v) => set({ readingDraft: v }),
+  setThinkingText: (text) => set({ thinkingText: text }),
+  appendThinkingText: (text) =>
+    set((state) => ({ thinkingText: state.thinkingText + text })),
+  setRebuildMaterialsFor: (v) => set({ rebuildMaterialsFor: v }),
   setError: (error) => set({ error }),
   setActiveTab: (tab) => {
     writeLs(LS_ACTIVE_TAB, tab);

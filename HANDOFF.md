@@ -4,7 +4,7 @@
 
 Converting the 6 ClassBuild example courses to the new chapter themes (Press / Notebook / Almanac / Storybook / Studio / Terminal). Each course's **chapter text stays verbatim** (audio narration already exists for it and must keep matching), but we re-theme the chapter HTML, render fresh figures via OpenAI, and add interactive widgets that match the new theme.
 
-Image renders go through OpenAI gpt-image-2; everything else (text) is done by you (Claude) directly. The API key lives in `/Users/uqjtange/Documents/research/current_projects/classbuild-cli/.env.local` (gitignored via `*.local`). All scripts use `npx tsx --env-file=.env.local ...` to pick it up.
+Image renders go through OpenAI gpt-image-2; everything else (text) is done by you (Claude) directly. The API key lives in `/Users/uqjtange/Documents/research/current_projects/classbuild-cli/.env.local` (gitignored via `*.local`). All scripts use `npx tsx --env-file=.env.local ...` to pick it up. Scripts that import `src/` (generate-course, gen-audio, publish-course, build-staging) also need `--import ./scripts/raw-loader.mjs` so tsx can load the `?raw` theme CSS — or use `npm run course` / `npm run stage`.
 
 ## Theme map (locked in)
 

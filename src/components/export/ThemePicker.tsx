@@ -43,6 +43,19 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
         color: 'var(--cb-text-default)',
       }}
     >
+      {/* On touch screens the 9.5px "preview ↗" link is a ~62×14 target.
+          Grow its hit area to ~44px with padding, and cancel the padding with
+          equal negative margins so the card layout doesn't move. */}
+      <style>{`
+        @media (pointer: coarse) {
+          .cb-theme-preview-btn {
+            padding: 15px 10px !important;
+            margin: -15px -10px !important;
+            position: relative;
+            z-index: 1;
+          }
+        }
+      `}</style>
       <div style={{ marginBottom: 18 }}>
         <div
           className="cb-sc"
@@ -106,6 +119,9 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
               }}
               onClick={() => onSelect(t.id)}
               onKeyDown={(e) => {
+                // Only keys on the card itself: Enter/Space on the nested
+                // "preview" button must open the preview, not select.
+                if (e.target !== e.currentTarget) return;
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
                   onSelect(t.id);
@@ -180,7 +196,7 @@ export function ThemePicker({ selectedId, onSelect }: ThemePickerProps) {
                       e.stopPropagation();
                       setOverlayId(t.id);
                     }}
-                    className="cb-mono cb-focus"
+                    className="cb-mono cb-focus cb-theme-preview-btn"
                     style={{
                       background: 'transparent',
                       border: 0,

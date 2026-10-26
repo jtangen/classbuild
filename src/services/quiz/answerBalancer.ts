@@ -13,6 +13,38 @@ interface ParsedPracticeQuestion {
   blockEnd: number;
 }
 
+/**
+ * One option line ("   b. Plausible distractor"): indent + letter marker,
+ * then the option text, then any trailing spaces. Options sit on their own
+ * lines between the bold stem and the **Answer** line, so anchoring to line
+ * starts keeps a stray " b. " or the word "Answer" inside an option's text
+ * from cutting it short — and lets the merge rewrite exactly that option's
+ * line, never the stem or the correct answer.
+ */
+const OPTION_LINE = /^([ \t]*([a-d])\.[ \t]+)(.*?)([ \t]*)$/gm;
+
+/** The part of a question block that holds the options (before **Answer**). */
+function splitAtAnswer(block: string): [string, string] {
+  const at = block.search(/\*\*Answer\*\*/);
+  return at === -1 ? [block, ''] : [block.slice(0, at), block.slice(at)];
+}
+
+/** Swap the text of option `letter` (if it still reads `from`) for `to`. */
+function replaceOptionText(block: string, letter: string, from: string, to: string): string {
+  const [optionsPart, rest] = splitAtAnswer(block);
+  let done = false;
+  const rewritten = optionsPart.replace(
+    OPTION_LINE,
+    (line, marker: string, l: string, text: string, trailing: string) => {
+      if (done || l !== letter || text.trim() !== from) return line;
+      done = true;
+      // Function replacement: `$&`, `$'` etc. in model text stay literal.
+      return marker + to + trailing;
+    },
+  );
+  return rewritten + rest;
+}
+
 function parsePracticeQuiz(markdown: string): ParsedPracticeQuestion[] {
   // Split on --- separators to get question blocks
   const blocks = markdown.split(/\n---\n/);
@@ -30,12 +62,10 @@ function parsePracticeQuiz(markdown: string): ParsedPracticeQuestion[] {
 
     const id = parseInt(qMatch[1]);
 
-    // Extract all options — match "a. text" through to next option or "Answer" or "**"
-    const optionRegex = /\s+([a-d])\.\s+([\s\S]*?)(?=\s+[a-d]\.\s|Answer|\*\*|$)/g;
+    // Extract the options — one per line, first occurrence of each letter.
     const options: Record<string, string> = {};
-    let m;
-    while ((m = optionRegex.exec(block)) !== null) {
-      options[m[1]] = m[2].trim();
+    for (const m of splitAtAnswer(block)[0].matchAll(OPTION_LINE)) {
+      if (!(m[2] in options)) options[m[2]] = m[3].trim();
     }
 
     if (!options['a']) continue;
@@ -132,7 +162,8 @@ interface RewriteOutput {
 
 async function requestRewrites(
   questions: RewriteInput[],
-  apiKey: string
+  apiKey: string,
+  signal?: AbortSignal,
 ): Promise<RewriteOutput[]> {
   const fullText = await streamMessage(
     {
@@ -142,6 +173,7 @@ async function requestRewrites(
       messages: [{ role: 'user', content: JSON.stringify(questions, null, 2) }],
       thinkingBudget: 'low',
       maxTokens: 4000,
+      signal,
     },
     {} // no streaming callbacks needed
   );
@@ -161,7 +193,8 @@ async function requestRewrites(
 
 export async function balancePracticeQuiz(
   quizMarkdown: string,
-  apiKey: string
+  apiKey: string,
+  signal?: AbortSignal,
 ): Promise<string> {
   try {
     const questions = parsePracticeQuiz(quizMarkdown);
@@ -183,7 +216,7 @@ export async function balancePracticeQuiz(
       distractors: questions[idx].distractors,
     }));
 
-    const rewrites = await requestRewrites(rewriteInput, apiKey);
+    const rewrites = await requestRewrites(rewriteInput, apiKey, signal);
 
     // Split markdown into question blocks for scoped replacement
     const parts = quizMarkdown.split(/(\n---\n)/);
@@ -205,8 +238,15 @@ export async function balancePracticeQuiz(
           if (origQ) {
             let modified = part;
             for (let i = 0; i < origQ.distractors.length; i++) {
-              if (rw.distractors[i] && rw.distractors[i] !== origQ.distractors[i]) {
-                modified = modified.replace(origQ.distractors[i], rw.distractors[i]);
+              const next = rw.distractors[i];
+              if (typeof next === 'string' && next.trim() && next !== origQ.distractors[i]) {
+                // Rewrite only option b/c/d's own line (one line per option).
+                modified = replaceOptionText(
+                  modified,
+                  'bcd'[i],
+                  origQ.distractors[i],
+                  next.replace(/\s*\n\s*/g, ' ').trim(),
+                );
               }
             }
             result += modified;
@@ -218,7 +258,9 @@ export async function balancePracticeQuiz(
     }
 
     return result;
-  } catch {
+  } catch (err) {
+    // Balancing is best-effort, but a Stop must still stop the caller.
+    if (signal?.aborted) throw err;
     return quizMarkdown;
   }
 }
@@ -227,7 +269,8 @@ export async function balancePracticeQuiz(
 
 export async function balanceInClassQuiz(
   quiz: InClassQuizQuestion[],
-  apiKey: string
+  apiKey: string,
+  signal?: AbortSignal,
 ): Promise<InClassQuizQuestion[]> {
   try {
     const auditInput = quiz.map(q => ({
@@ -247,7 +290,7 @@ export async function balanceInClassQuiz(
       distractors: quiz[idx].distractors.map(d => d.text),
     }));
 
-    const rewrites = await requestRewrites(rewriteInput, apiKey);
+    const rewrites = await requestRewrites(rewriteInput, apiKey, signal);
 
     // Merge rewrites back into the quiz array
     const result = quiz.map((q, i) => {
@@ -263,7 +306,8 @@ export async function balanceInClassQuiz(
     });
 
     return result;
-  } catch {
+  } catch (err) {
+    if (signal?.aborted) throw err;
     return quiz;
   }
 }

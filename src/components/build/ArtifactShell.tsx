@@ -56,13 +56,16 @@ export function ArtifactShell({
           display: 'flex',
           alignItems: 'flex-start',
           justifyContent: 'space-between',
-          gap: 16,
+          // Wraps: on a phone the actions drop below the title instead of
+          // squeezing it to one word per line.
+          flexWrap: 'wrap',
+          gap: '10px 16px',
           padding: '14px 20px',
           background: 'var(--cb-surface-sunken)',
           borderBottom: '0.5px solid var(--cb-border-default)',
         }}
       >
-        <div style={{ minWidth: 0, flex: '1 1 auto' }}>
+        <div style={{ minWidth: 0, flex: '1 1 220px' }}>
           <div
             className="cb-sc"
             style={{
@@ -107,6 +110,7 @@ export function ArtifactShell({
               display: 'flex',
               gap: 8,
               alignItems: 'center',
+              flexWrap: 'wrap',
               flexShrink: 0,
             }}
           >

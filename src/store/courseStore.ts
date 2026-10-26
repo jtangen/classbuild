@@ -1,6 +1,19 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { idbStorage } from './idbStorage';
+import { useUiStore } from './uiStore';
+import { abortAll } from '../services/abortRegistry';
+
+/**
+ * Everything that must stop or be forgotten when the course is cleared or
+ * replaced: in-flight streams (a stream for the old course would otherwise
+ * write its result into the next), and Build's queued "rebuild materials"
+ * marker, which points at the old course's chapter.
+ */
+export function leaveCourse(): void {
+  abortAll();
+  useUiStore.getState().setRebuildMaterialsFor(null);
+}
 import type {
   CourseSetup,
   Syllabus,
@@ -65,7 +78,7 @@ interface CourseState {
   reset: () => void;
 }
 
-const defaultSetup: CourseSetup = {
+export const defaultSetup: CourseSetup = {
   topic: '',
   educationLevel: 'advanced-undergrad',
   priorKnowledge: 'some',
@@ -131,7 +144,11 @@ export const useCourseStore = create<CourseState>()(
 
       addResearchDossier: (dossier) =>
         set((state) => ({
-          researchDossiers: [...state.researchDossiers, dossier],
+          // One dossier per chapter: a re-run replaces, never duplicates.
+          researchDossiers: [
+            ...state.researchDossiers.filter((d) => d.chapterNumber !== dossier.chapterNumber),
+            dossier,
+          ],
         })),
 
       addChapter: (chapter) =>
@@ -174,7 +191,8 @@ export const useCourseStore = create<CourseState>()(
           }),
         })),
 
-      resetDownstream: () =>
+      resetDownstream: () => {
+        leaveCourse();
         set({
           completedStages: [],
           syllabus: null,
@@ -182,9 +200,11 @@ export const useCourseStore = create<CourseState>()(
           researchDossiers: [],
           chapters: [],
           curriculumMap: null,
-        }),
+        });
+      },
 
-      reset: () =>
+      reset: () => {
+        leaveCourse();
         set({
           currentStage: 'landing',
           completedStages: [],
@@ -194,14 +214,19 @@ export const useCourseStore = create<CourseState>()(
           researchDossiers: [],
           chapters: [],
           curriculumMap: null,
-        }),
+        });
+      },
     }),
     {
       name: 'classbuild-course',
       storage: idbStorage,
       version: 4,
       migrate(persisted, version) {
-        const state = persisted as Record<string, unknown>;
+        // A throw here leaves hydration unfinished (App's loading screen
+        // forever), so never dereference a non-object payload.
+        const state = (
+          typeof persisted === 'object' && persisted !== null ? persisted : {}
+        ) as Record<string, unknown>;
         // v0→v1: migrate old preview/generate stages to build
         if (version === undefined || version < 1) {
           if (state.currentStage === 'preview' || state.currentStage === 'generate') {

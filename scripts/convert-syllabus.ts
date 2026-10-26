@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Convert a syllabus.json to .md and .docx formats.
- * Usage: npx tsx scripts/convert-syllabus.ts ./output/prejudice_v2/syllabus.json
+ * Usage: npx tsx --import ./scripts/raw-loader.mjs scripts/convert-syllabus.ts ./output/prejudice_v2/syllabus.json
  */
 
 import { readFile, writeFile } from 'node:fs/promises';
@@ -51,7 +51,7 @@ function formatSyllabusMd(syllabus: Syllabus): string {
 async function main() {
   const inputPath = process.argv[2];
   if (!inputPath) {
-    console.error('Usage: npx tsx scripts/convert-syllabus.ts <path/to/syllabus.json>');
+    console.error('Usage: npx tsx --import ./scripts/raw-loader.mjs scripts/convert-syllabus.ts <path/to/syllabus.json>');
     process.exit(1);
   }
 

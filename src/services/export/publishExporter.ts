@@ -1,5 +1,7 @@
 import type { Syllabus, GeneratedChapter, WeeklyChallengeData } from '../../types/course';
 import { renderChapterHtml, getTheme } from '../../themes';
+import { isSafeMediaUrl } from '../../utils/url';
+import { readChapterAudio } from './chapterAudio';
 import {
   buildCodexViewerHtml,
   type CodexChapterData,
@@ -106,7 +108,11 @@ export async function assemblePublishSite(
     if (ch.slidesJson?.length) {
       let wroteAny = false;
       ch.slidesJson.forEach((s, i) => {
-        const m = s.imageDataUri?.match(/^data:[^;]+;base64,(.+)$/);
+        // Stored values can come from an imported project file: only take
+        // genuine base64 image data URIs.
+        const m = isSafeMediaUrl(s.imageDataUri, 'image')
+          ? s.imageDataUri.match(/^data:[^;]+;base64,(.+)$/)
+          : null;
         if (m) {
           zip.file(`slides/ch${nn}/slide-${pad2(i + 1)}.jpg`, m[1], { base64: true });
           wroteAny = true;
@@ -117,17 +123,13 @@ export async function assemblePublishSite(
       if (wroteAny) data.slides = ch.slidesJson.map((s) => ({ title: s.title }));
     }
 
-    // Audio — prefer the durable data URI (survives reload); fall back to the
-    // in-session blob URL. fetch() accepts both. Skip on failure.
-    const chapterAudio = ch.audioUrl ?? ch.audioDataUri;
-    if (chapterAudio) {
-      try {
-        const audioBlob = await fetch(chapterAudio).then((r) => r.blob());
-        zip.file(`audio/${nn}.mp3`, audioBlob);
-        data.audioPath = `audio/${nn}.mp3`;
-      } catch {
-        /* audio source no longer valid — omit audio */
-      }
+    // Audio — the in-session blob URL, falling back to the durable data URI
+    // when the blob URL is dead. Only app-produced audio URLs are read; if
+    // neither source is readable the Audio tab is simply omitted.
+    const audioBlob = await readChapterAudio(ch);
+    if (audioBlob) {
+      zip.file(`audio/${nn}.mp3`, audioBlob);
+      data.audioPath = `audio/${nn}.mp3`;
     }
     if (ch.audioTranscript) data.transcript = ch.audioTranscript;
 

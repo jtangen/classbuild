@@ -30,7 +30,9 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "course": "tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/generate-course.ts",
+    "stage": "tsx --import ./scripts/raw-loader.mjs scripts/build-staging.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.74.0",

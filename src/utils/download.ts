@@ -9,6 +9,11 @@ export function downloadFile(
   const a = document.createElement('a');
   a.href = url;
   a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
   a.click();
-  URL.revokeObjectURL(url);
+  a.remove();
+  // Revoking synchronously can cancel the download before the browser has
+  // read the blob (Safari/Firefox); keep it alive briefly, as FileSaver does.
+  setTimeout(() => URL.revokeObjectURL(url), 40_000);
 }

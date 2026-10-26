@@ -152,6 +152,49 @@ export const FONTS_URL =
   '&family=Manrope:wght@300;400;500;600;700;800' +
   '&display=swap';
 
+/** Desktop size of a theme's chapter title in px, read from its CSS. */
+function titleSizePx(css: string): number {
+  const m = css.match(/\.ch-title\s*\{[^}]*?font-size:\s*([\d.]+)px/);
+  return m ? parseFloat(m[1]) : 54;
+}
+
+/**
+ * Phone layout shared by every theme (the theme CSS files are desktop-only):
+ * narrow side padding, a title that scales with the screen (never larger than
+ * on desktop), widget rows that wrap, one column of meters, figures without
+ * side bleed, and long reference URLs that break. Desktop is untouched.
+ */
+function phoneCss(theme: ChapterTheme): string {
+  const s = `.theme-${theme.id}`;
+  const max = Math.min(54, titleSizePx(theme.css));
+  const min = Math.min(34, max);
+  return `@media (max-width: 600px) {
+  ${s} { padding-left: 18px; padding-right: 18px; }
+  ${s} .ch-title { font-size: clamp(${min}px, 10vw, ${max}px); max-width: 100%; overflow-wrap: break-word; }
+  ${s} .ch-widget-row { flex-wrap: wrap; }
+  ${s} .ch-widget-field { flex: 1 1 100%; min-width: 0; }
+  ${s} .ch-widget-select { width: 100%; min-width: 0; max-width: 100%; }
+  ${s} .ch-widget-meters { grid-template-columns: 1fr; }
+  ${s} .ch-figure { margin-left: 0; margin-right: 0; }
+  ${s} .ch-refs p, ${s} .ch-refs li { overflow-wrap: anywhere; }
+}`;
+}
+
+/**
+ * A figure box holding text rather than an image (the chapter prompt used to
+ * invite hand-made ones, e.g. a framework list). Themes size .ch-figbox as a
+ * fixed-height image frame in an accent colour with the tag pinned over its
+ * foot, which cut the text off and printed the tag across it. Such a box grows
+ * to fit, takes the body colour, and keeps its tag in the flow. Image boxes,
+ * "image unavailable" boxes (only the tag) and the old drawn placeholders (an
+ * absolutely placed <svg>) are untouched.
+ */
+function textFigureCss(theme: ChapterTheme): string {
+  const box = `.theme-${theme.id} .ch-figbox:not(:has(> img, > svg)):has(> :not(.ch-figbox-tag))`;
+  return `${box} { height: auto; overflow: visible; color: inherit; padding: 18px 20px; }
+${box} > .ch-figbox-tag { position: static; transform: none; display: table; margin-top: 12px; }`;
+}
+
 /**
  * Wrap a chapter body fragment (`<article class="ch">…</article>` + any widget
  * scripts) into a self-contained HTML document styled by the chosen theme.
@@ -182,6 +225,8 @@ export function wrapChapterHtml(
 *, *::before, *::after { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
 ${theme.css}
+${textFigureCss(theme)}
+${phoneCss(theme)}
 </style>
 </head>
 <body class="theme-${theme.id}">
@@ -242,23 +287,74 @@ export interface Theme {
 
 function deriveLegacy(t: ChapterTheme): Theme {
   const [bg, text, accent, muted, surface] = t.palette;
+  const dark = t.mode === 'dark';
+  // Cards: dark themes keep their surface. Light themes use a gentle tint of
+  // the page toward the surface, because some palette surfaces are saturated
+  // (Storybook's green) and make poor reading grounds.
+  const cardBg = dark ? surface : mix(bg, surface, 0.22);
+  // Raised panels (option cards, slider tracks, stat tiles) are one visible
+  // step from the card, toward the text colour, in every theme.
+  const elevated = mix(cardBg, text, 0.07);
+  // Every role used for text must be readable on each ground it can sit on:
+  // 4.5:1 (WCAG AA) or better, darkened (or lightened on dark themes) only as
+  // far as needed, so each colour keeps its hue. The last ground is a step
+  // past `elevated`, as margin for lightly tinted panels and badges.
+  const grounds = [bg, cardBg, elevated, mix(cardBg, text, 0.12)];
+  const readable = (color: string, min = 4.5) => readableOn(color, grounds, min, dark);
   return {
     id: t.id,
     name: t.name,
     pageBg: bg,
-    cardBg: surface,
-    elevated: surface,
-    accent,
-    accentLight: lighten(accent, 0.18),
-    warmAccent: muted,
-    textPrimary: text,
-    textSecondary: mix(text, bg, 0.32),
-    textMuted: mix(text, bg, 0.55),
-    success: t.mode === 'dark' ? '#6ee7b7' : '#3d5c33',
+    cardBg,
+    elevated,
+    accent: readable(accent),
+    accentLight: dark ? readable(lighten(accent, 0.18)) : readable(accent),
+    warmAccent: readable(muted),
+    textPrimary: readable(text, 7),
+    textSecondary: readable(mix(text, cardBg, 0.3)),
+    textMuted: readable(mix(text, cardBg, 0.45)),
+    success: readable(dark ? '#6ee7b7' : '#3d5c33'),
     headingFont: stripQuotes(t.displayFont),
     bodyFont: stripQuotes(t.bodyFont),
-    isDark: t.mode === 'dark',
+    isDark: dark,
   };
+}
+
+/** WCAG relative luminance of a #rrggbb colour. */
+function luminance(hex: string): number {
+  const [r, g, b] = hexToRgb(hex).map((v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/** WCAG contrast ratio between two #rrggbb colours (1 to 21). */
+function contrastRatio(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+/**
+ * `color` if it already reaches `min` contrast on every ground, otherwise the
+ * first 5% step toward black (light grounds) or white (dark grounds) that does.
+ */
+function readableOn(color: string, grounds: string[], min: number, dark: boolean): string {
+  const toward = dark ? '#ffffff' : '#000000';
+  for (let step = 0; step <= 20; step++) {
+    const c = mix(color, toward, step / 20);
+    if (grounds.every((g) => contrastRatio(c, g) >= min)) return c;
+  }
+  return toward;
+}
+
+/**
+ * Make a fixed colour (a status green, a tier gold) readable as text on a
+ * legacy theme's page, card and raised surfaces.
+ */
+export function readableOnTheme(color: string, theme: Theme, min = 4.5): string {
+  const deep = mix(theme.cardBg, theme.textPrimary, 0.12);
+  return readableOn(color, [theme.pageBg, theme.cardBg, theme.elevated, deep], min, theme.isDark);
 }
 
 function stripQuotes(font: string): string {
@@ -308,11 +404,13 @@ export function getTheme(themeId?: string): Theme {
  * but the infographic prompt still uses it for palette guidance.
  */
 export function buildThemePromptBlock(theme: Theme): string {
+  // The raw brand palette, not the contrast-adjusted text roles above.
+  const [bg, text, accent, muted, surface] = getChapterTheme(theme.id).palette;
   return `## VISUAL DESIGN
 Use these colors as a palette guide:
-- Page background: ${theme.pageBg}
-- Surface: ${theme.cardBg}
-- Primary accent: ${theme.accent}
-- Primary text: ${theme.textPrimary}
-- Muted accent: ${theme.warmAccent}`;
+- Page background: ${bg}
+- Surface: ${surface}
+- Primary accent: ${accent}
+- Primary text: ${text}
+- Muted accent: ${muted}`;
 }

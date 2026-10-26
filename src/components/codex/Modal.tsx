@@ -1,5 +1,8 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 interface CodexModalProps {
   open: boolean;
@@ -21,7 +24,7 @@ interface CodexModalProps {
 /**
  * Codex modal. Flat 42% dim — no backdrop-blur. Square-ish radius. Sheet
  * shadow. Escape closes. Overlay click closes. Focus moves into the modal
- * on open.
+ * on open, Tab stays inside it, and focus returns to whatever opened it.
  */
 export function CodexModal({
   open,
@@ -34,11 +37,46 @@ export function CodexModal({
   width = 480,
 }: CodexModalProps) {
   const ref = useRef<HTMLDivElement>(null);
+  // Callers pass inline arrows, so onClose changes on every parent render. If
+  // the open effect depended on it, each re-render (one per keystroke in an
+  // input inside the modal) would re-run it and yank focus back to the
+  // dialog. Keep the latest handler in a ref and run the effect per open.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  });
+  const titleId = useId();
+  const subId = useId();
 
   useEffect(() => {
     if (!open) return;
+    // Usually the button that opened the dialog; focus goes back there on close.
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape') {
+        onCloseRef.current();
+        return;
+      }
+      const dialog = ref.current;
+      if (e.key !== 'Tab' || !dialog) return;
+      // Keep Tab inside the dialog — the dimmed page behind it is inert.
+      const items = Array.from(dialog.querySelectorAll<HTMLElement>(FOCUSABLE));
+      if (items.length === 0) {
+        e.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = document.activeElement;
+      const inside = active instanceof Node && dialog.contains(active);
+      if (e.shiftKey && (!inside || active === first || active === dialog)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && (!inside || active === last)) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener('keydown', onKey);
     // Move focus into the modal so the screen reader and keyboard land here.
@@ -49,8 +87,9 @@ export function CodexModal({
     return () => {
       window.removeEventListener('keydown', onKey);
       document.body.style.overflow = prev;
+      if (opener?.isConnected) opener.focus();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return (
     <AnimatePresence>
@@ -78,6 +117,8 @@ export function CodexModal({
             tabIndex={-1}
             role="dialog"
             aria-modal="true"
+            aria-labelledby={titleId}
+            aria-describedby={sub ? subId : undefined}
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -86,7 +127,8 @@ export function CodexModal({
               background: 'var(--cb-surface-raised)',
               border: '1px solid var(--cb-border-default)',
               borderRadius: 3,
-              padding: '28px 32px',
+              // Tighter on phones, where 32px a side ate a quarter of the width.
+              padding: 'clamp(20px, 5vw, 28px) clamp(18px, 6vw, 32px)',
               // Never wider than the viewport (phones) — the configured
               // width only applies when there's room for it.
               maxWidth: `min(${width}px, calc(100vw - 28px))`,
@@ -114,6 +156,7 @@ export function CodexModal({
               </div>
             )}
             <h3
+              id={titleId}
               style={{
                 margin: '0 0 10px',
                 fontSize: 24,
@@ -128,6 +171,7 @@ export function CodexModal({
             </h3>
             {sub && (
               <p
+                id={subId}
                 style={{
                   margin: '0 0 18px',
                   fontSize: 15,
@@ -145,6 +189,9 @@ export function CodexModal({
                 style={{
                   display: 'flex',
                   justifyContent: 'flex-end',
+                  // Wrap rather than overflow: at phone width three buttons
+                  // don't fit, and nowrap pushed the first off the left edge.
+                  flexWrap: 'wrap',
                   gap: 10,
                   marginTop: 22,
                   paddingTop: 18,
