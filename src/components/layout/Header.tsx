@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useUiStore } from '../../store/uiStore';
 import type { MaterialKind } from '../../store/uiStore';
 import { useCourseStore } from '../../store/courseStore';
+import { isPersistenceBlocked } from '../../store/idbStorage';
 import { CodexButton } from '../codex/Button';
 import { Colophon } from '../codex/Colophon';
 import { useCourseBusy } from './useCourseBusy';
@@ -53,6 +54,8 @@ export function Header() {
   // writing into the course by chapter number, so resetting under it would
   // land the old course's output in the new one.
   const isBusy = useCourseBusy();
+  // Read on render: persistError changes whenever this flag is set.
+  const savingOff = persistError !== null && isPersistenceBlocked();
   const [showConfirm, setShowConfirm] = useState(false);
 
   // Re-tick the relative "Saved · Xs ago" label. Once per 5s is plenty:
@@ -224,8 +227,11 @@ export function Header() {
               <button
                 type="button"
                 className="cb-mono cb-focus"
-                title={`${persistError} — click to retry the save.`}
+                // Saving switched off (storage unreadable): a retry can't
+                // help, so say so instead of offering one.
+                title={savingOff ? persistError : `${persistError} — click to retry the save.`}
                 onClick={() => {
+                  if (savingOff) return;
                   // A no-op set re-runs the persist middleware, which
                   // re-serializes the FULL current state; success clears
                   // this banner via idbStorage.
@@ -242,7 +248,7 @@ export function Header() {
                   border: '0.5px solid var(--cb-status-danger, #a03535)',
                   borderRadius: 2,
                   padding: '3px 9px 4px',
-                  cursor: 'pointer',
+                  cursor: savingOff ? 'help' : 'pointer',
                 }}
               >
                 <span
@@ -255,7 +261,7 @@ export function Header() {
                     background: 'var(--cb-status-danger, #a03535)',
                   }}
                 />
-                Save failed — retry
+                {savingOff ? 'Not saving in this tab' : 'Save failed — retry'}
               </button>
             )}
 

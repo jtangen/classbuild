@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Header } from './Header';
+import { MultiTabNotice } from './MultiTabNotice';
 import { StageIndicator } from './StageIndicator';
 import { ErrorBoundary } from '../shared/ErrorBoundary';
 import { useUiStore } from '../../store/uiStore';
@@ -27,6 +28,7 @@ export function AppShell() {
     >
       <Header />
       <main style={{ paddingTop: 64 }}>
+        <MultiTabNotice />
         {!isLanding && <StageIndicator />}
         <div className="max-w-7xl mx-auto px-6 pb-12">
           <ErrorBoundary key={location.pathname}>

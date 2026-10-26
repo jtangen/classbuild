@@ -215,6 +215,10 @@ export function SyllabusPage() {
     ? 'drafting'
     : 'thinking'; // pre-generation transient — useEffect is about to fire
 
+  // A first draft that failed: no syllabus, nothing running, an error shown.
+  // Without this the page kept its "warming up" trace and disabled buttons.
+  const stalled = !syllabus && !isGenerating && !!error;
+
   const draftedCount = syllabus ? totalChapters : partialChapters.length;
   const activeDraftIndex = syllabus ? -1 : Math.max(0, partialChapters.length - 1);
 
@@ -235,6 +239,8 @@ export function SyllabusPage() {
       <div style={{ maxWidth: 1180, margin: '0 auto' }}>
         <SyllabusBanner
           phase={phase}
+          busy={isGenerating}
+          stalled={stalled}
           title={displayTitle}
           drafted={draftedCount}
           total={totalChapters}
@@ -293,7 +299,7 @@ export function SyllabusPage() {
           <></>
         </CodexModal>
 
-        {phase === 'thinking' && (
+        {phase === 'thinking' && !stalled && (
           <ThinkingTrace thinkingText={thinkingText} elapsedSec={elapsedSec} />
         )}
 
@@ -434,6 +440,8 @@ function ThinkingTrace({
 
 function SyllabusBanner({
   phase,
+  busy,
+  stalled,
   title,
   drafted,
   total,
@@ -442,6 +450,10 @@ function SyllabusBanner({
   onProceed,
 }: {
   phase: Phase;
+  /** A syllabus stream is running (a regenerate keeps phase 'settled'). */
+  busy: boolean;
+  /** The first draft failed: no syllabus and nothing running. */
+  stalled: boolean;
   title: string;
   drafted: number;
   total: number;
@@ -449,19 +461,26 @@ function SyllabusBanner({
   onRegenerate: () => void;
   onProceed: () => void;
 }) {
-  const progress =
-    phase === 'thinking'
-      ? 'Designing the course architecture…'
-      : phase === 'drafting'
-      ? `Drafting chapter ${Math.min(drafted + 1, total)} of ${total}.`
-      : `${total} ${pluralise('chapter', total)} · syllabus settled.`;
+  const progress = stalled
+    ? 'Drafting stopped. The note below says why.'
+    : phase === 'thinking'
+    ? 'Designing the course architecture…'
+    : phase === 'drafting'
+    ? `Drafting chapter ${Math.min(drafted + 1, total)} of ${total}.`
+    : busy
+    ? 'Redrafting the syllabus…'
+    : `${total} ${pluralise('chapter', total)} · syllabus settled.`;
 
-  const displayTitle =
-    phase === 'thinking' && !title
-      ? 'Drafting your syllabus…'
-      : title || 'Drafting your syllabus…';
+  const displayTitle = stalled && !title
+    ? 'No syllabus yet'
+    : title || 'Drafting your syllabus…';
 
-  const isGenerating = phase !== 'settled';
+  // Buttons follow the real stream state, not the phase. A regenerate keeps
+  // the old syllabus on screen ('settled') while the new one streams, so
+  // phase alone left "Begin research" open mid-redraft; a failed first draft
+  // has no syllabus but nothing running, so phase alone locked "Edit brief".
+  const isGenerating = busy || (phase !== 'settled' && !stalled);
+  const showPen = busy || (phase !== 'settled' && !stalled);
 
   return (
     <header
@@ -510,8 +529,8 @@ function SyllabusBanner({
             color: 'var(--cb-text-muted)',
           }}
         >
-          {phase !== 'settled' && <PenStroke width={48} />}
-          {phase === 'settled' && (
+          {showPen && <PenStroke width={48} />}
+          {!showPen && (
             <span
               style={{ color: 'var(--cb-accent-emphasis)', fontSize: 14.5 }}
             >
@@ -546,7 +565,7 @@ function SyllabusBanner({
           variant="primary"
           size="sm"
           onClick={onProceed}
-          disabled={isGenerating}
+          disabled={isGenerating || phase !== 'settled'}
         >
           {isGenerating ? 'Begin research · drafting…' : 'Begin research →'}
         </CodexButton>

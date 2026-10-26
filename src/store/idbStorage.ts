@@ -99,6 +99,12 @@ function errorText(err: unknown): string {
  */
 let writesBlocked: string | null = null;
 
+/** True once saving is switched off for this tab (the stored course couldn't
+ *  be read) — a retry can't help, only a reload. */
+export function isPersistenceBlocked(): boolean {
+  return writesBlocked !== null;
+}
+
 async function reportPersistError(message: string): Promise<void> {
   // Dynamic import keeps the store ↔ storage reference a true cycle break.
   const { useUiStore } = await import('./uiStore');
