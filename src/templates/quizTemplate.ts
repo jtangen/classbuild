@@ -8,7 +8,14 @@
  * Based on the PSYC2371 practice quiz design.
  */
 import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
+import { readableOnTheme } from '../themes/themes.config';
 import { escapeHtml, toScriptJson } from './htmlEscape';
+
+/** `rgba()` of a #rrggbb colour, for theme-tinted backgrounds. */
+function rgbaOf(hex: string, alpha: number): string {
+  const n = parseInt(hex.slice(1, 7), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
 
 /** Each chapter theme implies a different chrome aesthetic — modernist hard
  *  corners for Studio, friendly rounded blocks for Storybook, hairline serifs
@@ -41,6 +48,10 @@ export function buildQuizHtml(
   const t = getTheme(themeId);
   const ct = getChapterTheme(themeId);
   const chrome = themeChrome(ct.id);
+  // Status colours are used as text (verdicts, chart values, review lines), so
+  // each is adjusted to read at 4.5:1 on this theme's page, card and panels.
+  const rd = (color: string) => readableOnTheme(color, t);
+  const tint = (alpha: number) => rgbaOf(t.accentLight, alpha);
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -56,13 +67,13 @@ export function buildQuizHtml(
         :root {
             --primary-purple: ${t.accent};
             --light-purple: ${t.accentLight};
-            --red: #ef4444;
-            --green: #22c55e;
-            --gold: #f59e0b;
-            --orange: #f97316;
-            --yellow: #fbbf24;
-            --blue: #3b82f6;
-            --aqua: #06b6d4;
+            --red: ${rd('#ef4444')};
+            --green: ${rd('#22c55e')};
+            --gold: ${rd('#f59e0b')};
+            --orange: ${rd('#f97316')};
+            --yellow: ${rd('#fbbf24')};
+            --blue: ${rd('#3b82f6')};
+            --aqua: ${rd('#06b6d4')};
             --light-grey: ${t.isDark ? '#334155' : '#cbd5e1'};
             /* Secondary text: the theme's own secondary colour keeps labels
                readable on every surface (the old slate greys were ~2:1). */
@@ -361,7 +372,7 @@ export function buildQuizHtml(
             top: auto;
             bottom: -30px;
             right: 20px;
-            background-color: var(--gold);
+            background-color: #f59e0b; /* bright fill under dark text; --gold is the text shade */
             color: #1a1a2e;
             border-radius: 50%;
             width: 90px;
@@ -408,22 +419,24 @@ export function buildQuizHtml(
         }
 
         .powerup-info {
-            background-color: rgba(139, 92, 246, 0.1);
+            background-color: ${tint(0.1)};
             border-radius: 8px;
             padding: 8px 12px;
             margin-bottom: 15px;
             font-size: 0.9rem;
-            color: var(--light-purple);
+            color: var(--black);
             text-align: center;
         }
 
+        /* A 40px circle for the icon; text labels like "50:50" grow into a pill */
         .powerup {
             position: relative;
             background-color: var(--light-grey);
             color: var(--white);
             border: none;
-            border-radius: 50%;
-            width: 40px;
+            border-radius: 20px;
+            min-width: 40px;
+            padding: 0 10px;
             height: 40px;
             cursor: pointer;
             display: flex;
@@ -443,6 +456,12 @@ export function buildQuizHtml(
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
+        }
+
+        #fifty-fifty {
+            font-family: var(--qz-font-mono);
+            font-size: 0.85rem;
+            font-weight: 700;
         }
 
         .powerup-count {
@@ -554,7 +573,7 @@ export function buildQuizHtml(
 
         /* Metacognitive Feedback */
         .meta-feedback {
-            background-color: rgba(139, 92, 246, 0.1);
+            background-color: ${tint(0.1)};
             border-radius: 8px;
             padding: 20px;
             margin-top: 20px;
@@ -691,7 +710,7 @@ export function buildQuizHtml(
 
         .option:hover {
             border-color: var(--light-purple);
-            background-color: rgba(139, 92, 246, 0.1);
+            background-color: ${tint(0.1)};
         }
 
         .option.selected {
@@ -746,7 +765,7 @@ export function buildQuizHtml(
             letter-spacing: -0.003em;
             margin-bottom: 20px;
             line-height: 1.4;
-            color: var(--light-purple);
+            color: var(--black); /* ink: the question is the main reading text */
         }
 
         #feedback-container {
@@ -1057,7 +1076,7 @@ export function buildQuizHtml(
             display: inline-block;
             margin-top: 10px;
             padding: 5px 10px;
-            background-color: rgba(139, 92, 246, 0.15);
+            background-color: ${tint(0.15)};
             border-radius: 20px;
             font-size: 0.9rem;
         }
@@ -1129,7 +1148,7 @@ export function buildQuizHtml(
             bottom: 20px;
             right: 20px;
             max-width: 300px;
-            box-shadow: 0 4px 20px rgba(139, 92, 246, 0.3);
+            box-shadow: 0 4px 20px ${tint(0.3)};
             z-index: 100;
             animation: slideIn 0.5s forwards, slideOut 0.5s forwards 4.5s;
             display: flex;

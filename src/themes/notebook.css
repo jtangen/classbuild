@@ -480,3 +480,11 @@
 }
 .theme-notebook .ch-foot-mark::before { content: '·· '; }
 .theme-notebook .ch-foot-mark::after { content: ' ··'; }
+
+/* PHONE: the shared phone block in wrapChapterHtml narrows the side padding;
+   keep the margin rule clear of the text and drop the punched holes. */
+@media (max-width: 600px) {
+  body.theme-notebook { padding-left: 30px; }
+  .theme-notebook::before { left: 18px; }
+  .theme-notebook::after { display: none; }
+}

@@ -12,15 +12,8 @@
  */
 import { getTheme, getChapterTheme, FONTS_URL } from '../themes';
 import type { WeeklyChallengeData } from '../types/course';
+import { readableOnTheme } from '../themes/themes.config';
 import { toScriptJson } from './htmlEscape';
-
-/** Blend two #rrggbb colours: w = 0 gives a, w = 1 gives b. */
-function mixHex(a: string, b: string, w: number): string {
-  const parse = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-  const [ca, cb] = [parse(a), parse(b)];
-  if ([...ca, ...cb].some((n) => Number.isNaN(n))) return a;
-  return '#' + ca.map((v, i) => Math.round(v * (1 - w) + cb[i] * w).toString(16).padStart(2, '0')).join('');
-}
 
 /** Decimal places in a numeric value (0.25 -> 2, 65 -> 0). */
 function decimalPlaces(n: unknown): number {
@@ -45,10 +38,9 @@ export function buildWeeklyChallengeHtml(
 ): string {
   const t = getTheme(themeId);
   const ct = getChapterTheme(themeId);
-  // Raised surfaces (slider track, progress segments, tier bars, option
-  // letters) need to stand off the card. The theme palette uses one colour for
-  // both, so tint the card toward the text colour when they match.
-  const elevated = t.elevated !== t.cardBg ? t.elevated : mixHex(t.cardBg, t.textPrimary, t.isDark ? 0.1 : 0.07);
+  // Status colours are used as text (verdicts, tier labels, review lines), so
+  // each is adjusted to read at 4.5:1 on this theme's page, card and panels.
+  const rd = (color: string) => readableOnTheme(color, t);
 
   // ── Build-time answer obfuscation ──
   // Strip answer fields from questions and encode them so they don't appear
@@ -138,14 +130,14 @@ export function buildWeeklyChallengeHtml(
             --warm-accent: ${t.warmAccent};
             --bg-page: ${t.pageBg};
             --bg-card: ${t.cardBg};
-            --bg-elevated: ${elevated};
+            --bg-elevated: ${t.elevated};
             --text-primary: ${t.textPrimary};
             --text-secondary: ${t.textSecondary};
             --text-muted: ${t.textMuted};
             --success: ${t.success};
-            --error: #ef4444;
-            --gold: #f59e0b;
-            --blue: #3b82f6;
+            --error: ${rd('#ef4444')};
+            --gold: ${rd('#f59e0b')};
+            --blue: ${rd('#3b82f6')};
             --on-accent: ${t.isDark ? '#1a1a2e' : '#ffffff'};
             --shadow: 0 4px 12px rgba(0, 0, 0, ${t.isDark ? '0.4' : '0.15'});
             --shadow-lg: 0 8px 24px rgba(0, 0, 0, ${t.isDark ? '0.5' : '0.18'});
@@ -526,12 +518,12 @@ export function buildWeeklyChallengeHtml(
 
         .option-card.correct .option-letter {
             background: var(--success);
-            color: #fff;
+            color: var(--on-accent);
         }
 
         .option-card.incorrect .option-letter {
             background: var(--error);
-            color: #fff;
+            color: var(--on-accent);
         }
 
         .option-text { flex: 1; }
@@ -1021,7 +1013,7 @@ export function buildWeeklyChallengeHtml(
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0.1em;
-            color: var(--warm-accent);
+            color: #fbbf24; /* on the dark intro overlay in every theme */
             text-shadow: 0 0 30px rgba(245,158,11,0.4);
         }
 

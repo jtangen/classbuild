@@ -457,11 +457,9 @@ export function buildCoursePackageHtml(
       cursor: pointer;
       padding: 0.2rem 0;
       margin-top: 0.2rem;
-      opacity: 0.8;
-      transition: opacity 0.15s;
     }
 
-    .desc-toggle:hover { opacity: 1; }
+    .desc-toggle:hover { text-decoration: underline; }
 
     /* ── Tab bar ──────────────────────────── */
     .tab-bar {

@@ -487,3 +487,10 @@
   font-size: 20px;
   font-style: italic;
 }
+
+/* PHONE: the header band bleeds exactly to the edges under the shared phone
+   block's 18px side padding (its desktop bleed of 28px would overflow). */
+@media (max-width: 600px) {
+  .theme-storybook .ch-head { margin-left: -18px; margin-right: -18px; padding-left: 18px; padding-right: 18px; }
+  .theme-storybook .ch-head::after { left: 18px; }
+}
