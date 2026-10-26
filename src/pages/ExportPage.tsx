@@ -31,6 +31,8 @@ import { downloadFile } from '../utils/download';
 import { normalizeActivityDetail } from '../utils/activityDetail';
 import { isSafeMediaUrl } from '../utils/url';
 import { hasChapterAudio, readChapterAudio } from '../services/export/chapterAudio';
+import { abortInFlight, beginAbortable, endAbortable, materialAbortKey } from '../services/abortRegistry';
+import { isAbortError } from '../utils/errors';
 
 /** Lowercase ASCII slug for download names. Accents are folded first
  *  ("Économie" → "economie"); a title with no Latin letters at all (e.g.
@@ -308,6 +310,36 @@ async function buildTeachingPackDocx(chapter: GeneratedChapter, courseTitle: str
   return Packer.toBlob(doc);
 }
 
+/**
+ * Run one of "Draft class"'s quiz steps the way Build runs its own material
+ * jobs: under the `kind:N` abort key, so a Stop on the Build tab cancels it,
+ * and in Build's in-flight slot for that kind when the slot is free, so the
+ * tab shows it as generating. Returns the error to report, or null on success
+ * or a Stop (a Stop is a silent cancel).
+ */
+async function runDraftMaterial(
+  kind: 'quiz' | 'inclassquiz',
+  chapterNum: number,
+  run: (signal: AbortSignal) => Promise<void>,
+): Promise<unknown> {
+  const key = materialAbortKey(kind, chapterNum);
+  const controller = beginAbortable(key);
+  // Never clobber a slot Build's own job holds; release only what we claimed.
+  const claimed = useUiStore.getState().inFlight[kind] === undefined;
+  if (claimed) useUiStore.getState().setInFlight(kind, chapterNum);
+  try {
+    await run(controller.signal);
+    return null;
+  } catch (err) {
+    return isAbortError(err) || controller.signal.aborted ? null : err;
+  } finally {
+    endAbortable(key, controller);
+    if (claimed && useUiStore.getState().inFlight[kind] === chapterNum) {
+      useUiStore.getState().setInFlight(kind, null);
+    }
+  }
+}
+
 /** Message for when the app-wide one-deck-at-a-time render lock is held. */
 function deckBusyMessage(): string | null {
   const busy = useUiStore.getState().slidesRender;
@@ -372,8 +404,13 @@ export function ExportPage() {
   const { syllabus, chapters, researchDossiers, addChapter, updateChapter, setSlideImage, setup, updateSetup, curriculumMap, setCurriculumMap } = useCourseStore();
   const currentThemeId = (setup.themeId as ChapterThemeId | undefined) ?? DEFAULT_CHAPTER_THEME_ID;
   const { claudeApiKey, openaiApiKey } = useApiStore();
-  const { isGenerating, setIsGenerating, setError, error, slidesRender } = useUiStore();
+  const {
+    isGenerating, setIsGenerating, setError, error, slidesRender,
+    readingDraft, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText,
+  } = useUiStore();
   const [generatingChapter, setGeneratingChapter] = useState<number | null>(null);
+  // Set by a drafting row's Stop so "Draft class" skips its remaining steps.
+  const draftStopRef = useRef(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [isGeneratingOutcomes, setIsGeneratingOutcomes] = useState(false);
   const [outcomesError, setOutcomesError] = useState<string | null>(null);
@@ -416,7 +453,7 @@ export function ExportPage() {
     const chapter = chapters.find(c => c.number === chapterNum);
     if (!chapter?.slidesJson || !syllabus) return;
     if (!openaiApiKey) {
-      setError('Add an OpenAI API key in Setup to render the slide images.');
+      setError('Add an OpenAI key in Setup to render the slide images.');
       return;
     }
     // Guard: only one slide render in flight across the app.
@@ -611,15 +648,19 @@ export function ExportPage() {
   // --- Generate a single chapter from export page ---
 
   const generateSingleChapter = useCallback(async (chapterNum: number) => {
-    if (!syllabus || isGenerating) return;
+    if (!syllabus) return;
     const ch = syllabus.chapters.find(c => c.number === chapterNum);
     if (!ch) return;
     if (!claudeApiKey) {
-      setError('Add a Claude API key in Setup to draft this class.');
+      setError('Add your Anthropic key in Setup to draft this class.');
       return;
     }
+    // One reading at a time, app-wide: Build's drafts hold the same slot.
+    const ui = useUiStore.getState();
+    if (ui.isGenerating || ui.readingDraft) return;
 
     setError(null);
+    draftStopRef.current = false;
     setIsGenerating(true);
     setGeneratingChapter(chapterNum);
 
@@ -630,76 +671,112 @@ export function ExportPage() {
         summary: s.summary, url: s.url, doi: s.doi,
       }));
 
-      // Generate chapter — same inputs as the Build pipeline: the teacher's
-      // length brief, and figure placeholders when an OpenAI key can fill them.
-      const hasImageGen = !!openaiApiKey;
-      const fullText = await streamMessage(
-        {
-          apiKey: claudeApiKey,
-          model: MODELS.opus,
-          system: buildChapterPrompt(setup.themeId, hasImageGen),
-          messages: [{ role: 'user', content: buildChapterUserPrompt(syllabus.courseTitle, ch, setup.chapterLength, { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes }, researchSources, hasImageGen, setup.chapterLengthBrief) }],
-          thinkingBudget: 'high',
-          maxTokens: 16000,
-        },
-        {},
-      );
-
-      let html = extractHtml(fullText);
-      if (hasImageGen) {
-        const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
-        html = await replaceAiImagePlaceholders(html, openaiApiKey);
-      }
-      addChapter({ number: chapterNum, title: ch.title, htmlContent: html });
-
-      // Generate practice quiz (answer-balanced, like the Build pipeline)
+      // 1. Reading — registered exactly like Build's own drafts (readingDraft,
+      //    streamed text + thinking, the reading:N abort key), so the Build page
+      //    shows this draft's stream, timer and a working Stop. Same inputs as
+      //    the Build pipeline: the teacher's length brief, and figure
+      //    placeholders when an OpenAI key can fill them.
+      const readingKey = materialAbortKey('reading', chapterNum);
+      const readingCtl = beginAbortable(readingKey);
+      setReadingDraft({ chapterNum, mode: 'draft', startedAt: Date.now() });
+      setStreamingText('');
+      setThinkingText('');
+      let html: string;
       try {
-        const quizText = await streamMessage(
+        const hasImageGen = !!openaiApiKey;
+        const fullText = await streamMessage(
           {
             apiKey: claudeApiKey,
             model: MODELS.opus,
-            system: buildPracticeQuizPrompt(),
-            messages: [{ role: 'user', content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
+            system: buildChapterPrompt(setup.themeId, hasImageGen),
+            messages: [{ role: 'user', content: buildChapterUserPrompt(syllabus.courseTitle, ch, setup.chapterLength, { educationLevel: setup.educationLevel, priorKnowledge: setup.priorKnowledge, learnerNotes: setup.learnerNotes }, researchSources, hasImageGen, setup.chapterLengthBrief) }],
             thinkingBudget: 'high',
-            maxTokens: 8000,
+            maxTokens: 16000,
+            signal: readingCtl.signal,
           },
-          {},
+          {
+            onThinking: (text) => appendThinkingText(text),
+            onText: (text) => appendStreamingText(text),
+          },
         );
-        const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
-        updateChapter(chapterNum, { practiceQuizData: await balancePracticeQuiz(quizText, claudeApiKey) });
-      } catch (err) {
-        setError(`Class ${chapterNum} practice quiz: ${friendlyError(err, 'generation failed.')}`);
+
+        html = extractHtml(fullText);
+        if (hasImageGen) {
+          const { replaceAiImagePlaceholders } = await import('../services/openai/imagePlacer');
+          html = await replaceAiImagePlaceholders(html, openaiApiKey, { signal: readingCtl.signal });
+        }
+        // A Stop during figure rendering still discards the draft.
+        readingCtl.signal.throwIfAborted();
+        addChapter({ number: chapterNum, title: ch.title, htmlContent: html });
+      } finally {
+        endAbortable(readingKey, readingCtl);
+        setReadingDraft(null);
+        setThinkingText('');
+        setStreamingText('');
       }
 
-      // Generate in-class quiz (answer-balanced, like the Build pipeline)
-      try {
-        const inClassText = await streamMessage(
-          {
-            apiKey: claudeApiKey,
-            model: MODELS.opus,
-            system: buildInClassQuizPrompt(),
-            messages: [{ role: 'user', content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
-            thinkingBudget: 'high',
-            maxTokens: 8000,
-          },
-          {},
-        );
-        const parsed = parseJson(inClassText);
-        if (!Array.isArray(parsed)) throw new Error('Unparseable in-class quiz.');
-        const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
-        updateChapter(chapterNum, {
-          inClassQuizData: await balanceInClassQuiz(parsed as InClassQuizQuestion[], claudeApiKey),
+      // 2–3. Quizzes (answer-balanced, like the Build pipeline). Each runs like
+      //      a Build material job, so the Build tab shows it and its Stop
+      //      cancels just that quiz.
+      const problems: string[] = [];
+      if (!draftStopRef.current) {
+        const err = await runDraftMaterial('quiz', chapterNum, async (signal) => {
+          const quizText = await streamMessage(
+            {
+              apiKey: claudeApiKey,
+              model: MODELS.opus,
+              system: buildPracticeQuizPrompt(),
+              messages: [{ role: 'user', content: buildPracticeQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
+              thinkingBudget: 'high',
+              maxTokens: 8000,
+              signal,
+            },
+            {},
+          );
+          const { balancePracticeQuiz } = await import('../services/quiz/answerBalancer');
+          updateChapter(chapterNum, { practiceQuizData: await balancePracticeQuiz(quizText, claudeApiKey, signal) });
         });
-      } catch (err) {
-        setError(`Class ${chapterNum} in-class quiz: ${friendlyError(err, 'generation failed.')}`);
+        if (err) problems.push(`Class ${chapterNum} practice quiz: ${friendlyError(err, 'generation failed.')}`);
       }
+      if (!draftStopRef.current) {
+        const err = await runDraftMaterial('inclassquiz', chapterNum, async (signal) => {
+          const inClassText = await streamMessage(
+            {
+              apiKey: claudeApiKey,
+              model: MODELS.opus,
+              system: buildInClassQuizPrompt(),
+              messages: [{ role: 'user', content: buildInClassQuizUserPrompt(ch.title, ch.narrative, ch.keyConcepts, html.slice(0, 3000)) }],
+              thinkingBudget: 'high',
+              maxTokens: 8000,
+              signal,
+            },
+            {},
+          );
+          const parsed = parseJson(inClassText);
+          if (!Array.isArray(parsed)) throw new Error('Unparseable in-class quiz.');
+          const { balanceInClassQuiz } = await import('../services/quiz/answerBalancer');
+          updateChapter(chapterNum, {
+            inClassQuizData: await balanceInClassQuiz(parsed as InClassQuizQuestion[], claudeApiKey, signal),
+          });
+        });
+        if (err) problems.push(`Class ${chapterNum} in-class quiz: ${friendlyError(err, 'generation failed.')}`);
+      }
+      if (problems.length > 0) setError(problems.join(' '));
     } catch (err) {
-      setError(`Chapter ${chapterNum}: ${friendlyError(err, 'generation failed.')}`);
+      // A Stop (here or on the Build page) is a silent cancel.
+      if (!isAbortError(err)) setError(`Class ${chapterNum}: ${friendlyError(err, 'generation failed.')}`);
     } finally {
       setIsGenerating(false);
       setGeneratingChapter(null);
     }
-  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup, addChapter, updateChapter, isGenerating, setIsGenerating, setError]);
+  }, [syllabus, claudeApiKey, openaiApiKey, researchDossiers, setup, addChapter, updateChapter, setIsGenerating, setReadingDraft, setStreamingText, appendStreamingText, setThinkingText, appendThinkingText, setError]);
+
+  /** Stop button on a drafting row: cancels whichever step is running and
+   *  skips the rest. */
+  const stopSingleChapter = useCallback((chapterNum: number) => {
+    draftStopRef.current = true;
+    for (const kind of ['reading', 'quiz', 'inclassquiz']) abortInFlight(materialAbortKey(kind, chapterNum));
+  }, []);
 
   // --- Per-class bundle ---
   //
@@ -1154,12 +1231,12 @@ export function ExportPage() {
 
   // Why drafting / learning outcomes are unavailable right now.
   const draftBlocker = !claudeApiKey
-    ? 'Add a Claude API key in Setup to draft classes.'
+    ? 'Add your Anthropic key in Setup to draft classes.'
     : isGenerating
       ? 'Another class is drafting. Wait for it to finish.'
       : undefined;
   const outcomesBlocker = !claudeApiKey
-    ? 'Add a Claude API key in Setup to generate learning outcomes.'
+    ? 'Add your Anthropic key in Setup to generate learning outcomes.'
     : isGenerating
       ? "Wait for the class that's drafting to finish."
       : undefined;
@@ -1407,6 +1484,7 @@ export function ExportPage() {
                   blocker={draftBlocker}
                   isCurrent={isCurrentlyGenerating}
                   onGenerate={() => generateSingleChapter(ch.number)}
+                  onStop={() => stopSingleChapter(ch.number)}
                 />
               );
             }
@@ -1484,6 +1562,12 @@ export function ExportPage() {
                 onDownloadAll={() => void handleDownloadClassBundle(ch.number)}
                 bundleDisabled={isExporting}
                 bundleBusy={exporting === ch.number}
+                onStopDraft={
+                  // "Draft class" saved the reading and is writing the quizzes.
+                  isCurrentlyGenerating && readingDraft?.chapterNum !== ch.number
+                    ? () => stopSingleChapter(ch.number)
+                    : undefined
+                }
               />
             );
           })}
@@ -1533,6 +1617,7 @@ function ChapterRow({
   onDownloadAll,
   bundleDisabled = false,
   bundleBusy = false,
+  onStopDraft,
 }: {
   number: number;
   title: string;
@@ -1544,6 +1629,8 @@ function ChapterRow({
   bundleDisabled?: boolean;
   /** This class's bundle is the export currently running. */
   bundleBusy?: boolean;
+  /** Set while "Draft class" is still writing this class's quizzes. */
+  onStopDraft?: () => void;
 }) {
   return (
     <article
@@ -1607,6 +1694,43 @@ function ChapterRow({
             />
           ))}
         </div>
+        {onStopDraft && (
+          <div
+            role="status"
+            className="cb-mono"
+            style={{
+              display: 'flex',
+              gap: 12,
+              alignItems: 'baseline',
+              marginTop: 8,
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              color: 'var(--cb-accent-emphasis)',
+            }}
+          >
+            writing the quizzes…
+            <button
+              type="button"
+              onClick={onStopDraft}
+              className="cb-mono cb-focus"
+              title="Stop writing this class's quizzes. The reading is already saved."
+              style={{
+                background: 'transparent',
+                border: 0,
+                padding: 0,
+                cursor: 'pointer',
+                color: 'var(--cb-text-muted)',
+                fontSize: 11,
+                letterSpacing: '0.12em',
+                textTransform: 'uppercase',
+                textDecoration: 'underline',
+                textUnderlineOffset: 3,
+              }}
+            >
+              stop
+            </button>
+          </div>
+        )}
       </div>
 
       <span
@@ -1638,6 +1762,7 @@ function ChapterRowEmpty({
   blocker,
   isCurrent,
   onGenerate,
+  onStop,
 }: {
   number: number;
   title: string;
@@ -1645,7 +1770,10 @@ function ChapterRowEmpty({
   blocker?: string;
   isCurrent: boolean;
   onGenerate: () => void;
+  onStop: () => void;
 }) {
+  // "Not drafted" is said in words (amber status text), not by fading the
+  // row: at reduced opacity the title fell to 2.86:1 contrast.
   return (
     <article
       className="cb-artifact-row"
@@ -1656,7 +1784,6 @@ function ChapterRowEmpty({
         gap: 20,
         padding: '18px 0 16px',
         borderBottom: '0.5px solid var(--cb-border-default)',
-        opacity: isCurrent ? 1 : 0.65,
       }}
     >
       <span
@@ -1670,35 +1797,47 @@ function ChapterRowEmpty({
         Class {String(number).padStart(2, '0')}
       </span>
 
-      <h3
-        className="cb-italic"
-        style={{
-          margin: 0,
-          fontSize: 21,
-          fontWeight: 500,
-          lineHeight: 1.25,
-          color: 'var(--cb-text-muted)',
-          fontVariationSettings: '"opsz" 18',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={title}
-      >
-        {title}
-      </h3>
-
-      {isCurrent ? (
-        <span
+      <div style={{ minWidth: 0 }}>
+        <h3
           className="cb-italic"
           style={{
-            fontSize: 13,
-            color: 'var(--cb-accent-emphasis)',
+            margin: 0,
+            fontSize: 21,
+            fontWeight: 500,
+            lineHeight: 1.25,
+            color: 'var(--cb-text-muted)',
+            fontVariationSettings: '"opsz" 18',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
           }}
+          title={title}
         >
-          drafting…
-        </span>
+          {title}
+        </h3>
+        <div
+          className="cb-mono"
+          role={isCurrent ? 'status' : undefined}
+          style={{
+            marginTop: 6,
+            fontSize: 11,
+            letterSpacing: '0.08em',
+            color: isCurrent ? 'var(--cb-accent-emphasis)' : 'var(--cb-status-warning-text)',
+          }}
+        >
+          {isCurrent ? 'drafting the reading…' : 'not drafted yet'}
+        </div>
+      </div>
+
+      {isCurrent ? (
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={onStop}
+          title="Stop drafting this class. Nothing is saved for the step that's running."
+        >
+          Stop
+        </Button>
       ) : (
         <Button
           size="sm"
