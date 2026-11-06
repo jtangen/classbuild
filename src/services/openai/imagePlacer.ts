@@ -1,6 +1,6 @@
 /**
  * Replace `<figure class="ai-image">` placeholders in chapter HTML with
- * actual generated images from OpenAI gpt-image-2. The chapter prompt
+ * actual generated images from OpenAI's image model. The chapter prompt
  * instructs the model to emit a `data-prompt` attribute and an optional
  * `data-aspect` ("square" | "portrait" | "landscape") which we map to an
  * aspect-ratio-correct size.
@@ -118,8 +118,8 @@ export async function replaceAiImagePlaceholders(
   const matches = findPlaceholders(html);
   if (matches.length === 0) return html;
 
-  // Generate in parallel — gpt-image-2 is async and the OpenAI API supports
-  // concurrent requests. Capped at 3 in flight to be a good citizen.
+  // Generate in parallel — the OpenAI Image API takes concurrent requests.
+  // Capped at 3 in flight to be a good citizen.
   const results: Array<string | null> = await runWithConcurrency(
     matches.map((m) => async () => {
       try {

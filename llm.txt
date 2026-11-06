@@ -2,7 +2,7 @@
 
 > AI-powered course generator that takes a topic and produces a complete, ready-to-teach university course — interactive HTML chapters, gamified quizzes, image-led PowerPoint slides, narrated audiobooks, infographics, weekly mastery challenges and teaching packs — all grounded in five evidence-based learning science principles. Built with TypeScript, React 19, Vite 7, and Claude.
 
-ClassBuild operates as both a browser app (React + Zustand + Vite at localhost:5173) and a headless CLI (`scripts/generate-course.ts`). API keys are bring-your-own: Anthropic Claude (required), OpenAI (optional — gpt-image-2 figures, slide images and infographics) and ElevenLabs (optional — audiobook narration). In the browser, keys stay in localStorage and go only to their own provider.
+ClassBuild operates as both a browser app (React + Zustand + Vite at localhost:5173) and a headless CLI (`scripts/generate-course.ts`). API keys are bring-your-own: Anthropic Claude (required), OpenAI (optional — GPT Image 2.6 figures, slide images and infographics) and ElevenLabs (optional — audiobook narration). In the browser, keys stay in localStorage and go only to their own provider.
 
 ## Architecture
 
@@ -14,7 +14,7 @@ The codebase has two entry points sharing the same generation core:
 Key directories:
 - `src/prompts/` — All LLM prompt builders (system + user prompts for each generation stage)
 - `src/services/claude/` — Anthropic SDK client, streaming with retry and refusal fallback, model constants
-- `src/services/openai/` — gpt-image-2 image generation and chapter-figure placeholder replacement
+- `src/services/openai/` — GPT Image 2.6 image generation (the model is set once, in `imageModel.ts`) and chapter-figure placeholder replacement
 - `src/services/elevenLabs/` — Audiobook narration (MP3)
 - `src/services/academic/` — Source verification against Crossref, Semantic Scholar and Unpaywall
 - `src/services/export/` — PPTX, quiz DOCX, and publish (course site) exporters
@@ -33,15 +33,15 @@ The pipeline has five stages, each with dedicated prompt builders in `src/prompt
 2. **Syllabus** (`src/prompts/syllabus.ts`) — Claude Opus designs the full course arc. Outputs JSON with chapter titles, narratives, key concepts, widget specs, learning science annotations, and spacing connections. Parsed into `Syllabus` type.
 3. **Research** (`src/prompts/research.ts`) — Claude with web search gathers real-world sources per chapter. Produces a `ResearchDossier`; DOIs and metadata are checked against Crossref / Semantic Scholar (`src/services/academic/`).
 4. **Build** — Per chapter, generates all materials in parallel where possible:
-   - **Chapter HTML** (`src/prompts/chapter.ts`) — Reading in the chosen theme's markup contract, with interactive widgets and gpt-image-2 figure placeholders
+   - **Chapter HTML** (`src/prompts/chapter.ts`) — Reading in the chosen theme's markup contract, with interactive widgets and GPT Image 2.6 figure placeholders
    - **Practice quiz** (`src/prompts/practiceQuiz.ts`) — Gamified quiz with confidence calibration
    - **In-class quiz** (`src/prompts/inClassQuiz.ts`) — 5 shuffled versions + answer keys
    - **Discussion questions** (`src/prompts/discussion.ts`)
    - **Activities** (`src/prompts/activities.ts`) — Facilitated activities with step-by-step guides
    - **Audio transcript** (`src/prompts/audioTranscript.ts`) — Narration script sent to ElevenLabs
-   - **Slides** (`src/prompts/slides.ts`) — One gpt-image-2 prompt per slide; each slide is a full-bleed 4K image with speaker notes, packed with pptxgenjs
+   - **Slides** (`src/prompts/slides.ts`) — One GPT Image 2.6 prompt per slide; each slide is a full-bleed 4K image with speaker notes, packed with pptxgenjs
    - **Weekly challenge** (`src/prompts/weeklyChallenge.ts`) — Mastery-gated assessment with 6 question types, parameterised variants, SCORM 2004 wrapper for Blackboard
-   - **Infographic** (`src/prompts/infographic.ts`) — Claude writes a prompt, gpt-image-2 renders it
+   - **Infographic** (`src/prompts/infographic.ts`) — Claude writes a prompt, GPT Image 2.6 renders it
 5. **Export/Publish** — Download as ZIP or PowerPoint, package SCORM, or publish a static course site (`src/services/export/publishExporter.ts`; CLI: `scripts/lib/publish.ts`).
 
 ## CLI Usage
@@ -91,7 +91,7 @@ Thinking levels: `max`, `high`, `medium`, `low` — sent as `output_config.effor
 
 Streaming (`src/services/claude/streaming.ts`): `streamMessage()` with callbacks for `onText`, `onThinking`, `onToolUse`, `onWebSearch`, `onWebSearchResults`, `onDone`, `onError`; `streamWithRetry()` retries rate limits, overloads and 5xx errors that occur before any output. A response every model declined raises a `ModelRefusalError`.
 
-OpenAI images (`src/services/openai/`): gpt-image-2 renders chapter figures (replacing `<figure class="ai-image">` placeholders), 4K slide images and infographics, as JPEG, with Retry-After-aware retries.
+OpenAI images (`src/services/openai/`): GPT Image 2.6 (`gpt-image-2.6-sunburst`, set in `imageModel.ts`) renders chapter figures (replacing `<figure class="ai-image">` placeholders), 4K slide images and infographics, as JPEG, with Retry-After-aware retries.
 
 ElevenLabs (`src/services/elevenLabs/tts.ts`): Audiobook narration as MP3, chunked on paragraph and sentence boundaries.
 
@@ -147,12 +147,12 @@ ElevenLabs premade voices (`VOICE_OPTIONS` in `src/themes/index.ts`): George (de
 - `scripts/raw-loader.mjs`: Lets tsx load the `?raw` theme CSS imports
 - `scripts/lib/publish.ts`: Static course site assembler
 - `scripts/lib/docx-helpers.ts`: DOCX generation for discussion, activities, transcript, research, syllabus
-- `scripts/lib/node-image.ts`, `scripts/lib/node-image-placer.ts`: Node gpt-image-2 generation and figure placement
+- `scripts/lib/node-image.ts`, `scripts/lib/node-image-placer.ts`: Node image generation (same model as the app) and figure placement
 - `scripts/gen-audio.ts`: Standalone audio generation script
 - `scripts/package-scorm.ts`: SCORM 2004 packager
 - `src/services/claude/client.ts`: Anthropic SDK singleton, model constants, thinking budgets
 - `src/services/claude/streaming.ts`: Streaming with retry, web search integration, refusal handling
-- `src/services/openai/imageGen.ts`, `imagePlacer.ts`: gpt-image-2 generation and chapter figure placement
+- `src/services/openai/imageGen.ts`, `imagePlacer.ts`, `imageModel.ts`: image generation, chapter figure placement and the one model constant
 - `src/services/elevenLabs/tts.ts`: ElevenLabs narration
 - `src/services/academic/`: Source verification (Crossref, Semantic Scholar, Unpaywall)
 - `src/services/export/pptxExporter.ts`: PowerPoint generation via pptxgenjs

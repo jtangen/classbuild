@@ -4,7 +4,7 @@
 
 Converting the 6 ClassBuild example courses to the new chapter themes (Press / Notebook / Almanac / Storybook / Studio / Terminal). Each course's **chapter text stays verbatim** (audio narration already exists for it and must keep matching), but we re-theme the chapter HTML, render fresh figures via OpenAI, and add interactive widgets that match the new theme.
 
-Image renders go through OpenAI gpt-image-2; everything else (text) is done by you (Claude) directly. The API key lives in `/Users/uqjtange/Documents/research/current_projects/classbuild-cli/.env.local` (gitignored via `*.local`). All scripts use `npx tsx --env-file=.env.local ...` to pick it up. Scripts that import `src/` (generate-course, gen-audio, publish-course, build-staging) also need `--import ./scripts/raw-loader.mjs` so tsx can load the `?raw` theme CSS — or use `npm run course` / `npm run stage`.
+Image renders go through OpenAI GPT Image 2.6 (`gpt-image-2.6-sunburst`, set once in `src/services/openai/imageModel.ts`; the courses below were rendered with its predecessor, gpt-image-2); everything else (text) is done by you (Claude) directly. The API key lives in `/Users/uqjtange/Documents/research/current_projects/classbuild-cli/.env.local` (gitignored via `*.local`). All scripts use `npx tsx --env-file=.env.local ...` to pick it up. Scripts that import `src/` (generate-course, gen-audio, publish-course, build-staging) also need `--import ./scripts/raw-loader.mjs` so tsx can load the `?raw` theme CSS — or use `npm run course` / `npm run stage`.
 
 ## Theme map (locked in)
 
@@ -134,6 +134,8 @@ Puppy (Almanac) and Sleep (Notebook) have both been done this way. The applied r
 First-wave painterly: Tea cost roughly **$19** in OpenAI image renders (76 slide + 12 chapter figures at gpt-image-2 high quality).
 
 Editorial-photo re-render of Puppy + Sleep added ~**$50** on top (32 chapter figures + ~210 slide images at gpt-image-2 high quality). Each chapter is ~$0.80 for its 2 figures; each slide deck is ~$3 for 13–14 slide images. Budget ~$25/course if you also re-render slides.
+
+GPT Image 2.6 Sunburst at `high` (measured 6 November 2026) is far cheaper: ~$0.04 per 1536×1024 figure (40–50 s) and ~$0.10 per 3840×2160 slide (~40 s). `xhigh` costs ~1.7× as much per figure (~$0.08, ~60 s).
 
 ## Known issues / wishlist for later
 

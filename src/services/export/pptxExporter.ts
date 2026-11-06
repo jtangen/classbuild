@@ -15,7 +15,7 @@ function isPermanentImageError(err: unknown): boolean {
 
 /**
  * Slide generation now renders each slide as a single 4K (3840×2160)
- * editorial image via gpt-image-2 — the image carries the slide's title,
+ * editorial image via the OpenAI image model — the image carries the slide's title,
  * key text, and visuals together. pptxgenjs is used as the container: each
  * slide is a 16:9 frame with the rendered image filling the full bleed, and
  * the AI-written speaker notes attached natively.
@@ -30,10 +30,10 @@ export type SlideImageProgress = (slideIndex: number, total: number, phase: 'ren
 interface GeneratePptxOptions {
   /** Image quality for each rendered slide. Defaults to 'high'. */
   imageQuality?: 'low' | 'medium' | 'high' | 'auto';
-  /** Pixel size requested from gpt-image-2 per slide. Defaults to 4K landscape. */
+  /** Pixel size requested from the image model per slide. Defaults to 4K landscape. */
   imageSize?: string;
   /**
-   * Number of gpt-image-2 requests in flight at once. Defaults to 6. The
+   * Number of image requests in flight at once. Defaults to 6. The
    * Image API tolerates concurrent calls well; setting too high risks
    * hitting per-minute rate limits, but the retry layer handles that
    * gracefully with exponential backoff.
@@ -56,7 +56,7 @@ interface GeneratePptxOptions {
 }
 
 /**
- * Render every slide image via gpt-image-2 (or reuse cached ones), then pack
+ * Render every slide image via the image model (or reuse cached ones), then pack
  * everything into a .pptx where each slide is a full-bleed 16:9 image with
  * the AI-written notes attached.
  *

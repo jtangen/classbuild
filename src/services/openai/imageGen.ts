@@ -1,11 +1,13 @@
 /**
- * OpenAI gpt-image-2 image generation.
+ * OpenAI image generation (the model is IMAGE_MODEL in ./imageModel).
  *
  * Calls the Image API (`/v1/images/generations`) directly — no SDK to keep
  * the bundle lean — and returns a `data:image/jpeg;base64,…` URI ready for
  * `<img src>`. JPEG output is requested explicitly because it's both faster
  * to generate and dramatically smaller than PNG for photographic content.
  */
+
+import { IMAGE_MODEL } from './imageModel';
 
 export type ImageQuality = 'low' | 'medium' | 'high' | 'auto';
 
@@ -24,7 +26,6 @@ const DEFAULT_QUALITY: ImageQuality = 'high';
 const DEFAULT_SIZE = 'auto';
 const DEFAULT_COMPRESSION = 90;
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
-const MODEL = 'gpt-image-2';
 
 export class OpenAIImageError extends Error {
   readonly status: number | undefined;
@@ -79,7 +80,7 @@ export async function generateImage(
   }
 
   const body = {
-    model: MODEL,
+    model: IMAGE_MODEL,
     prompt,
     n: 1,
     size: options.size ?? DEFAULT_SIZE,

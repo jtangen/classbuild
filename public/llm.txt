@@ -35,7 +35,7 @@ Open http://localhost:5173 and enter your API key on the Setup page.
 ## What API keys are needed
 
 Anthropic Claude — required — powers all course generation
-OpenAI — optional — chapter figures, 4K slide images and infographics (gpt-image-2)
+OpenAI — optional — chapter figures, 4K slide images and infographics (GPT Image 2.6)
 ElevenLabs — optional — audiobook narration
 
 Keys are stored in the browser only (localStorage) and go only to their own provider. They are never sent to any ClassBuild server.
@@ -130,7 +130,7 @@ Each prompt builder takes course setup and chapter context as arguments and retu
 React 19, Vite 7, TypeScript 5.9, Tailwind CSS 4, Zustand 5
 Anthropic SDK 0.74.0 (dangerouslyAllowBrowser for BYOK)
 pptxgenjs for PowerPoint, docx for DOCX, jszip + file-saver for ZIP
-OpenAI gpt-image-2 (optional) for figures, slide images and infographics; ElevenLabs (optional) for narration
+OpenAI GPT Image 2.6 (optional) for figures, slide images and infographics; ElevenLabs (optional) for narration
 Framer Motion for animations, DOMPurify for HTML sanitization
 
 ## Six chapter themes

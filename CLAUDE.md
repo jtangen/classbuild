@@ -44,7 +44,7 @@ src/
 │   ├── claude/
 │   │   ├── client.ts                # Anthropic SDK wrapper, model IDs, thinking budgets
 │   │   └── streaming.ts            # streamMessage()/streamWithRetry(): thinking, web search, refusal fallback
-│   ├── openai/                      # gpt-image-2: imageGen, imagePlacer (figure placeholders), safetyClause
+│   ├── openai/                      # GPT Image 2.6: imageModel (the one model constant), imageGen, imagePlacer (figure placeholders), safetyClause
 │   ├── elevenLabs/tts.ts            # Audiobook narration (dynamic import)
 │   ├── academic/                    # Crossref / Semantic Scholar / Unpaywall source verification
 │   ├── quiz/answerBalancer.ts       # Balance correct/distractor answer lengths
@@ -109,3 +109,5 @@ haiku:  'claude-haiku-4-5-20251001'
 ```
 
 Opus (adaptive thinking + `effort`, server-side refusal fallback) drafts the syllabus, chapters, both quizzes and the weekly challenge. Sonnet (the `streamMessage` default) handles research with web search, slides, discussion, activities and audio transcripts. Haiku does answer balancing, activity detail and key validation.
+
+Images (figures, 4K slides, the CLI infographic) use OpenAI's `gpt-image-2.6-sunburst`, set once as `IMAGE_MODEL` in `src/services/openai/imageModel.ts` and shared by the app and the CLI scripts. `IMAGE_MODEL_NAME` there is the name the UI and Claude's image-prompt instructions use.

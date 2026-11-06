@@ -52,7 +52,7 @@ Open [localhost:5173](http://localhost:5173) and enter your API key on the Setup
 | Key | Required | Purpose |
 |-----|----------|---------|
 | Anthropic Claude | Yes | Course generation — syllabus, research, chapters, quizzes, slides, teaching pack |
-| OpenAI | For images | Slide images and chapter figures (gpt-image-2) |
+| OpenAI | For images | Slide images and chapter figures (GPT Image 2.6) |
 | ElevenLabs | For audio | Audiobook narration (text-to-speech) |
 
 ## How does ClassBuild work?
@@ -162,7 +162,7 @@ The syllabus stage annotates every chapter with the specific principles it empha
 
 ## Built with
 
-React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 5.5 / Sonnet 4.6 / Haiku 4.5 · OpenAI gpt-image-2 (images) · ElevenLabs (narration)
+React 19 · Vite 7 · TypeScript 5.9 · Tailwind CSS 4 · Zustand · Framer Motion · Claude Opus 5.5 / Sonnet 4.6 / Haiku 4.5 · OpenAI GPT Image 2.6 (images) · ElevenLabs (narration)
 
 Built with Claude for [Code with Claude · Tokyo](https://claude.com/code-with-claude/tokyo) (Feb 2026).
 

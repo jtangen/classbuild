@@ -63,7 +63,7 @@ interface CourseState {
   updateChapter: (number: number, updates: Partial<GeneratedChapter>) => void;
   /**
    * Atomically write a single slide's rendered image into a chapter's
-   * slidesJson. Used by the slide-render flow so concurrent gpt-image-2
+   * slidesJson. Used by the slide-render flow so concurrent image
    * workers writing different slides don't clobber each other's progress.
    */
   setSlideImage: (chapterNum: number, slideIndex: number, dataUri: string) => void;

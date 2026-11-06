@@ -161,7 +161,7 @@ export function BuildPage() {
   // Per-slide image refine state. Edited prompts live here until the user
   // either regenerates (commits) or hits Reset; they belong to the chapter in
   // view and are dropped on a chapter switch. `refiningSlide` is the slide
-  // currently being rendered through gpt-image-2. It and the error carry their
+  // currently being rendered by the image model. It and the error carry their
   // chapter: a render outlives a chapter switch, and a slide index only means
   // something within one deck.
   const [editedSlidePrompts, setEditedSlidePrompts] = useState<Record<number, string>>({});
@@ -875,7 +875,7 @@ Teacher feedback: "${feedback}"`;
   //
   // Refine one slide's image without disturbing the rest of the deck.
   // The user edits the imagePrompt textarea in-place; on Regenerate we call
-  // gpt-image-2 with the new prompt, atomically update slidesJson[i] in
+  // the image model with the new prompt, atomically update slidesJson[i] in
   // courseStore (both prompt and image), and mirror the change into the
   // local slidesData state so the row's "rendered" chip and any later deck
   // download pick up the new render.
@@ -948,7 +948,7 @@ Teacher feedback: "${feedback}"`;
   );
 
   // ── Slide deck render + download ────────────────────────────────────
-  // Renders any unrendered slide images through gpt-image-2 (with bounded
+  // Renders any unrendered slide images through the image model (bounded
   // concurrency) and packs the lot into a .pptx. Tracks progress through
   // uiStore.slidesRender so a tab switch keeps the in-flight render visible.
   const downloadSlideDeck = useCallback(async () => {

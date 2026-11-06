@@ -1,6 +1,7 @@
 /**
- * Render every slide imagePrompt in a slides.json file via OpenAI gpt-image-2
- * and write the JPEGs out as slide-NN.jpg into an adjacent ./img/ directory.
+ * Render every slide imagePrompt in a slides.json file via OpenAI's image
+ * model (IMAGE_MODEL, shared with the app) and write the JPEGs out as
+ * slide-NN.jpg into an adjacent ./img/ directory.
  *
  *   npx tsx --env-file=.env.local --import ./scripts/raw-loader.mjs scripts/render-slides.ts \
  *     output/science-and-art-of-tea/slides-new/01_slides.json
@@ -13,10 +14,10 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeFileAtomic } from './lib/write-atomic';
+import { IMAGE_MODEL } from '../src/services/openai/imageModel';
 
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
-const MODEL = 'gpt-image-2';
-const SLIDE_SIZE = '2048x1152'; // wide-landscape 16:9 — gpt-image-2's largest 16:9
+const SLIDE_SIZE = '2048x1152'; // wide-landscape 16:9
 const SAFETY_CLAUSE =
   ' Render only text, numbers, dates, names, and citations that appear verbatim earlier in this prompt. Do not invent values: no made-up axis numbers, percentages, sample sizes, dates, author names, or journal titles. If a chart or label would require data that is not in this prompt, omit the values entirely and render the visual as an unlabelled abstract trend.';
 
@@ -28,7 +29,7 @@ interface Slide {
 
 async function renderImageOnce(prompt: string, apiKey: string): Promise<Buffer> {
   const body = {
-    model: MODEL,
+    model: IMAGE_MODEL,
     prompt: prompt.trimEnd() + SAFETY_CLAUSE,
     n: 1,
     size: SLIDE_SIZE,

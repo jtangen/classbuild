@@ -1,7 +1,8 @@
 /**
  * Render the <figure class="ai-image"> placeholders in a chapter HTML file
- * using OpenAI gpt-image-2, then write the images out as JPEG files in an
- * adjacent ./img/ directory and rewrite the placeholders to <img src="img/…">.
+ * using OpenAI's image model (IMAGE_MODEL, shared with the app), then write
+ * the images out as JPEG files in an adjacent ./img/ directory and rewrite
+ * the placeholders to <img src="img/…">.
  *
  * Why files rather than base64-inline: the HTML stays small enough to edit
  * by hand, the same images are reusable when we re-assemble the published
@@ -18,9 +19,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { writeFileAtomic } from './lib/write-atomic';
+import { IMAGE_MODEL } from '../src/services/openai/imageModel';
 
 const ENDPOINT = 'https://api.openai.com/v1/images/generations';
-const MODEL = 'gpt-image-2';
 
 const ASPECT_TO_SIZE: Record<string, string> = {
   square: '1024x1024',
@@ -92,7 +93,7 @@ function escapeAttr(s: string): string {
 
 async function renderImageOnce(prompt: string, aspect: string, apiKey: string): Promise<Buffer> {
   const body = {
-    model: MODEL,
+    model: IMAGE_MODEL,
     prompt: prompt.trimEnd() + SAFETY_CLAUSE,
     n: 1,
     size: ASPECT_TO_SIZE[aspect] ?? ASPECT_TO_SIZE.landscape,
