@@ -1,3 +1,4 @@
+import { IMAGE_MODEL_NAME } from '../services/openai/imageModel';
 import {
   IMAGE_AVOID_CLAUSE,
   IMAGE_FORBIDDEN_IDIOMS,
@@ -6,18 +7,19 @@ import {
 } from './imageStyle';
 
 /**
- * The meta-prompt — Claude reads it and writes a single gpt-image-2 prompt
+ * The meta-prompt — Claude reads it and writes a single image prompt
  * describing one editorial-grade infographic for the chapter. The output
- * prompt is fed straight to gpt-image-2 at 4K (3840×2160) landscape.
+ * prompt is fed straight to the OpenAI image model at 4K (3840×2160)
+ * landscape.
  */
 export function buildInfographicMetaPrompt(): string {
-  return `You are ClassBuild's image-direction lead. You write **one** gpt-image-2 prompt that will be rendered at 3840×2160 (4K landscape) and become the chapter's signature infographic.
+  return `You are ClassBuild's image-direction lead. You write **one** ${IMAGE_MODEL_NAME} prompt that will be rendered at 3840×2160 (4K landscape) and become the chapter's signature infographic.
 
 ## What "good" looks like
 
 Imagine a New York Times or Bloomberg explanatory graphic, an Economist chart page, a Nature graphical abstract, a Massimo Vignelli transit diagram. Editorial, considered, typographically literate. Not a stock-photo composite, not a clip-art diagram, not a marketing slide.
 
-gpt-image-2 is exceptional at:
+${IMAGE_MODEL_NAME} is exceptional at:
 - **Long, specific prompts** (use them — 200–350 words is the sweet spot).
 - **Rendering text legibly** — quote exact label copy in quotes; specify weight, case, placement.
 - **Editorial composition** — call out grid, foreground/background, hierarchy.
@@ -71,7 +73,7 @@ export function buildInfographicMetaUserPrompt(
   keyConcepts: string[],
   contentSnippet: string,
 ): string {
-  return `Write the gpt-image-2 prompt for the signature infographic of:
+  return `Write the ${IMAGE_MODEL_NAME} prompt for the signature infographic of:
 
 **Chapter**: "${chapterTitle}"
 **Key concepts**: ${keyConcepts.join(', ')}

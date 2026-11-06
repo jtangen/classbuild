@@ -2,12 +2,13 @@ import { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../codex';
 import { useDialogFocus } from './useDialogFocus';
+import { IMAGE_MODEL_NAME } from '../../services/openai/imageModel';
 
 /**
  * Drawer that slides in from the right when the user clicks a chapter image.
  * Shows a thumbnail of the current render, the original prompt (editable when
  * an OpenAI key is present, read-only otherwise), and a Regenerate button that
- * re-runs gpt-image-2 against just this one image. A figure whose render
+ * re-runs the image model against just this one image. A figure whose render
  * failed (src null) opens it too, to try again.
  */
 export function ChapterImageRefineDrawer({
@@ -53,7 +54,7 @@ export function ChapterImageRefineDrawer({
       {state && (
         <>
           {/* Scrim is interactive only when the render is idle. While
-              gpt-image-2 runs, we drop it to pointer-events:none so the user
+              image renders, we drop it to pointer-events:none so the user
               can still scroll the chapter, switch tabs, or navigate — the
               render keeps going regardless and the image swaps in when done. */}
           <motion.div
@@ -295,7 +296,7 @@ export function ChapterImageRefineDrawer({
                     lineHeight: 1.55,
                   }}
                 >
-                  Rendering through gpt-image-2 — typically 30–60 seconds.
+                  Rendering through {IMAGE_MODEL_NAME} — typically 30–60 seconds.
                   Feel free to close this drawer and scroll around; we'll swap
                   the image in place when it's ready.
                 </p>

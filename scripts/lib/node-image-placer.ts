@@ -1,7 +1,7 @@
 /**
  * Node-compatible counterpart of src/services/openai/imagePlacer.ts.
  * Replaces <figure class="ai-image"> placeholders in chapter HTML with
- * gpt-image-2 renders.
+ * image-model renders.
  */
 import { generateImageNodeWithRetry } from './node-image';
 import { withSafetyClause } from '../../src/services/openai/safetyClause';

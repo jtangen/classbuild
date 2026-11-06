@@ -8,6 +8,8 @@
  *   setTabError('quiz', friendlyError(err));
  */
 
+import { IMAGE_MODEL_NAME } from '../services/openai/imageModel';
+
 /**
  * Claude's safety classifiers declined the request and no fallback model took
  * it (stop_reason 'refusal'). `category` is the API's stop_details.category,
@@ -108,9 +110,12 @@ export function friendlyImageError(err: unknown): string {
   }
   if (status === 401) return 'OpenAI rejected the key. Check your OpenAI key in Setup.';
   if (status === 403 && /verif/i.test(message)) {
-    return 'OpenAI wants your organisation verified before it will use gpt-image-2 (platform.openai.com → Settings → Organization).';
+    return `OpenAI wants your organisation verified before it will use ${IMAGE_MODEL_NAME} (platform.openai.com → Settings → Organization).`;
   }
-  if (status === 403) return "Your OpenAI account can't use gpt-image-2. Check its access in the OpenAI console.";
+  // OpenAI answers a model the account can't reach with 404 model_not_found.
+  if (status === 403 || status === 404 || /model_not_found/i.test(message)) {
+    return `Your OpenAI account can't use ${IMAGE_MODEL_NAME}. Check its access in the OpenAI console.`;
+  }
   if (/moderation|safety system/i.test(message)) {
     return "OpenAI's safety system declined this image prompt. Rewording it usually helps.";
   }

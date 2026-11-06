@@ -7,7 +7,7 @@ export interface SlidesRenderState {
   current: number;
   /** Total slides to render. */
   total: number;
-  /** Pipeline phase — 'rendering' = gpt-image-2 calls; 'packing' = pptxgenjs. */
+  /** Pipeline phase — 'rendering' = image-model calls; 'packing' = pptxgenjs. */
   phase: 'rendering' | 'packing';
 }
 

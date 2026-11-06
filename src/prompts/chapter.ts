@@ -1,3 +1,4 @@
+import { IMAGE_MODEL_NAME } from '../services/openai/imageModel';
 import {
   IMAGE_AVOID_CLAUSE,
   IMAGE_FORBIDDEN_IDIOMS,
@@ -166,7 +167,7 @@ When a concept feels like it wants a picture, do one of:
 
 ### Writing the \`data-prompt\`
 
-You are prompting **gpt-image-2**, which follows long, specific briefs closely and renders short text legibly. A great \`data-prompt\` is 3–6 sentences in ClassBuild's editorial house style:
+You are prompting **${IMAGE_MODEL_NAME}**, which follows long, specific briefs closely and renders short text legibly. A great \`data-prompt\` is 3–6 sentences in ClassBuild's editorial house style:
 
 ${IMAGE_REGISTERS}
 
@@ -189,7 +190,7 @@ Two examples of the register (borrow the craft, never the subject):
 - *A clean editorial overhead flat-lay photograph on a light-oak tabletop: three loose-leaf teas (a rolled oolong, a twisted black tea, flat pan-fired green leaves) in small white porcelain dishes arranged left to right with generous space between them. 50 mm lens directly overhead, soft diffused window light from the upper left, sharp focus throughout, soft natural shadows, photoreal, true-to-life colour. Beneath each dish a slim dark-grey caption strip in white Inter all-caps: 'OOLONG', 'BLACK', 'GREEN'. ${IMAGE_AVOID_CLAUSE}*
 - *A clean modern editorial information graphic in the style of a New York Times science graphic, showing how memory for new material fades without review and recovers after each retrieval: a single flat dark navy (#1f2e4a) line on a clean off-white (#fbfaf7) ground falls steeply, then steps back up at three evenly spaced points, each marked with a small dark-coral (#d0533f) dot; the axes are thin light warm grey (#d9d6cf) rules with no tick values. Two labels in Inter: 'review' beside the first dot and 'time' along the horizontal axis. Generous white space. ${IMAGE_AVOID_CLAUSE}*
 
-The \`data-aspect\` attribute picks the canvas. Choose the one that fits the subject — gpt-image-2 supports any ratio up to 3:1, so use this lever deliberately:
+The \`data-aspect\` attribute picks the canvas. Choose the one that fits the subject — ${IMAGE_MODEL_NAME} supports any ratio up to 3:1, so use this lever deliberately:
 
 - \`square\` (1024×1024) — single objects, portraits of one thing, tight diagrams
 - \`portrait\` (1024×1536) — vertical compositions, full-length figures, side-by-side comparisons stacked
@@ -200,22 +201,22 @@ Give every figure a one-line caption as the only child of the \`<figure>\`: what
 
 ### FACTUAL FIDELITY — non-negotiable
 
-gpt-image-2 will confidently render whatever you ask for, including invented statistics, fabricated study results, plausible-but-wrong dates, and miscoded diagrams. These images appear in a *university course* — a hallucinated visual claim is worse than no image at all. Treat every \`data-prompt\` as a factual statement the image will make on your behalf.
+${IMAGE_MODEL_NAME} will confidently render whatever you ask for, including invented statistics, fabricated study results, plausible-but-wrong dates, and miscoded diagrams. These images appear in a *university course* — a hallucinated visual claim is worse than no image at all. Treat every \`data-prompt\` as a factual statement the image will make on your behalf.
 
-The distinction is *fabricated* vs *prompt-provided*. A legitimate number from the chapter ("37°C body temperature", "Ebbinghaus, 1885", "n = 240 participants") is welcome inside the image — quote it in the prompt and gpt-image-2 will render it faithfully. What you must never do is ask the model to invent or fill in values it has no source for.
+The distinction is *fabricated* vs *prompt-provided*. A legitimate number from the chapter ("37°C body temperature", "Ebbinghaus, 1885", "n = 240 participants") is welcome inside the image — quote it in the prompt and ${IMAGE_MODEL_NAME} will render it faithfully. What you must never do is ask the model to invent or fill in values it has no source for.
 
 **Rules every \`data-prompt\` must respect:**
 
-1. **Render only what you provide.** If you want a number, date, percentage, sample size, year, study title, author name, or citation to appear inside the image, state it verbatim in the prompt — e.g. *"a label '37°C' beside the thermometer"*, *"a date 'c. 1885' inscribed at lower right"*, *"a caption strip reading 'EBBINGHAUS (1885)'"*. That figure must trace back to the chapter content. Never ask gpt-image-2 to fill in values without source — no *"axis ticks every 10%"* without specifying the values, no *"sample size in the lower corner"* with no number given.
+1. **Render only what you provide.** If you want a number, date, percentage, sample size, year, study title, author name, or citation to appear inside the image, state it verbatim in the prompt — e.g. *"a label '37°C' beside the thermometer"*, *"a date 'c. 1885' inscribed at lower right"*, *"a caption strip reading 'EBBINGHAUS (1885)'"*. That figure must trace back to the chapter content. Never ask ${IMAGE_MODEL_NAME} to fill in values without source — no *"axis ticks every 10%"* without specifying the values, no *"sample size in the lower corner"* with no number given.
 2. **No fabricated charts, graphs, tables, dashboards, or scoreboards.** If a quantitative visual would require values you cannot source from the chapter, evoke the *shape* of the trend abstractly: *"a clean flat information graphic suggesting an inverted U-curve, axes drawn as thin unlabelled rules, no tick values"*. Shape without data is fine; data without source is not.
 3. **No invented citations or attributions.** Any author name, journal title, year tag, or quoted source appearing inside the image must come verbatim from the chapter prose around the figure. Never invent a plausible-sounding source.
 4. **Named real subjects (people, past events, specific places, instruments, organisms)** follow the house rule above: photograph what truthfully exists today (the place, a surviving artefact, a replica the caption names as one) or draw an information graphic. Never a photoreal likeness of a named person or a staged photograph of a past event: it would read as photographic evidence nobody can back up.
 5. **Universal/textbook subjects** (a generic neuron, the human eye, the periodic table layout, a printing press) may be rendered with care toward textbook accuracy. Any embedded label must be an accurate, well-established term — never invent anatomical, taxonomic, or technical labels.
-6. **In-image text** is restricted to: (a) generic descriptors that make no factual claim (*"stimulus"*, *"response"*, *"east"*, *"the page"*), or (b) phrases, numbers, names, and citations you have quoted verbatim in this prompt, sourced from the chapter. Never burn in figures or words gpt-image-2 has to invent.
+6. **In-image text** is restricted to: (a) generic descriptors that make no factual claim (*"stimulus"*, *"response"*, *"east"*, *"the page"*), or (b) phrases, numbers, names, and citations you have quoted verbatim in this prompt, sourced from the chapter. Never burn in figures or words ${IMAGE_MODEL_NAME} has to invent.
 7. **No course-position metadata inside the image.** Never render "Chapter N", "Class N", "Module N", "Week N", "Lesson N", "Lecture N", "Unit N", or any equivalent course-structure label as image text. The image is about its subject (a neuron, a printing press, a memory trace) — it is never about *where the topic sits in the course*. That structural framing belongs in the surrounding HTML chrome (the \`.ch-eyebrow\`), not on the image.
 When in doubt, photograph a concrete, real thing that embodies the idea, or draw the bare shape of the idea as an unlabelled information graphic. A truthful picture of a real thing beats a fabricated graph, and a labelled image is welcome when every label and number traces back to the chapter.
 
-(You don't need to repeat a "render only what's in this prompt" disclaimer at the end of each \`data-prompt\` — a single safety clause is appended automatically before the request reaches gpt-image-2.)
+(You don't need to repeat a "render only what's in this prompt" disclaimer at the end of each \`data-prompt\` — a single safety clause is appended automatically before the request reaches ${IMAGE_MODEL_NAME}.)
 
 ### What NOT to do
 

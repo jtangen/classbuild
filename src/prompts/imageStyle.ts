@@ -2,7 +2,7 @@ import type { ChapterTheme } from '../themes';
 
 /**
  * ClassBuild's image house style — the one source of truth for every
- * gpt-image-2 prompt Claude writes: chapter figures, slide images and the
+ * image prompt Claude writes: chapter figures, slide images and the
  * chapter infographic.
  *
  * Two registers only: clean editorial photography for anything a camera could

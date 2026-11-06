@@ -975,7 +975,7 @@ async function main() {
       console.log('');
       chapterHtml = extractHtml(chapterText);
 
-      // Replace ai-image placeholders with gpt-image-2 renders
+      // Replace ai-image placeholders with image-model renders
       if (OPENAI_API_KEY) {
         log(`    Ch ${prefix} Replacing image placeholders...`);
         chapterHtml = await replaceAiImagePlaceholdersNode(chapterHtml, OPENAI_API_KEY, (msg) =>

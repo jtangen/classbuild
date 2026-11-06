@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { CodexButton as Button } from '../../codex';
 import type { SlideData } from '../../../types/course';
 import type { SlidesRenderState } from '../../../store/uiStore';
+import { IMAGE_MODEL_NAME } from '../../../services/openai/imageModel';
 import {
   ArtifactStatusLine,
   ArtifactEmpty,
@@ -79,7 +80,7 @@ export function SlidesTab(props: SlidesTabProps) {
         <KeyRequiredEmpty
           kicker="Slides"
           title="A twelve-slide deck, ready to teach"
-          body="Every slide is a full-bleed 4K editorial image rendered through OpenAI's gpt-image-2 — the chapter's argument as visuals in your chosen theme, plus speaker notes. Without an OpenAI key the deck is locked: Claude can draft the slide titles, captions, and speaker notes, but the images can't be rendered and the PowerPoint export won't open."
+          body={`Every slide is a full-bleed 4K editorial image rendered through OpenAI's ${IMAGE_MODEL_NAME} — the chapter's argument as visuals in your chosen theme, plus speaker notes. Without an OpenAI key the deck is locked: Claude can draft the slide titles, captions, and speaker notes, but the images can't be rendered and the PowerPoint export won't open.`}
           primaryLabel="Add OpenAI key →"
           onPrimary={onAddKey}
           secondaryLabel="Skip — draft titles and speaker notes only"
@@ -133,7 +134,7 @@ export function SlidesTab(props: SlidesTabProps) {
       <ArtifactShell
         kicker="Slides"
         title={`${slides.length} slides with speaker notes`}
-        meta="Each slide renders as a 4K editorial image through gpt-image-2."
+        meta={`Each slide renders as a 4K editorial image through ${IMAGE_MODEL_NAME}.`}
         actions={
           <Button
             size="sm"
@@ -196,7 +197,7 @@ export function SlidesTab(props: SlidesTabProps) {
                     letterSpacing: '0.06em',
                   }}
                 >
-                  <span>rendering slide images · gpt-image-2 · 4K</span>
+                  <span>rendering slide images · {IMAGE_MODEL_NAME} · 4K</span>
                   <span>{slidesRender!.current} of {slidesRender!.total}</span>
                 </div>
                 <div style={{ height: 2, background: 'var(--cb-border-default)', overflow: 'hidden' }}>
@@ -560,7 +561,7 @@ function SlideImageRefine({
               className="cb-italic"
               style={{ fontSize: 12.5, color: 'var(--cb-text-muted)' }}
             >
-              gpt-image-2 typically takes 30–60 seconds.
+              {IMAGE_MODEL_NAME} typically takes 30–60 seconds.
             </span>
           )}
         </div>

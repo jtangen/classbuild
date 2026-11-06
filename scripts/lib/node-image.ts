@@ -1,7 +1,10 @@
 /**
- * Node.js wrapper around OpenAI gpt-image-2 — returns raw base64 plus the
- * mime type, leaving the data-URI assembly to the caller.
+ * Node.js wrapper around the OpenAI image model (IMAGE_MODEL, shared with the
+ * app) — returns raw base64 plus the mime type, leaving the data-URI assembly
+ * to the caller.
  */
+
+import { IMAGE_MODEL } from '../../src/services/openai/imageModel';
 
 interface ImageResponse {
   data?: Array<{ b64_json?: string }>;
@@ -19,7 +22,7 @@ export async function generateImageNode(
   options: NodeImageOptions = {},
 ): Promise<{ base64: string; mimeType: string }> {
   const body = {
-    model: 'gpt-image-2',
+    model: IMAGE_MODEL,
     prompt,
     n: 1,
     size: options.size ?? '1024x1024',

@@ -216,14 +216,14 @@ export interface GeneratedChapter {
   slidesJson?: SlideData[];
   pptxUrl?: string; // blob URL
   infographicDataUri?: string; // data:image/jpeg;base64,...
-  infographicPrompt?: string; // the Claude-written prompt for gpt-image-2
+  infographicPrompt?: string; // the Claude-written image prompt
   weeklyChallengeData?: WeeklyChallengeData;
 }
 
 export interface SlideData {
   title: string;
   speakerNotes: string;
-  /** gpt-image-2 prompt describing the full editorial image for this slide. */
+  /** Image-model prompt describing the full editorial image for this slide. */
   imagePrompt?: string;
   /** Rendered image (data:image/jpeg;base64,…). Cached after first render. */
   imageDataUri?: string;

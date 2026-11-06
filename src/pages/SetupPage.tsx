@@ -4,6 +4,7 @@ import { useCourseStore } from '../store/courseStore';
 import { useApiStore } from '../store/apiStore';
 import { useUiStore } from '../store/uiStore';
 import { MODELS } from '../services/claude/client';
+import { IMAGE_MODEL_NAME } from '../services/openai/imageModel';
 import { isBriefReady } from '../prompts/syllabus';
 import { STAGES } from '../types/course';
 import type {
@@ -1408,7 +1409,7 @@ function ApiKeysModal({ open, onClose }: { open: boolean; onClose: () => void })
               rel="noopener noreferrer"
               style={linkStyle}
             >
-              Where do OpenAI keys come from? ↗ (gpt-image-2 renders the images)
+              Where do OpenAI keys come from? ↗ ({IMAGE_MODEL_NAME} renders the images)
             </a>
           }
         />
